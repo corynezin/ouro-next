@@ -22,6 +22,7 @@ import { neverSleeps, spriteTasksHold } from '../adapters/host-hold.ts'
 import type { HostHold } from '../adapters/host-hold.ts'
 import { folderBases } from '../adapters/base-source.ts'
 import type { BasePublishTarget, BaseSource } from '../adapters/base-source.ts'
+import { gitBasePublishTarget, gitBaseSource } from '../adapters/git-bases.ts'
 import { hubBasePublishTarget, hubBaseSource } from '../adapters/hub-bases.ts'
 import { guardianClient } from '../adapters/guardian-client.ts'
 import { DEFAULT_LIVE_POLICY, DEFAULT_SUMMARY_POLICY } from '../domain/summary.ts'
@@ -88,15 +89,25 @@ function pushSenderFromEnvironment(): SendPush | null {
   }
 }
 
-/** The hub (`OURO_HUB_URL`) on installed machines; a folder in journeys. */
+/** A git repository (`OURO_BASE_REPO`) or the hub (`OURO_HUB_URL`) on installed machines; a folder in journeys. */
 function baseSourceOf(env: NodeJS.ProcessEnv): BaseSource | null {
+  if (env.OURO_HUB_URL && env.OURO_BASE_REPO) throw new Error('set OURO_HUB_URL or OURO_BASE_REPO, not both')
+  if (env.OURO_BASE_REPO && env.OURO_BASE_SOURCE_DIR) throw new Error('set OURO_BASE_REPO or OURO_BASE_SOURCE_DIR, not both')
+  if (env.OURO_BASE_REPO) return gitBaseSource(env.OURO_BASE_REPO)
   if (env.OURO_HUB_URL && env.OURO_BASE_SOURCE_DIR) throw new Error('set OURO_HUB_URL or OURO_BASE_SOURCE_DIR, not both')
   if (env.OURO_HUB_URL) return hubBaseSource(env.OURO_HUB_URL)
   return env.OURO_BASE_SOURCE_DIR ? folderBases(env.OURO_BASE_SOURCE_DIR) : null
 }
 
-/** Only the publisher has one: the hub, as its account (`OURO_HUB_TOKEN_FILE`, a secret kept out of the environment). */
+/**
+ * Only the publisher has one: the base repository pushed to over `OURO_BASE_REPO_PUSH_URL` (the publisher's ssh key
+ * authenticates), or the hub, as its account (`OURO_HUB_TOKEN_FILE`, a secret kept out of the environment).
+ */
 function basePublishTargetOf(env: NodeJS.ProcessEnv): BasePublishTarget | null {
+  if (env.OURO_HUB_URL && env.OURO_BASE_REPO) throw new Error('set OURO_HUB_URL or OURO_BASE_REPO, not both')
+  if (env.OURO_BASE_REPO_PUSH_URL && !env.OURO_BASE_REPO) throw new Error('OURO_BASE_REPO_PUSH_URL needs OURO_BASE_REPO')
+  if (env.OURO_BASE_REPO_PUSH_URL && (env.OURO_HUB_TOKEN_FILE || env.OURO_BASE_PUBLISH_DIR)) throw new Error('set OURO_BASE_REPO_PUSH_URL, OURO_HUB_TOKEN_FILE or OURO_BASE_PUBLISH_DIR, only one')
+  if (env.OURO_BASE_REPO_PUSH_URL) return gitBasePublishTarget(env.OURO_BASE_REPO_PUSH_URL)
   if (env.OURO_HUB_TOKEN_FILE && env.OURO_BASE_PUBLISH_DIR) throw new Error('set OURO_HUB_TOKEN_FILE or OURO_BASE_PUBLISH_DIR, not both')
   if (env.OURO_HUB_TOKEN_FILE) {
     if (!env.OURO_HUB_URL) throw new Error('OURO_HUB_TOKEN_FILE needs OURO_HUB_URL')
