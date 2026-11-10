@@ -1,7 +1,9 @@
 # Ouro (rebirth)
 
 A ground-up rewrite of Ouro: new server and new iPhone app, with the same features, journeys and UI.
-It runs separately from the live system. Start with `docs/architecture.md`.
+It runs separately from the live system.
+
+This repository is Ouro Next's main line. Bases are its releases: tags `base-<n>`, cut by the release workflow. People develop in a private copy and send changes here as pull requests.
 
 ## Running the server
 

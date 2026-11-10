@@ -1,0 +1,10 @@
+{
+  "ships": [
+    "apps", "guardian", "journeys", "packages", "server", "tools", "scripts/install-run-sprite.sh",
+    ".gitignore", "package.json", "package-lock.json", "README.md", "tsconfig.base.json", "tsconfig.json"
+  ],
+  "internal": ["docs", "CLAUDE.md", "AGENTS.md"],
+  "dependencies": ["node_modules", "apps/mobile/node_modules"],
+  "checks": ["npm run -s lint:imports", "npm run -s typecheck", "npm run -s test:unit",
+    "cd apps/mobile && npx expo export --platform ios --output-dir dist && test -f dist/metadata.json"]
+}

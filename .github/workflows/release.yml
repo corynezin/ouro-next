@@ -1,0 +1,44 @@
+name: release
+# Cuts the next base: an annotated tag `base-<n>` on main, whose message is the notes, and a GitHub release for it.
+# Servers read only the tags. Withdrawing base n is an annotated tag `base-<n>-withdrawn`.
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: What changed, as people will read it in the app
+        required: true
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint:imports
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - name: Tag and release the next base
+        env:
+          NOTES: ${{ inputs.notes }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(git tag --list 'base-*' | grep -E '^base-[0-9]+$' | sed 's/^base-//' | sort -n | tail -1)
+          n=$(( ${last:-0} + 1 ))
+          git config user.name "Ouro Next"
+          git config user.email "bases@ouro-next.invalid"
+          git tag -a "base-$n" -m "$NOTES"
+          git push origin "base-$n"
+          gh release create "base-$n" --title "Base $n" --notes "$NOTES" --verify-tag

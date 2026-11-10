@@ -1,0 +1,8 @@
+{
+  "name": "@ouro/hub",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The hosted service: sign-up with an invite, and computers of a person's own, each running an Ouro server.",
+  "dependencies": { "@ouro/contract": "*" }
+}

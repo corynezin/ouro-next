@@ -1,0 +1,29 @@
+name: checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  free-tiers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: No internal documents
+        run: |
+          found=$(git ls-files | grep -E '(^|/)(docs/|CLAUDE\.md$|AGENTS\.md$)' || true)
+          if [ -n "$found" ]; then echo "internal documents belong in your private copy, not here:"; echo "$found"; exit 1; fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Import direction
+        run: npm run lint:imports
+      - name: Types
+        run: npm run typecheck
+      - name: Domain, contract, store, guardian and app core tests
+        run: npm run test:unit
+      - name: Journeys, with real processes and the stand-in model
+        run: npm run test:journeys
