@@ -1,0 +1,27 @@
+# Locking closes an open sheet, so the cover hides it and nothing under it can be used. Before running: Face ID enrolled
+# on the simulator, the app paired, and Settings → Require Face ID on. Maestro can't run shell commands, so failing the
+# prompt is the runner's job: once this flow is waiting for "Ouro is locked", send a non-matching face (simctl, as
+# rb-mac's runner does). The assertions hold both while the prompt is up and after it fails.
+appId: dev.claudeinbox.ouronext
+---
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: "Manage servers"
+    timeout: 10000
+- pressKey: home
+- launchApp:
+    stopApp: false
+# The runner fails the prompt; Cancel it, so the system alert can't be what swallows the taps below.
+- extendedWaitUntil:
+    visible: "Face Not Recognized.*"
+    timeout: 20000
+- tapOn: "Cancel"
+- assertVisible: "Ouro is locked"
+# The sheet stays open in its window under the cover's own, where Maestro still reads it: what counts is that it takes
+# no touches. Manage servers would open Servers, and Done would close the sheet.
+- tapOn: "Manage servers"
+- assertNotVisible: "Add a server"
+- tapOn: "Done"
+- assertVisible: "Manage servers"
+- assertVisible: "Ouro is locked"
+- takeScreenshot: m5-lock-over-settings

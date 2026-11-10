@@ -1,0 +1,69 @@
+# The chat's header and goal bar, and unread clearing. Setup (runner): "header" has a goal and replied to its task;
+# "pinger" replied to its task and hasn't been opened, so it is unread. Not yet run on the simulator: selectors may
+# need adjusting on the first run.
+# Rows: CHAT-01 (a local agent's title is its bare name), CHAT-02 (Next unread replaces the chat), CHAT-03 (More menu,
+# "Goal" and "Set a goal"), CHAT-17 (opening clears unread), CHAT-45 (goal bar opens Goal).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+# CHAT-17: pinger's row carries its unread count until the chat is opened.
+- scrollUntilVisible:
+    element: "pinger, .*"
+    centerElement: true
+- assertVisible: "pinger, .*, 1"
+- tapOn: "pinger, .*"
+- extendedWaitUntil:
+    visible: "Message pinger"
+    timeout: 10000
+# CHAT-03: without a goal the menu offers "Set a goal".
+- tapOn: "More"
+- assertVisible: "Log"
+- assertVisible: "Set a goal"
+- assertVisible: "Summaries"
+- assertVisible: "Details"
+- takeScreenshot: parity-chat-more-no-goal
+- tapOn:
+    point: "50%,50%"
+- runFlow: _to-list.yaml
+- scrollUntilVisible:
+    element: "pinger, .*"
+    centerElement: true
+- assertNotVisible: "pinger, .*, 1"
+# CHAT-01, CHAT-45: header's chat, its title and its goal bar.
+- scrollUntilVisible:
+    element: "header, .*"
+    centerElement: true
+- tapOn: "header, .*"
+- extendedWaitUntil:
+    visible: "Message header"
+    timeout: 10000
+- assertVisible: ".*goal: active.*"
+- takeScreenshot: parity-chat-header-goal-bar
+- tapOn: "More"
+- assertVisible: "Goal"
+- assertNotVisible: "Set a goal"
+- tapOn:
+    point: "50%,50%"
+- tapOn: ".*goal: active.*"
+- extendedWaitUntil:
+    visible: "Keep the header tidy"
+    timeout: 10000
+- assertNotVisible: "Message header"
+- tapOn:
+    point: "38,84"
+- extendedWaitUntil:
+    visible: "Message header"
+    timeout: 10000
+# CHAT-02: Next unread replaces this chat, so Back goes to the list, not to header. Unread chats are left by earlier
+# flows (the master's and helper's open asks at least), so the button is enabled.
+- tapOn: "Next unread, \\d+"
+- extendedWaitUntil:
+    visible: "Message .*"
+    timeout: 10000
+- assertNotVisible: "Message header"
+- takeScreenshot: parity-chat-next-unread
+- tapOn:
+    point: "38,84"
+- extendedWaitUntil:
+    visible: "Agents, tasks, messages"
+    timeout: 10000

@@ -1,0 +1,30 @@
+{
+  "name": "ouro-rebirth",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "packages/*",
+    "server",
+    "guardian",
+    "hub",
+    "tools",
+    "apps/*"
+  ],
+  "scripts": {
+    "postinstall": "patch-package --patch-dir apps/mobile/patches",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/mobile/tsconfig.json && tsc --noEmit -p apps/mobile/journeys/tsconfig.json",
+    "lint:imports": "node tools/check-imports.ts",
+    "test": "npm run lint:imports && npm run typecheck && npm run test:unit",
+    "test:live": "node --no-warnings --test --test-concurrency=1 'journeys/live/*.live.ts'",
+    "test:journeys": "node --no-warnings --test --test-concurrency=1 'journeys/*.journey.ts' 'apps/mobile/journeys/*.journey.ts'",
+    "test:unit": "node --no-warnings --test 'packages/*/src/**/*.test.ts' 'server/src/**/*.test.ts' 'guardian/src/**/*.test.ts' 'hub/src/**/*.test.ts' 'tools/**/*.test.ts' 'apps/mobile/src/**/*.test.ts'"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  }
+}

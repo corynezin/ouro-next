@@ -1,0 +1,9 @@
+# Run right after the server is killed, in the chat flow 02 left open: once the 5 s grace is over, the chat's status bar
+# says the connection is lost instead of the agent's last known state.
+appId: dev.claudeinbox.ouronext
+---
+- extendedWaitUntil:
+    visible: "Offline:.*"
+    timeout: 30000
+- assertNotVisible: "idle"
+- takeScreenshot: 05a-chat-offline

@@ -1,0 +1,4 @@
+# P0 chat: a new agent is started from the phone and its reply arrives; leaves the chat open.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: ../m1/02-new-agent-and-reply.yaml

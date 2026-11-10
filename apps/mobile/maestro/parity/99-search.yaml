@@ -1,0 +1,27 @@
+# List search: no match, task text in any case and with accents, the last message, and the master. Runs last: it leaves
+# the search field filled. Rows: AG-12 (hidden while searching), AG-48.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- assertVisible: "Master agent"
+- tapOn: "Agents, tasks, messages"
+- inputText: "zzq"
+- extendedWaitUntil:
+    visible: "No agents match “zzq”\\."
+    timeout: 5000
+- assertNotVisible: "Master agent"
+- eraseText: 10
+- inputText: "THINGS"
+- extendedWaitUntil:
+    visible: "asker, stand-in.*"
+    timeout: 5000
+- eraseText: 10
+- inputText: "thîngs"
+- extendedWaitUntil:
+    visible: "asker, stand-in.*"
+    timeout: 5000
+- eraseText: 10
+- inputText: "master"
+- extendedWaitUntil:
+    visible: "master, .*"
+    timeout: 5000

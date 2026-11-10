@@ -1,0 +1,63 @@
+# New group and Add to chat sheets. Rows: NCHAT-01 (Create disabled without members), NCHAT-02, NCHAT-03, NCHAT-05
+# (agents alphabetical), NCHAT-07. Starts on the agents list, after 51-53 have made agents and groups.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Chats.*"
+- tapOn: "New group"
+- assertVisible: "New group"
+- assertVisible: "Cancel"
+- assertVisible:
+    text: "Create"
+    enabled: false
+- assertVisible: "Name"
+- assertVisible: "Group name"
+- assertVisible: "Find a person or agent"
+- assertVisible: "People"
+- assertVisible: "name@server"
+- assertVisible: "Someone not listed\\? Type them as human@server, or an agent as name@server\\."
+- assertVisible: "Agents"
+- assertVisible: "greeter"
+- assertVisible: "helper"
+- assertVisible: "worker"
+- takeScreenshot: parity-new-group
+# The agent search filters the toggles.
+- tapOn: "Find a person or agent"
+- inputText: "WÓR"   # accent- and case-insensitive
+- assertVisible: "worker"
+- assertNotVisible: "greeter"
+- assertNotVisible: "helper"
+- eraseText: 5
+- inputText: "helper"
+- assertNotVisible: "greeter"
+- tapOn:
+    point: "340,533"   # the only row left, helper: a SwiftUI Toggle flips only on its switch
+- tapOn: "Group name"
+- inputText: "Duo"
+- pressKey: Enter
+- assertVisible:
+    text: "Create"
+    enabled: true
+- tapOn: "Create"
+# Create closes the sheet and opens the new room.
+- extendedWaitUntil:
+    visible: "2 members"
+    timeout: 10000
+- assertVisible: "Message Duo"
+- takeScreenshot: parity-new-group-created
+- tapOn: "Details"
+- assertVisible: "Members \\(2\\)"
+- assertVisible: "helper, helper, helper, Remove helper"
+- tapOn: ".*Add people or agents"
+# Add to chat: no Name section, and members already in it aren't offered.
+- assertVisible: "Find a person or agent"
+- assertNotVisible: "Group name"
+- assertVisible: "greeter"
+- assertNotVisible: "helper"
+- takeScreenshot: parity-add-to-chat
+- tapOn:
+    point: "340,441"   # greeter's switch
+- tapOn: "Add"
+- extendedWaitUntil:
+    visible: "Members \\(3\\)"
+    timeout: 10000

@@ -1,0 +1,32 @@
+# Chat details of Crew. Rows: CINFO-02, CINFO-03,
+# CINFO-04, CINFO-06. Starts in Crew's room, from 52.
+appId: dev.claudeinbox.ouronext
+---
+- tapOn: "Details"
+- assertVisible: "Created by .* · .*"
+- assertVisible: "Members \\(3\\)"
+- assertVisible: "greeter, greeter, greeter, Remove greeter"
+- assertVisible: "human, person, You, human, Leave"
+- assertVisible: "add, Add people or agents"
+- takeScreenshot: parity-chat-details
+# Remove and Leave confirm, with the same promise.
+- tapOn:
+    point: "376,216"   # the red minus beside greeter
+- assertVisible: "Remove greeter\\?"
+- assertVisible: "What was said stays in the chat\\."
+- tapOn: "Cancel"
+- tapOn:
+    point: "376,282"   # the red minus beside You
+- assertVisible: "Leave this chat\\?"
+- assertVisible: "What was said stays in the chat\\."
+- tapOn: "Cancel"
+# An agent member opens its details; a person opens the person page.
+- tapOn: "worker, worker, worker.*"
+- extendedWaitUntil:
+    visible: "Model, stand-in"
+    timeout: 10000
+- tapOn:
+    point: "38,84"
+- tapOn: "human, person, You.*"
+- assertVisible: "Person, human"
+- assertVisible: "Chats"

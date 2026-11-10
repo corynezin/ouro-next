@@ -1,0 +1,36 @@
+# A revoked phone. Setup (runner): this phone's device was revoked with `ouro devices revoke <id>`, and a fresh pairing
+# link is on the simulator's clipboard, so the flow ends paired again for the flows after it. Not yet run on the
+# simulator: selectors may need adjusting on the first run.
+# Rows: AG-59.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- extendedWaitUntil:
+    visible: "This server is not paired \\(or was revoked\\)\\."
+    timeout: 30000
+- assertVisible: "Remove this server"
+- takeScreenshot: parity-list-revoked
+- tapOn: "Remove this server"
+# Removing the last server leaves the pairing screens (Welcome, or the Pair form), then the fresh link on the clipboard
+# pairs again, so the flows after this one still have a server.
+- extendedWaitUntil:
+    visible: "I have my own server: pair with a code|Paste from clipboard and pair"
+    timeout: 15000
+- runFlow:
+    when:
+      visible: "I have my own server: pair with a code"
+    commands:
+      - tapOn: "I have my own server: pair with a code"
+- extendedWaitUntil:
+    visible: "Paste from clipboard and pair"
+    timeout: 15000
+- tapOn: "Paste from clipboard and pair"
+- runFlow:
+    when:
+      visible: "Allow Paste"
+    commands:
+      - tapOn: "Allow Paste"
+- extendedWaitUntil:
+    visible: "Agents, tasks, messages"
+    timeout: 20000
+- assertVisible: "Master agent"

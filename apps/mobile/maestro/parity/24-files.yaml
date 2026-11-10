@@ -1,0 +1,76 @@
+# Files both ways. Setup (runner): the server is back (from 23); "filer" replied with pic.png (160×120) and
+# notes.txt; pic.png is in the simulator's photo library; the camera is denied to the app. Not yet run on the
+# simulator: selectors, and the picker and share sheet taps, may need adjusting.
+# Rows: AG-58 (back within seconds of the server), CHAT-35, CHAT-36, CHAT-37, CHAT-38, CHAT-39 (the share sheet opens),
+# CHAT-60, CHAT-62, CHAT-26, CHAT-59 (the picked file's name says JPEG).
+appId: dev.claudeinbox.ouronext
+---
+# The runner setup changes the app's privacy permissions, which closes the app.
+- launchApp
+- runFlow: _to-list.yaml
+- extendedWaitUntil:
+    notVisible: "Offline: .*"
+    timeout: 15000
+- scrollUntilVisible:
+    element: "filer, .*"
+    centerElement: true
+- tapOn: "filer, .*"
+- extendedWaitUntil:
+    visible: "Two files"
+    timeout: 15000
+- assertVisible: "document, pic\\.png.*"
+- assertVisible: "document, notes\\.txt.*"
+- takeScreenshot: parity-files-in-chat
+# CHAT-37: an image opens full screen on black.
+- tapOn: "document, pic\\.png.*"
+- extendedWaitUntil:
+    notVisible: "Message filer"
+    timeout: 10000
+- takeScreenshot: parity-file-image
+- tapOn:
+    point: "38,84"
+# CHAT-38: another file opens in the web view; CHAT-39: the header's share button.
+- tapOn: "document, notes\\.txt.*"
+- extendedWaitUntil:
+    visible: ".*Notes for the file screen.*"
+    timeout: 15000
+- takeScreenshot: parity-file-web
+- tapOn:
+    point: "355,84"   # the share button, the header's only right item; it has no label
+- extendedWaitUntil:
+    visible: "Save to Files|Copy"
+    timeout: 15000
+- takeScreenshot: parity-file-share-sheet
+- tapOn: "dismiss popup"
+- tapOn:
+    point: "38,84"
+# CHAT-60 (not ticked): the simulator offers a camera chooser instead of denying, so the "may not use the camera"
+# message can't be shown here; it needs the real phone. The camera opens, and is dismissed.
+- tapOn: "Attach"
+- tapOn: "Camera"
+- extendedWaitUntil:
+    visible: "Take Picture"
+    timeout: 10000
+- tapOn: "Dismiss"
+# CHAT-59, CHAT-62: one photo from the library, its chip, and removing it by its label.
+- tapOn: "Attach"
+- tapOn: "Photo Library"
+- extendedWaitUntil:
+    visible: "Photos|Add"
+    timeout: 10000
+- tapOn:
+    point: "15%,30%"   # the first photo in the picker's grid
+- tapOn: "Done"
+- extendedWaitUntil:
+    visible: "Remove .*"
+    timeout: 10000
+# CHAT-59 (not ticked): the library photo here is a PNG, so the JPEG naming of a converted photo is not shown.
+- assertVisible: "Remove pic\\.png"
+- takeScreenshot: parity-composer-chip
+# CHAT-26: the pending bubble's file line, then the sent image.
+- tapOn: "Send"
+- takeScreenshot: parity-pending-file-line
+- extendedWaitUntil:
+    visible: "stand-in received:.*"
+    timeout: 30000
+- takeScreenshot: parity-sent-image

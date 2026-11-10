@@ -1,0 +1,78 @@
+# Servers: default labels, Remove only on a server that isn't active, its confirm, rename on return and on blur with
+# blank ignored, switching, and Add a server. Rows: SERVERS-05, SERVERS-10, SERVERS-13; SERVERS-04 apart from blur. Needs LINK2, the link of a second
+# server the runner started; opening it adds that server to this phone and makes it active.
+appId: dev.claudeinbox.ouronext
+---
+- openLink: ${LINK2}
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "No agents yet\\."
+    timeout: 20000
+- openLink: ouronext://servers
+- waitForAnimationToEnd
+# SERVERS-13: labels are the hosts of the URLs. The one that isn't active has Remove; the active one doesn't.
+- assertVisible: "127\\.0\\.0\\.1:\\d+, http://127\\.0\\.0\\.1:\\d+, .*"
+- assertVisible: "127\\.0\\.0\\.1:\\d+, active, http://127\\.0\\.0\\.1:\\d+, .*"
+- assertVisible: "Remove"
+- takeScreenshot: parity-servers-two
+# SERVERS-04: the active server's label becomes an inline field; return commits it.
+- tapOn:
+    text: "Rename"
+    index: 1
+- eraseText: 30
+- inputText: "Work"
+- pressKey: Enter
+- assertVisible: "Work, active, http://127\\.0\\.0\\.1:\\d+, .*"
+# A blank name is ignored.
+- tapOn:
+    text: "Rename"
+    index: 1
+- eraseText: 30
+- pressKey: Enter
+- assertVisible: "Work, active, http://127\\.0\\.0\\.1:\\d+, .*"
+# (Commit on blur isn't shown: the simulator's taps outside the field don't blur it, so SERVERS-04 stays unchecked.)
+- tapOn:
+    text: "Rename"
+    index: 1
+- eraseText: 30
+- inputText: "Home"
+- pressKey: Enter
+- assertVisible: "Home, active, http://127\\.0\\.0\\.1:\\d+, .*"
+# SERVERS-10: Add a server opens Pair.
+- tapOn: "Add a server"
+- extendedWaitUntil:
+    visible: "Pair"
+    timeout: 5000
+- assertVisible: "Paste from clipboard and pair"
+- tapOn: "Back"
+# Switch to the first server: the sheet closes and its agents are home.
+- tapOn: "127\\.0\\.0\\.1:\\d+, http://.*"
+- extendedWaitUntil:
+    visible: "Agents, tasks, messages"
+    timeout: 20000
+- assertNotVisible: "No agents yet\\."
+# SERVERS-05: Remove on the other server asks first and keeps the list going.
+- openLink: ouronext://servers
+- waitForAnimationToEnd
+- tapOn: "Remove"
+- assertVisible: "Remove Home\\?"
+- assertVisible: "The machine and agents keep running\\. Pair again later with a new code\\."
+- takeScreenshot: parity-servers-remove-confirm
+- tapOn: "Cancel"
+- assertVisible: "Home, http://127\\.0\\.0\\.1:\\d+, .*"
+- tapOn: "Remove"
+- tapOn:
+    point: "68%,57%"   # the alert's Remove; the row's own Remove has the same text
+- extendedWaitUntil:
+    notVisible: "Home, .*"
+    timeout: 10000
+- assertVisible: "127\\.0\\.0\\.1:\\d+, active, http://127\\.0\\.0\\.1:\\d+, .*"
+- assertVisible: "Add a server"
+- tapOn: "Done"
+- extendedWaitUntil:
+    visible: "Agents, tasks, messages"
+    timeout: 10000

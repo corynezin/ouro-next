@@ -1,0 +1,56 @@
+# Settings preferences: Notifications (SET-16 permission prompt, SET-17 choices), Privacy (SET-18 without Face ID),
+# Agents list fold choices (SET-19). Starts on the agents list.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: "Manage servers"
+    timeout: 10000
+- scrollUntilVisible:
+    element: "Allow notifications on this phone"
+- assertVisible: "Notify me about.*"
+- assertVisible: "Urgent asks break through Focus.*"
+- assertVisible: "One banner per agent burst.*"
+- takeScreenshot: parity-settings-notifications
+- assertVisible: "Notify me about.*Every message.*"
+- tapOn: "Every message"
+- extendedWaitUntil:
+    visible: "What needs me"
+    timeout: 5000
+- takeScreenshot: parity-settings-notify-menu
+- assertVisible: "What needs me"
+- assertVisible: "Every message"
+- assertVisible: "Nothing"
+- tapOn: "Nothing"
+- waitForAnimationToEnd
+- assertVisible: "Notify me about.*Nothing.*"
+- tapOn: "Allow notifications on this phone"
+- extendedWaitUntil:
+    visible: ".*Would Like to Send You Notifications"
+    timeout: 8000
+- takeScreenshot: parity-settings-allow-prompt
+- tapOn: "Allow"
+- waitForAnimationToEnd
+- takeScreenshot: parity-settings-allow-result
+- scrollUntilVisible:
+    element: "Privacy"
+- scrollUntilVisible:
+    element: "Require Face ID to open.*"
+- scrollUntilVisible:
+    element: "Fold idle agents.*"
+- assertVisible: "Agents quiet that long \\(not busy, nothing unread or waiting\\) go into an Idle section at the bottom\\."
+- tapOn:
+    text: "Default.*"
+    below: "Fold idle agents.*"
+- extendedWaitUntil:
+    visible: "After 15 min"
+    timeout: 5000
+- takeScreenshot: parity-settings-fold-menu
+- assertVisible: "Off"
+- assertVisible: "After 15 min"
+- assertVisible: "After 30 min"
+- assertVisible: "After 1 h"
+- assertVisible: "After 2 h"
+- assertVisible: "After 4 h"
+- assertVisible: "After 8 h"

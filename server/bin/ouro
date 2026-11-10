@@ -1,0 +1,3 @@
+#!/bin/sh
+# Resolves symlinks so a release's copy runs its own source.
+exec node --no-warnings "$(dirname "$(realpath "$0")")/../src/bin/ouro.ts" "$@"

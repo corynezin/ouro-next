@@ -1,0 +1,17 @@
+# Creates an agent on the stand-in model and waits for its reply in the chat.
+appId: dev.claudeinbox.ouronext
+---
+- tapOn: "New agent"
+- extendedWaitUntil:
+    visible: "Start"
+    timeout: 10000
+- takeScreenshot: 03-new-agent
+- tapOn: "task"
+- inputText: "Say hello"
+- tapOn: "name (optional — auto-generated if blank)"
+- inputText: "greeter"
+- tapOn: "Start"
+- extendedWaitUntil:
+    visible: "stand-in received: Say hello"
+    timeout: 30000
+- takeScreenshot: 04-chat-after-reply

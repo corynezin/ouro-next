@@ -1,0 +1,24 @@
+# New agent names: a taken name is refused in red and the sheet stays; spaces are stripped as the name is typed.
+# Rows: NEW-03, NEW-08.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "New agent"
+- tapOn: "task"
+- inputText: "Count"
+- tapOn: "name \\(optional — auto-generated if blank\\)"
+- inputText: "asker"
+- tapOn: "Start"
+- extendedWaitUntil:
+    visible: "an agent named \"asker\" already exists"
+    timeout: 10000
+- assertVisible: "New agent"
+- takeScreenshot: parity-new-agent-error
+- tapOn: "asker"
+- eraseText: 10
+- inputText: "my bot"
+- assertVisible: "mybot"
+- tapOn: "Start"
+- extendedWaitUntil:
+    visible: "Message mybot"
+    timeout: 15000

@@ -1,0 +1,125 @@
+# Asks across the list and the chat. The runner has made agent "asker" raise three asks through the stand-in: urgent
+# "Server is down", blocked "Need the API key", and "Ship it?" with choices Yes and No.
+# Rows: AG-02, AG-03, AG-18, AG-30, AG-34, AG-21, AG-22, AG-23, AG-24, AG-25, CHAT-49, CHAT-50, CHAT-51, CHAT-52, CHAT-53, CHAT-54,
+# CHAT-56, CHAT-57, J-09.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- extendedWaitUntil:
+    visible: "Asks \\(3\\)"
+    timeout: 30000
+- assertVisible: "Next unread, 1"
+- assertVisible: "Chats"
+- assertVisible: "New agent"
+# Highest level first: urgent, blocked, then waiting with its choices.
+- assertVisible: "exclamationmark\\.octagon\\.fill, asker, .*, Server is down"
+- assertVisible: "block, asker, .*, Need the API key"
+- assertVisible: "questionmark\\.circle, asker, .*, Ship it\\?, Answer Yes, Answer No"
+# The row's top-ask symbol is labelled with the count, and a stand-in agent shows no OpenRouter cost.
+- assertVisible: "asker, stand-in, asker, .*3 open asks.*"
+- assertNotVisible: ".*asker, .*\\$0\\.00.*"
+- takeScreenshot: parity-asks
+# Next unread from the list goes to the top open ask's conversation.
+- tapOn: "Next unread, 1"
+- extendedWaitUntil:
+    visible: "Message asker"
+    timeout: 10000
+- runFlow: _to-list.yaml
+# Snoozing from the swipe: the count drops, the row shows when it comes back, and its swipe becomes Remind.
+- swipe:
+    from: ".*asker, .*, Server is down"
+    direction: LEFT
+- tapOn: "Snooze 1h"
+- extendedWaitUntil:
+    visible: "Asks \\(2\\)"
+    timeout: 10000
+- assertVisible: "exclamationmark\\.octagon\\.fill, asker, zz .*, Server is down"
+- assertVisible: "Remind"
+- swipe:
+    from: ".*asker, .*, Need the API key"
+    direction: LEFT
+- tapOn: "Snooze 1h"
+- swipe:
+    from: ".*asker, .*, Ship it\\?, Answer Yes, Answer No"
+    direction: LEFT
+- tapOn: "Snooze 1h"
+- extendedWaitUntil:
+    visible: "Asks \\(all snoozed\\)"
+    timeout: 10000
+- takeScreenshot: parity-asks-all-snoozed
+# Remind, on a snoozed ask's swipe, brings it back now.
+- swipe:
+    from: ".*asker, .*, Server is down"
+    direction: LEFT
+- tapOn: "Remind"
+- extendedWaitUntil:
+    visible: "Asks \\(1\\)"
+    timeout: 10000
+# The long-press sheet, titled with the ask.
+- longPressOn: ".*asker, .*, Need the API key"
+- assertVisible: "Open conversation"
+- assertVisible: "Remind me in 30 minutes"
+- assertVisible: "Remind me in 1 hour"
+- assertVisible: "Remind me in 3 hours"
+- assertVisible: "Remind me in Tomorrow 9:00"
+- assertVisible: "Remind me when it's done"
+- assertVisible: "Remind me when I'm back"
+- assertVisible: "Remind me now"
+- assertVisible: "Cancel"
+- tapOn: "Remind me now"
+- extendedWaitUntil:
+    visible: "Asks \\(2\\)"
+    timeout: 10000
+# Tapping an ask opens its conversation, with the asks panel above the composer.
+- tapOn: ".*asker, .*, Need the API key"
+- extendedWaitUntil:
+    visible: "A reply closes all 3; tap one to answer just it\\."
+    timeout: 10000
+- assertVisible: "Message asker"
+- assertVisible: "Attach"
+- assertNotVisible: "Send"
+- tapOn:
+    text: "Need the API key"
+    index: 1
+- assertVisible: "Answer ask \\d"
+# The first ask in the panel (urgent, after Remind) isn't the one chosen: its options offer to answer just it, and then
+# to reply to all instead.
+- tapOn:
+    text: "Ask options"
+    index: 0
+- assertVisible: "Answer just this"
+- assertVisible: "Remind me in 30 minutes"
+- tapOn: "Answer just this"
+- tapOn:
+    text: "Ask options"
+    index: 0
+- assertVisible: "Reply to all instead"
+- tapOn: "Cancel"
+- assertVisible: "Answer ask \\d"
+- takeScreenshot: parity-asks-panel
+# A choice pill answers its ask; the pills go from the message and the panel.
+- tapOn:
+    text: "Answer Yes"
+    index: 1
+- extendedWaitUntil:
+    notVisible: "Answer Yes"
+    timeout: 10000
+- assertNotVisible: "Answer No"
+# Answering just one: the others stay, and sending ends the answering state.
+- tapOn: "Answer ask \\d"
+- inputText: "key"
+- assertVisible: "Send"
+- tapOn: "Send"
+- extendedWaitUntil:
+    visible: "Message asker"
+    timeout: 10000
+- assertVisible: "Ask options"
+# A plain reply closes the rest.
+- tapOn: "Message asker"
+- inputText: "all good"
+- tapOn: "Send"
+- extendedWaitUntil:
+    notVisible: "Ask options"
+    timeout: 10000
+- runFlow: _to-list.yaml
+- assertNotVisible: "Asks.*"

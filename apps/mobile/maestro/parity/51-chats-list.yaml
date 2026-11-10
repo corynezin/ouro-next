@@ -1,0 +1,36 @@
+# Chats list: your chats, "Other chats" collapsed, unread on group and direct rows, and which screen each row opens.
+# Rows: ROOMS-02, ROOMS-03, ROOMS-06, ROOMS-07, ROOMS-08. Setup (runner): worker posted in group Crew, worker made group Backroom with
+# helper, helper wrote to worker.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Chats.*"
+- extendedWaitUntil:
+    visible: "Other chats, \\d+"
+    timeout: 30000
+- assertVisible: "New group"
+- assertVisible: "person\\.2\\.fill, Crew, 3, .*, worker: worker here: lunch\\?, 1"
+- assertVisible: "worker, worker, .*, 2"
+# The row shows the chat's last message: yours ("you: standin…"), or, once the server's unanswered-message notice has been
+# answered, the agent's echo of it; which one depends on timing, so the row is only checked to have a preview.
+- assertVisible: "helper, helper, [^,]+, .+"
+- assertNotVisible: "Backroom.*"
+- tapOn: "Other chats, \\d+"
+- assertVisible: "person\\.2\\.fill, Backroom, 2, .*, worker: psst helper"
+- assertVisible: "helper, helper & worker, [^,]+"
+- takeScreenshot: parity-chats-list
+# A direct chat you're in opens the agent's chat; a group opens the room; so does someone else's chat.
+- tapOn: "worker, worker, .*"
+- assertVisible: "Message worker"
+- assertVisible: "More"
+- tapOn:
+    point: "38,84"
+- tapOn: "person\\.2\\.fill, Crew.*"
+- assertVisible: "Message Crew"
+- assertVisible: "Details"
+- assertNotVisible: "More"
+- tapOn:
+    point: "38,84"
+- tapOn: "person\\.2\\.fill, Backroom.*"
+- assertVisible: "Only members can post here\\."
+- assertNotVisible: "More"

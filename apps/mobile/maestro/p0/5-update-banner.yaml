@@ -1,0 +1,4 @@
+# P0 update banner (after the runner published an update to the server): it shows, and a tap restarts into the update.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: ../m2/update-banner-tap.yaml

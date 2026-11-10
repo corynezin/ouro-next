@@ -1,0 +1,21 @@
+# J-03, the already-paired phone: a pair link that cold-launches the app (stopped first) while it is paired with one
+# server pairs the second server and switches to it. Needs LINK2 (the runner's second server); run without flow 58,
+# which uses the same one-time link.
+appId: dev.claudeinbox.ouronext
+---
+- stopApp
+- openLink: ${LINK2}
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "No agents yet\\."
+    timeout: 30000
+- takeScreenshot: j03-cold-link-switched
+- openLink: ouronext://servers
+- waitForAnimationToEnd
+- assertVisible: "127\\.0\\.0\\.1:\\d+, active, http://127\\.0\\.0\\.1:\\d+, .*"
+- assertVisible: "127\\.0\\.0\\.1:\\d+, http://127\\.0\\.0\\.1:\\d+, .*"
+- takeScreenshot: j03-cold-link-two-servers

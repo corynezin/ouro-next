@@ -1,0 +1,24 @@
+# The first-run Pair form, before any server is known: PAIR-01, PAIR-02, PAIR-04, PAIR-05 and PAIR-08.
+appId: dev.claudeinbox.ouronext
+---
+- launchApp:
+    clearState: true
+# A fresh install opens on Welcome (invite code); the pair form is behind its link.
+- extendedWaitUntil:
+    visible: "I have my own server: pair with a code"
+    timeout: 15000
+- tapOn: "I have my own server: pair with a code"
+- extendedWaitUntil:
+    visible: "Pair"
+    timeout: 15000
+- assertVisible: "On your Mac run\nouro pair\nand paste the link it prints\\."
+- assertVisible: "ouronext://pair\\?url=…&code=…"
+- assertVisible: "Paste from clipboard and pair"
+- assertVisible: "or"
+- assertVisible: "server address \\(100\\.x\\.y\\.z:8790\\)"
+- assertVisible: "code"
+- tapOn: "Pair"
+- extendedWaitUntil:
+    visible: "Paste the pairing link \\(ouronext://pair\\?…\\), or enter the address and code\\."
+    timeout: 5000
+- takeScreenshot: parity-pair-form-error

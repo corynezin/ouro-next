@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.expo/
+ios/
+android/
+runs/
+*.db
+*.db-*
+.env*
+*.p8
+*.mobileprovision
+*.ipa
+.reference-app/
+.signing/
+.tools/
+*.p12
+*.cer
+*.keychain-db
+*.xcarchive
+# Local Expo modules keep their native sources; only prebuild output is generated.
+!apps/mobile/modules/*/ios/

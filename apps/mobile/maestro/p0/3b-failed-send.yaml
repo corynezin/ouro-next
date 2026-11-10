@@ -1,0 +1,4 @@
+# P0 failed send, step 2 (server still down): the send fails visibly and is never shown as sent.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: ../m1/03-send-while-server-down.yaml

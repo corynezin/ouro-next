@@ -1,0 +1,39 @@
+// Every screen and its params. Modal ones are presented as sheets. Screens are added here with their milestone.
+import type { NativeStackScreenProps } from '@react-navigation/native-stack'
+import type { MessageAt } from '../features/chat/model.ts'
+
+export type Routes = {
+  Agents: undefined
+  /** `agentRef` is an id or a name: a link or a notification may have either. `at`: open at that message, from search;
+   * else at the newest. */
+  Chat: { agentRef: string; at?: MessageAt }
+  Log: { agentRef: string }
+  Summaries: { agentRef: string }
+  /** Every agent's latest summary. Reached only by a link, as in the reference. */
+  AllSummaries: undefined
+  Agent: { agentRef: string }
+  Goal: { agentRef: string }
+  Archived: undefined
+  Chats: undefined
+  ChatRoom: { chatId: string; at?: MessageAt }
+  ChatInfo: { chatId: string }
+  /** A chat member with no agent page here: a person, or an agent on another machine. */
+  Person: { address: string }
+  /** An agent on another of the person's computers: `<computer id>:<name>`. */
+  RemoteChat: { remoteAgentId: string }
+  NewGroup: undefined
+  AddToChat: { chatId: string }
+  New: undefined
+  Servers: undefined
+  Computers: undefined
+  Settings: undefined
+  Claude: undefined
+  ChatGPT: undefined
+  OpenRouter: undefined
+  GitHub: undefined
+  Pair: undefined
+  SelectText: { text: string }
+  /** A file sent in a chat, fetched with the session's authorisation. */
+  File: { attachmentId: string; fileName: string; isImage: boolean }
+}
+export type ScreenProps<K extends keyof Routes> = NativeStackScreenProps<Routes, K>

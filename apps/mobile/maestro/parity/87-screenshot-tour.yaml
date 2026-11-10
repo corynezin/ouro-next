@@ -1,0 +1,33 @@
+# One tour of the visual-only rows: a screenshot of each screen and state they name. Run after 02-10, so the list has
+# agents in it. Minimal asserts; the screenshots are what's looked at (numbered by name: tour-NN-...).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- takeScreenshot: tour-01-list-top
+# AG-50: pull to refresh.
+- swipe:
+    start: "50%,30%"
+    end: "50%,60%"
+    duration: 600
+- takeScreenshot: tour-02-pull-to-refresh
+# AG-51: a swipe on a row shows its buttons.
+- swipe:
+    start: "90%,38%"
+    end: "20%,38%"
+    duration: 400
+- takeScreenshot: tour-03-row-swiped
+- tapOn:
+    point: "50%,10%"
+# AG-46 (the Idle section) needs an agent idle for the fold time; the runner's agents are all recent, so it isn't toured.
+# SET-23, SET-03: Settings top and bottom.
+- tapOn: "Settings"
+- extendedWaitUntil: {visible: "Manage servers", timeout: 10000}
+- takeScreenshot: tour-06-settings-top
+- scrollUntilVisible:
+    element: "Archived agents"
+- scrollUntilVisible:
+    element: "Unpair"
+- takeScreenshot: tour-07-settings-bottom
+# Back out of Settings; the Computers invite and its toast are in flow 82.
+- tapOn: "Done"
+- assertVisible: "Agents, tasks, messages"

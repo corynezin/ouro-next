@@ -1,0 +1,42 @@
+# Group rooms: header variants, your bubble, the composer, mentions, a non-member's Join, someone else's direct chat.
+# Rows: ROOM-01, ROOM-03, ROOM-07, ROOM-12, and CINFO-03's direct chat half. Starts where 51 ended (Backroom, not yet joined).
+appId: dev.claudeinbox.ouronext
+---
+- assertVisible: "2 members · you aren’t in it"
+- assertVisible: "Details"
+- assertVisible: "Only members can post here\\."
+- takeScreenshot: parity-room-non-member
+- tapOn: "Join"
+- extendedWaitUntil:
+    visible: "Message Backroom"
+    timeout: 10000
+- assertVisible: "3 members"
+- tapOn:
+    point: "38,84"
+- tapOn: "helper, helper & worker.*"
+- assertVisible: "Direct chat"
+- assertVisible: "You’re reading someone else’s chat\\."
+- assertNotVisible: "Message .*"
+# Details of a direct chat: no Leave or Remove, and no way to add people (CINFO-03, CINFO-06).
+- tapOn: "Details"
+- assertVisible: "Members \\(2\\)"
+- assertNotVisible: ".*Leave"
+- assertNotVisible: "Remove .*"
+- assertNotVisible: "Add people or agents"
+- takeScreenshot: parity-direct-chat-details
+- tapOn:
+    point: "38,84"
+- tapOn:
+    point: "38,84"
+- tapOn: "person\\.2\\.fill, Crew.*"
+- assertVisible: "3 members"
+- assertVisible: "worker here: lunch\\?"
+# The composer has no attach button here, and a message of yours sits on the right with its time under it.
+- assertNotVisible: "Attach"
+- tapOn: "Message Crew"
+- inputText: "hi"
+- tapOn: "Send"
+- extendedWaitUntil:
+    visible: "hi"
+    timeout: 10000
+- takeScreenshot: parity-room-crew

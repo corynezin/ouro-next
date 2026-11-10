@@ -1,0 +1,12 @@
+# Agents list rows seen up close: avatar, name, goal marker, status line, summary, preview, age, idle and stopped states.
+# Needs the state the runner and flows 02 to 14 leave behind (alpha, zulu, sleeper, formatter, helper, mybot, asker, worker).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- takeScreenshot: parity-rows-top
+- scrollUntilVisible:
+    element: "sleeper, .*"
+- takeScreenshot: parity-rows-middle
+- scrollUntilVisible:
+    element: "asker, .*"
+- takeScreenshot: parity-rows-bottom

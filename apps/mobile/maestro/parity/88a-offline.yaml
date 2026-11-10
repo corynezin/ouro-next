@@ -1,0 +1,16 @@
+# J-22, first half: the server is down for this flow (the runner stops it before and starts it after). The list stays
+# with an Offline note and its data; an opened chat keeps its history. The flow ends with that chat open.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- extendedWaitUntil:
+    visible: "Offline: .*"
+    timeout: 30000
+- assertVisible: "greeter, .*"
+- takeScreenshot: j22-list-offline
+- tapOn: "greeter, .*"
+- extendedWaitUntil:
+    visible: "Message greeter"
+    timeout: 10000
+- assertVisible: "stand-in received.*"
+- takeScreenshot: j22-chat-offline-keeps-history

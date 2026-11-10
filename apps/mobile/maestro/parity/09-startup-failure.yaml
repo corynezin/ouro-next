@@ -1,0 +1,19 @@
+# Startup that can't read saved setup (the app's -OuroUnreadableKeychain test switch), then a normal launch.
+# Rows: APP-07, REC-03 (the startup-failed case: the banner offers the server-list reset).
+appId: dev.claudeinbox.ouronext
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      OuroUnreadableKeychain: "YES"
+- extendedWaitUntil:
+    visible: "Retry startup"
+    timeout: 15000
+- assertVisible: "Could not read saved setup\\. Your stored connections have been retained\\. Please retry\\."
+- assertVisible: "Reset server list and pair again"
+- takeScreenshot: parity-startup-failure
+- launchApp:
+    stopApp: true
+- extendedWaitUntil:
+    visible: "Agents, tasks, messages"
+    timeout: 15000

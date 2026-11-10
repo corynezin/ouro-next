@@ -1,0 +1,71 @@
+# Welcome and the Pair form on a fresh install, then pairing again by link so later flows find the server. Setup
+# (runner): the keychain is reset, and LINK is a fresh pairing link. Sign-up goes to the test hub, which refuses the
+# made-up invite, so its refusal is the note shown. Not yet run on the simulator: selectors may need adjusting.
+# Rows: ONB-02, ONB-03, ONB-04, ONB-05, ONB-06, ONB-07, ONB-08, ONB-09, ONB-10 (while open), PAIR-07, PAIR-09, PAIR-10.
+appId: dev.claudeinbox.ouronext
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "I have my own server: pair with a code"
+    timeout: 15000
+- assertVisible: "Ouro logo"
+- assertVisible: "Ouro"
+- assertVisible: "Your own team of Claude agents, on a computer of your own in the cloud\\. Chat with them from here\\."
+- assertVisible: "Invite code"
+- assertVisible: "from the person who invited you"
+- assertVisible: "Your name"
+- assertVisible: "Alex"
+- takeScreenshot: parity-welcome
+# ONB-07: both fields are needed.
+- tapOn: "Continue"
+- assertVisible: "Enter your invite code and your name\\."
+# ONB-10: an invite link fills the code while Welcome is open.
+- openLink: "ouronext://invite?code=alpha7"
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "alpha7"
+    timeout: 10000
+# ONB-05, ONB-06, ONB-08: a name, "go" submits, the spinner, then the hub's refusal.
+- tapOn: "Alex"
+- inputText: "Sam"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "That invite code is not valid, or was used already\\."
+    timeout: 30000
+- takeScreenshot: parity-welcome-refused
+# ONB-09, PAIR-10: the link opens Pair; Back returns to Welcome.
+- tapOn: "I have my own server: pair with a code"
+- extendedWaitUntil:
+    visible: "Back"
+    timeout: 10000
+- tapOn: "Back"
+- extendedWaitUntil:
+    visible: "Invite code"
+    timeout: 10000
+- tapOn: "I have my own server: pair with a code"
+# PAIR-07, PAIR-09: an address that answers nothing; the spinner, then the reason in red (by eye).
+- tapOn: "server address \\(100\\.x\\.y\\.z:8790\\)"
+- inputText: "127.0.0.1:9"
+- tapOn: "code"
+- inputText: "abcd"
+- tapOn: "Pair"
+- takeScreenshot: parity-pair-busy
+- extendedWaitUntil:
+    notVisible: "Agents, tasks, messages"
+    timeout: 5000
+- takeScreenshot: parity-pair-failed
+# Paired again, for the flows after this one.
+- openLink: ${LINK}
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "Agents, tasks, messages"
+    timeout: 20000

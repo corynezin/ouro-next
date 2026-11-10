@@ -1,0 +1,15 @@
+# New agent: a name typed with a space has the space stripped. Rows: NEW-03.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "New agent"
+- tapOn: "task"
+- inputText: "Say hi"
+- tapOn: "name \\(optional — auto-generated if blank\\)"
+- inputText: "my bot"
+- pressKey: Enter
+- tapOn: "Start"
+- extendedWaitUntil:
+    visible: "Message mybot"
+    timeout: 20000
+- assertVisible: "mybot"

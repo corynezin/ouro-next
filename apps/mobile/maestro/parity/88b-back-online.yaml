@@ -1,0 +1,17 @@
+# J-22 second half and J-23: the server is back (the runner started it and sent greeter a message while the phone was
+# on its chat). The phone catches up without leaving the chat: the new message shows once and the Offline note goes.
+# Run right after 88a.
+appId: dev.claudeinbox.ouronext
+---
+- extendedWaitUntil:
+    visible: "back after restart"
+    timeout: 90000
+- assertVisible: "greeter"
+- takeScreenshot: j23-caught-up
+- tapOn:
+    point: "38,84"
+- extendedWaitUntil:
+    visible: "Agents, tasks, messages"
+    timeout: 10000
+- assertNotVisible: "Offline: .*"
+- takeScreenshot: j22-list-back-online

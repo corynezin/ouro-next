@@ -1,0 +1,19 @@
+# Allows notifications from Settings (the one place that asks), then returns to the list. Run by the runner before
+# flows that need a banner, so they don't depend on flow 81 having run in the same install.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Settings"
+- extendedWaitUntil: {visible: "Manage servers", timeout: 10000}
+- scrollUntilVisible:
+    element: "Allow notifications on this phone"
+- tapOn: "Allow notifications on this phone"
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - tapOn: "Allow"
+- scrollUntilVisible:
+    element: "This server has no APNs key yet, so it can.t send notifications\\.|iOS gave this phone no push token\\. Try again later\\."
+    timeout: 40000
+- tapOn: "Done"

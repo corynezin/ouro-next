@@ -1,0 +1,10 @@
+# Run with the server stopped: the send must fail visibly, never show as sent.
+appId: dev.claudeinbox.ouronext
+---
+- tapOn: "Message greeter"
+- inputText: "Sent while offline"
+- tapOn: "Send"
+- extendedWaitUntil:
+    visible: ".*not sent.*tap to retry.*"
+    timeout: 60000
+- takeScreenshot: 05-send-failed

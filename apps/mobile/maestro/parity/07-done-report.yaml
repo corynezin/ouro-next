@@ -1,0 +1,21 @@
+# The runner has made asker reply "Tidying up" and then report done with "Everything is tidy": the report folds under
+# the reply and expands on a tap. Also the Attach sheet with text (not an image) on the clipboard.
+# Rows: CHAT-41, CHAT-42.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "asker, stand-in.*"
+- extendedWaitUntil:
+    visible: "Done, show summary"
+    timeout: 30000
+- assertNotVisible: "Everything is tidy"
+- tapOn: "Done, show summary"
+- assertVisible: "Done, hide summary"
+- assertVisible: "Everything is tidy"
+- takeScreenshot: parity-done-report
+- tapOn: "Attach"
+- assertVisible: "Photo Library"
+- assertVisible: "Camera"
+- assertVisible: "Files"
+- assertNotVisible: "Paste image"
+- tapOn: "Cancel"

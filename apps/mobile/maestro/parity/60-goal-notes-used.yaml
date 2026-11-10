@@ -1,0 +1,23 @@
+# A goal that has run cycles and has notes. Rows: GOAL-06, GOAL-13. Setup (runner): noter has a goal with a check that
+# never passes, a 60 s interval, and a goal-notes.md file written beside its journal.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "noter, stand-in.*"
+- tapOn: "More"
+- tapOn: "Goal"
+- extendedWaitUntil:
+    visible: "noter: goal"
+    timeout: 10000
+# The goal runs its first cycle within a minute and costs something.
+- extendedWaitUntil:
+    visible: "Used, .*"
+    timeout: 120000
+- assertVisible: "Tidy the garden"
+- assertVisible: "Kind, finishes when met"
+- assertVisible: "Check, false"
+- scrollUntilVisible:
+    element: "Notes \\(goal-notes\\.md\\)"
+- scrollUntilVisible:
+    element: "Found three weeds; will pull them next cycle\\."
+- takeScreenshot: parity-goal-used-notes

@@ -1,0 +1,4 @@
+# P0 setup: pair with a link (LINK from the runner). Onboarding through the hub joins the suite once it is on main.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: ../m1/01-pair-with-link.yaml

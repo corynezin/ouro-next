@@ -1,0 +1,46 @@
+# Agents list rows in their states. Setup (runner): "pauser" has a paused goal, "completer" a completed one, "cycler"
+# a goal every 10 minutes between cycles, "liner" replied three lines, "quietone" is held at a barrier with your
+# message last. Colours, dots and sizes are checked by eye. Not yet run on the simulator: selectors may need adjusting.
+# Rows: AG-08 (dot), AG-14 (the master's idle line), AG-28, AG-31, AG-33, AG-38 and AG-41 (between goal cycles), AG-42,
+# AG-50 (pull to refresh).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- takeScreenshot: parity-list-top-dot
+# AG-50: pulling down refreshes, and the list stays.
+- swipe:
+    start: "50%,35%"
+    end: "50%,80%"
+- takeScreenshot: parity-list-refreshing
+- extendedWaitUntil:
+    visible: "Master agent"
+    timeout: 10000
+# AG-41: a goal waiting for its next cycle, 10 minutes out.
+- scrollUntilVisible:
+    element: "cycler, .*"
+    centerElement: true
+- assertVisible: "cycler, .*between goal cycles · next in \\d+ min.*"
+# AG-33: three lines flattened into one line of text, with no summary.
+- scrollUntilVisible:
+    element: "liner, .*"
+    centerElement: true
+- assertVisible: "liner, .*first line second line third line.*"
+# AG-33: "you: " when your message is the last.
+- scrollUntilVisible:
+    element: "quietone, .*"
+    centerElement: true
+- assertVisible: "quietone, .*you: you said this last.*"
+- takeScreenshot: parity-list-rows-a
+# AG-28: paused (yellow) and complete (secondary) goal markers.
+- scrollUntilVisible:
+    element: "pauser, .*"
+    centerElement: true
+- scrollUntilVisible:
+    element: "completer, .*"
+    direction: UP
+    centerElement: true
+- takeScreenshot: parity-list-goal-markers
+- scrollUntilVisible:
+    element: "Master agent"
+    direction: UP
+- assertVisible: "Master agent"

@@ -1,0 +1,34 @@
+# A pair link opened while already paired pairs again; for the same address, the entry is replaced rather than added. A
+# link with a wrong code fails with a toast. Needs LINK (fresh) and BAD_LINK (the same with a wrong code) from the runner.
+# Rows: APP-15, PAIR-12.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- openLink: ${LINK}
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "Agents, tasks, messages"
+    timeout: 20000
+- openLink: ouronext://servers
+- extendedWaitUntil:
+    visible: "Add a server"
+    timeout: 10000
+- assertVisible: "127\\.0\\.0\\.1:\\d+, active, http://127\\.0\\.0\\.1:\\d+.*"
+- assertNotVisible:
+    text: "127\\.0\\.0\\.1:\\d+, .*http://127\\.0\\.0\\.1:\\d+.*"
+    index: 1
+- takeScreenshot: parity-servers-after-repair
+- tapOn: "Done"
+- extendedWaitUntil:
+    visible: "Agents, tasks, messages"
+    timeout: 10000
+# The toast lasts under two seconds, so wait for it straight after the link, with no other check in between.
+- openLink: ${BAD_LINK}
+- extendedWaitUntil:
+    visible: "Pairing failed: .*"
+    timeout: 15000
+- takeScreenshot: parity-pairing-failed-toast

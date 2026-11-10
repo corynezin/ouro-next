@@ -1,0 +1,7 @@
+{
+  "name": "@ouro/guardian",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The stable supervisor. Node standard library only: it must keep working whatever a self-edit does to everything else."
+}

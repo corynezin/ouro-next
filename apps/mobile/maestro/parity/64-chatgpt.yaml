@@ -1,0 +1,54 @@
+# Settings → Integrations → ChatGPT against the stand-in accounts. The runner enters the code the stand-in shows 12 s after
+# it appears (the real step happens on OpenAI's page). Rows: INT-04, INT-05 (code screen and the self-update to connected;
+# "Copy code and open OpenAI" is not tapped, it leaves the app), INT-06, INT-07 (the 5-hour window), INT-08.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: "Manage servers"
+    timeout: 10000
+- tapOn: "ChatGPT"
+# INT-04
+- extendedWaitUntil:
+    visible: "Sign in with ChatGPT"
+    timeout: 10000
+- assertVisible: "Run agents on GPT models with your ChatGPT plan\\. Codex on your computer keeps the sign-in; Ouro never sees your password\\."
+- takeScreenshot: parity-chatgpt-signed-out
+- tapOn: "Sign in with ChatGPT"
+# INT-05
+- extendedWaitUntil:
+    visible: "Enter this code"
+    timeout: 10000
+- assertVisible: "Code.*"
+- assertVisible: "Copy code and open OpenAI"
+- assertVisible: "Get a new code"
+- assertVisible: "Sign in on OpenAI's page and enter the code\\. This screen updates by itself once you're done\\. The code lasts 15 minutes\\."
+- takeScreenshot: parity-chatgpt-code
+# INT-06, INT-07
+- extendedWaitUntil:
+    visible: "Connected"
+    timeout: 40000
+- takeScreenshot: parity-chatgpt-connected-toast
+- assertVisible: "Account.*person@stand-in\\.invalid"
+- assertVisible: "Plan.*plus"
+- assertVisible: "Agents on GPT models run on Codex and count against your ChatGPT plan\\."
+- assertVisible: "Codex usage"
+- assertVisible: "5-hour window.*12% used.*"
+- assertVisible: "Refresh usage"
+- takeScreenshot: parity-chatgpt-connected
+# INT-08
+- tapOn: "Sign out of ChatGPT"
+- assertVisible: "Sign out of ChatGPT\\?"
+- assertVisible: "Agents on GPT models will stop until you sign in again\\."
+- takeScreenshot: parity-chatgpt-signout-confirm
+- tapOn:
+    point: "68%,58%"
+- extendedWaitUntil:
+    visible: "Sign in with ChatGPT"
+    timeout: 10000
+- takeScreenshot: parity-chatgpt-signed-out-again
+- tapOn: "Done"
+- tapOn:
+    point: "88%,11%"
+- assertVisible: "Agents, tasks, messages"

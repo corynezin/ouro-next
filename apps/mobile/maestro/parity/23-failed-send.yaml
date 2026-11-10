@@ -1,0 +1,65 @@
+# The server is down for this flow (the runner stops it before and starts it after). The list stays with an Offline
+# note; a send fails; the failed bubble's sheet, long-press menu and Edit; a chat never opened shows its load failure.
+# Setup (runner): "unopened" exists and was never opened. Not yet run on the simulator: selectors may need adjusting.
+# Rows: AG-57 (Offline after 5 s, data stays), CHAT-16, CHAT-20 (see the screenshot: the sheet's title should be the
+# error), CHAT-21, CHAT-23.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- extendedWaitUntil:
+    visible: "Offline: .*"
+    timeout: 20000
+- assertVisible: "talker, .*"
+- takeScreenshot: parity-list-offline
+# CHAT-16: a chat whose history was never loaded says why in the status bar.
+- scrollUntilVisible:
+    element: "unopened, .*"
+    centerElement: true
+- tapOn: "unopened, .*"
+- extendedWaitUntil:
+    visible: "Couldn't reach your Ouro machine\\. Try again in a few seconds\\."
+    timeout: 40000
+- takeScreenshot: parity-chat-history-failed
+- runFlow: _to-list.yaml
+- scrollUntilVisible:
+    element: "talker, .*"
+    centerElement: true
+- tapOn: "talker, .*"
+- tapOn: "Message talker"
+- inputText: "will fail"
+- tapOn: "Send"
+- extendedWaitUntil:
+    visible: ".*not sent.*"
+    timeout: 90000
+# A draft typed after the failure, for Edit to append to.
+- tapOn: "Message talker"
+- inputText: "draft words"
+- hideKeyboard
+# CHAT-20: tapping the failed bubble. Dismissing the keyboard can itself tap the bubble and open the sheet.
+- runFlow:
+    when:
+      notVisible: "Retry"
+    commands:
+      - tapOn: "will fail"
+- assertVisible: "Retry"
+- assertVisible: "Edit"
+- assertVisible: "Delete"
+- assertVisible: "Cancel"
+- takeScreenshot: parity-failed-sheet
+- tapOn: "Cancel"
+# CHAT-21: long-press has those, then Copy and Select text.
+- longPressOn: "will fail"
+- assertVisible: "Retry"
+- assertVisible: "Edit"
+- assertVisible: "Delete"
+# CHAT-21 (not ticked): the long-press sheet shows only Retry/Edit/Delete; Copy and Select text are missing.
+- tapOn: "Cancel"
+# CHAT-23: Edit puts the text back under the draft, on a new line, and the failed bubble goes.
+- tapOn: "will fail"
+- tapOn: "Edit"
+- extendedWaitUntil:
+    visible: "draft words\\s+will fail"
+    timeout: 5000
+- assertNotVisible: ".*not sent.*"
+- takeScreenshot: parity-failed-edit
+- eraseText: 30

@@ -1,0 +1,61 @@
+# Settings → Integrations → Claude Code → Connect Claude, API-key path, against the stand-in accounts (accepted key
+# sk-ant-accepted). Rows: INT-01 (Signed in as <email> (the stand-in's default: a plan) / Signed in with an API key; Not signed in is not exercised),
+# INT-02 (button label "Sign in again or use an API key", refusal, success toast "Claude Code is signed in", closes). "Open Anthropic login" is not tapped:
+# it leaves the app for Safari.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: "Manage servers"
+    timeout: 10000
+- tapOn: "Claude Code"
+# INT-01
+- extendedWaitUntil:
+    visible: "Status.*Signed in as person@stand-in\\.invalid"
+    timeout: 10000
+- assertVisible: "Claude Code runs on your computer using your Claude plan or Anthropic API key\\."
+- assertVisible: "Done"
+- takeScreenshot: parity-claude-signed-in-plan
+# INT-02
+- assertVisible: "Sign in again or use an API key"
+- tapOn: "Sign in again or use an API key"
+- assertVisible: "Sign in to Claude Code on your computer"
+- assertVisible: "Open Anthropic login"
+- assertVisible: "Use an Anthropic API key instead \\(recommended for heavy use\\)"
+- assertVisible: "No Claude account\\? Use OpenRouter instead"
+- takeScreenshot: parity-claude-connect
+- tapOn: "Use an Anthropic API key instead \\(recommended for heavy use\\)"
+- assertVisible: "Anthropic API key"
+- assertVisible: "Use this key"
+- assertVisible: "Sign in with your Claude plan instead"
+- tapOn: "sk-ant-…"
+- inputText: "sk-ant-nope"
+- tapOn: "Anthropic API key"
+- tapOn: "Use this key"
+- extendedWaitUntil:
+    visible: "That API key was not accepted\\."
+    timeout: 10000
+- takeScreenshot: parity-claude-refused
+- tapOn:
+    point: "50%,57%"
+- eraseText: 20
+- inputText: "sk-ant-accepted"
+- tapOn: "Anthropic API key"
+- tapOn: "Use this key"
+# Success closes Connect Claude and the Claude Code screen, back to the Settings list. The toast is shown for a moment:
+# the screenshot is taken at once and read by eye; no assertion can wait for it.
+- takeScreenshot: parity-claude-after-key
+- extendedWaitUntil:
+    visible: "Manage servers"
+    timeout: 10000
+- tapOn: "Claude Code"
+- extendedWaitUntil:
+    visible: "Status.*Signed in with an API key"
+    timeout: 10000
+- assertVisible: "Sign in again or use an API key"
+- takeScreenshot: parity-claude-signed-in
+- tapOn: "Done"
+- tapOn:
+    point: "88%,11%"
+- assertVisible: "Agents, tasks, messages"

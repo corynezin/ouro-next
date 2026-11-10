@@ -1,0 +1,29 @@
+# Unpair from Settings, back to the Pair form, then pair by pasting: the runner put a link with the reference's
+# claudeinbox:// scheme on the clipboard, and the parser accepts any scheme. The same server comes back (its master card).
+# Rows: PAIR-03, PAIR-11 (any scheme, while open; at launch is m1/01's openLink on a fresh launch).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Settings"
+- scrollUntilVisible:
+    element: "Unpair"
+- tapOn: "Unpair"
+- assertVisible: "Remove this server\\?"
+- tapOn: "Remove"
+- extendedWaitUntil:
+    visible: "I have my own server: pair with a code"
+    timeout: 15000
+- tapOn: "I have my own server: pair with a code"
+- extendedWaitUntil:
+    visible: "Paste from clipboard and pair"
+    timeout: 15000
+- tapOn: "Paste from clipboard and pair"
+- runFlow:
+    when:
+      visible: "Allow Paste"
+    commands:
+      - tapOn: "Allow Paste"
+- extendedWaitUntil:
+    visible: "Agents, tasks, messages"
+    timeout: 20000
+- assertVisible: "Master agent"

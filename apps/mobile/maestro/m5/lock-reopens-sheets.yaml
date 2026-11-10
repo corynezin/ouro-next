@@ -1,0 +1,9 @@
+# After unlocking, the sheet open at lock time is open again and works. Run after lock-covers-sheets.yaml, which leaves
+# the cover over Settings: the runner sends the app to the background and back, and answers the prompt with a matching
+# face. The cover window hides the sheet without removing it from what Maestro reads, so the check is a tap through.
+appId: dev.claudeinbox.ouronext
+---
+- assertNotVisible: "Ouro is locked"
+- takeScreenshot: m5-settings-reopened-after-unlock
+- tapOn: "Manage servers"
+- assertVisible: "Add a server"

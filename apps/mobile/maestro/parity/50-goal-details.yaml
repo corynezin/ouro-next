@@ -1,0 +1,71 @@
+# Goal screen for goals that have a check and an interval. Rows: GOAL-03 (the ◎ marker and the ∞ marker), GOAL-07
+# (interval menu and a custom value), GOAL-10 (Mark done with a check). Setup: the runner makes goalie (checked goal, 1h)
+# and oddity (open-ended goal, every 90 s).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+# The row re-renders while the goal cycles; a tap that lands mid-update is lost, so tap again until the chat is open.
+- extendedWaitUntil:
+    visible: "goalie, stand-in.*"
+    timeout: 10000
+- repeat:
+    while:
+      notVisible: "More"
+    times: 4
+    commands:
+      - tapOn: "goalie, stand-in.*"
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: "More"
+    timeout: 10000
+- tapOn: "More"
+- tapOn: "Goal"
+- extendedWaitUntil:
+    visible: "goalie: goal"
+    timeout: 10000
+- assertVisible: "◎ active · cycle \\d+"
+- assertVisible: "Ship the thing"
+- assertVisible: "Kind, finishes when met"
+- assertVisible: "Check, true"
+- assertVisible: "Interval, 1h"
+- takeScreenshot: parity-goal-check
+# GOAL-07: the menu lists default, 1m, 5m, 10m, 30m, 1h, 2h, 6h, 1d.
+- tapOn: "1h"
+- assertVisible: "Default"
+- assertVisible: "1m"
+- assertVisible: "5m"
+- assertVisible: "10m"
+- assertVisible: "30m"
+- assertVisible: "2h"
+- assertVisible: "6h"
+- assertVisible: "1d"
+- takeScreenshot: parity-goal-interval-menu
+- tapOn:
+    point: "245,355"   # the menu's 1h, already selected: closes the menu without changing the interval
+# GOAL-10: with a check, the Done section says it runs first.
+- tapOn: "Mark done…"
+- assertVisible: "Mark the goal done\\?"
+- assertVisible: "summary \\(optional\\)"
+- assertVisible: "Its check runs first: true"
+- assertVisible: "Done"
+- assertVisible: "Cancel"
+- takeScreenshot: parity-goal-done-check
+- tapOn: "Cancel"
+- tapOn:
+    point: "38,84"
+- runFlow: _to-list.yaml
+- tapOn: "oddity, stand-in.*"
+- tapOn: "More"
+- tapOn: "Goal"
+- extendedWaitUntil:
+    visible: "oddity: goal"
+    timeout: 10000
+- assertVisible: "∞ active · cycle \\d+"
+- assertVisible: "Interval, 90s"
+- tapOn: "90s"
+- assertVisible: "Default"
+- assertVisible: "30m"
+- takeScreenshot: parity-goal-interval-custom
+- tapOn:
+    point: "50%,95%"   # outside the menu: closes it without choosing
+- assertVisible: "Interval, 90s"

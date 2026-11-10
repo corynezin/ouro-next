@@ -1,0 +1,15 @@
+# After a matching face the cover is gone and the list works again. The list sits in the window under the cover's own,
+# where Maestro reads it even while covered, so the check is a tap through to the chat and back.
+appId: dev.claudeinbox.ouronext
+---
+- extendedWaitUntil:
+    notVisible: "Ouro is locked"
+    timeout: 10000
+- tapOn: "greeter.*"
+- extendedWaitUntil:
+    visible: "Message greeter"
+    timeout: 10000
+- tapOn: "Back"
+- extendedWaitUntil:
+    notVisible: "Message greeter"
+    timeout: 10000

@@ -1,0 +1,34 @@
+# The agent's Log, Summaries and Details screens for "speaker" (made by flow 70's setup in the same run).
+# Rows: LOG-02, LOG-06, SUM-01, SUM-03, DET-06, DET-07, DET-10, DET-11.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "speaker.*"
+- tapOn: "More"
+- tapOn: "Summaries"
+- extendedWaitUntil:
+    visible: "speaker: summaries"
+    timeout: 15000
+- takeScreenshot: parity-summaries
+- tapOn:
+    point: "38,84"
+- tapOn: "More"
+- tapOn: "Details"
+- extendedWaitUntil:
+    visible: "State.*"
+    timeout: 15000
+- takeScreenshot: parity-details-top
+- scrollUntilVisible:
+    element: "Task"
+- assertVisible: "Task"
+- assertVisible: "Chats"
+- assertVisible: "speaker"
+- takeScreenshot: parity-details-task
+- tapOn:
+    point: "38,84"
+- tapOn: "More"
+- tapOn: "Log"
+- extendedWaitUntil:
+    visible: "speaker · log"
+    timeout: 15000
+- takeScreenshot: parity-log-speaker

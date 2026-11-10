@@ -1,0 +1,15 @@
+# The runner archived greeter through the CLI; Archived lists it and a tap brings it back.
+appId: dev.claudeinbox.ouronext
+---
+- openLink: ouronext://archived
+- waitForAnimationToEnd
+- takeScreenshot: m5-06-archived
+# The row's accessible text joins name, goal and date.
+- tapOn: "greeter.*"
+- tapOn: "Unarchive"
+- assertVisible: "greeter is back (stopped; a message wakes it)"
+- assertVisible: "Nothing archived"
+- takeScreenshot: m5-07-after-unarchive
+- openLink: ouronext://agents
+- waitForAnimationToEnd
+- assertVisible: "greeter.*"

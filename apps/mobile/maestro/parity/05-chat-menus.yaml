@@ -1,0 +1,55 @@
+# greeter's chat: the bubble menu, Select text and Copy, Stop from More, and Details with Archive.
+# Rows: CHAT-05, CHAT-33, CHAT-34, DET-01, DET-14, AG-03 (no unread).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: ".*greeter, stand-in, greeter.*"
+- longPressOn: "stand-in received: Say hello"
+- assertVisible: "Copy"
+- assertVisible: "Select text"
+- assertVisible: "Cancel"
+- tapOn: "Select text"
+- extendedWaitUntil:
+    visible: "Copy all"
+    timeout: 5000
+- assertVisible: "Done"
+- tapOn: "Copy all"
+- extendedWaitUntil:
+    notVisible: "Copy all"
+    timeout: 5000
+- longPressOn: "stand-in received: Say hello"
+- tapOn: "Copy"
+- extendedWaitUntil:
+    visible: "Copied"
+    timeout: 3000
+- tapOn: "More"
+- tapOn: "Stop"
+- assertVisible: "Stop greeter\\?"
+- assertVisible: "It keeps its session; a message restarts it\\."
+- tapOn: "Stop"
+- extendedWaitUntil:
+    visible: "stopped greeter"
+    timeout: 10000
+- tapOn: "More"
+- tapOn: "Details"
+- extendedWaitUntil:
+    visible: "State, stopped"
+    timeout: 10000
+- assertVisible: "Applies from its next start; it keeps its context\\."
+- assertVisible: "Created by, You"
+- takeScreenshot: parity-details
+- scrollUntilVisible:
+    element: "Archive"
+- tapOn: "Archive"
+- assertVisible: "Archive greeter\\?"
+- assertVisible: "It stops and leaves the list; nothing is deleted\\."
+- tapOn:
+    point: "68%,57%"   # the alert's Archive; the screen's own Archive button has the same text
+# Archiving pops every screen about greeter.
+- extendedWaitUntil:
+    visible: "Agents, tasks, messages"
+    timeout: 10000
+- assertNotVisible: ".*greeter, stand-in, greeter.*"
+- assertVisible:
+    text: "No other unread"
+    enabled: false

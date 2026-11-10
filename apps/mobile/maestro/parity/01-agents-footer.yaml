@@ -1,0 +1,7 @@
+# AG-61: the list's footer names the running version (an embedded bundle on a fresh install).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- extendedWaitUntil:
+    visible: ".*embedded bundle · runtime 0\\.1\\.0.*"
+    timeout: 10000

@@ -1,0 +1,18 @@
+# Run after `ouro publish` on the home server, with the app open on any screen. The banner appears within a check
+# interval (about 20 s), and a tap found by its text, made as soon as it shows, restarts into the new update.
+appId: dev.claudeinbox.ouronext
+---
+- extendedWaitUntil:
+    visible: "A new version is ready: tap to restart"
+    timeout: 90000
+- takeScreenshot: m2-banner
+- tapOn: "A new version is ready: tap to restart"
+- extendedWaitUntil:
+    notVisible: "A new version is ready: tap to restart"
+    timeout: 30000
+# The banner says "Restarting…" until the app goes, and why if it doesn't: neither may be left showing.
+- extendedWaitUntil:
+    notVisible: "Restarting…"
+    timeout: 30000
+- assertNotVisible: "Couldn't restart.*"
+- takeScreenshot: m2-after-restart

@@ -1,0 +1,19 @@
+# Back out to the agents list from any pushed screen. The back button's label is the previous screen's title, so it's
+# tapped by position.
+appId: dev.claudeinbox.ouronext
+---
+# A sheet (Settings, Computers) left open by an earlier flow closes with Done.
+- runFlow:
+    when:
+      visible: "Done"
+    commands:
+      - tapOn: "Done"
+- repeat:
+    times: 5
+    while:
+      notVisible: "Agents, tasks, messages"
+    commands:
+      - tapOn:
+          point: "38,84"
+      - waitForAnimationToEnd
+- assertVisible: "Agents, tasks, messages"

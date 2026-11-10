@@ -1,0 +1,64 @@
+# Computers with Tailscale on its stand-in. Setup (runner): the stand-in's folder exists, and a watcher writes its
+# `approved` file 12 s after the login starts, so the flow sees "Approve the login" first. Not yet run on the
+# simulator: selectors may need adjusting; tapping "Approve the login" opens Safari on a .invalid address.
+# Rows: COMP-02, COMP-03, COMP-04, COMP-06, COMP-01 (empty list).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Settings"
+- extendedWaitUntil: {visible: "Manage servers", timeout: 10000}
+- scrollUntilVisible: {element: "Computers"}
+- tapOn: "Computers"
+- extendedWaitUntil:
+    visible: "First, connect Tailscale"
+    timeout: 15000
+- assertVisible: "Install Tailscale on your computer and sign in first: https://tailscale\\.com/download\\..*"
+- takeScreenshot: parity-computers-tailscale-gate
+- tapOn: "Connect Tailscale"
+- extendedWaitUntil:
+    visible: "Setting up Tailscale…|Approve the login"
+    timeout: 15000
+- extendedWaitUntil:
+    visible: "Approve the login"
+    timeout: 20000
+- takeScreenshot: parity-computers-tailscale-approve
+- extendedWaitUntil:
+    visible: "Add a computer"
+    timeout: 30000
+- assertVisible: "Connected as 100\\.64\\.0\\.7\\."
+- assertVisible: "Remove Tailscale from this server"
+- assertVisible: "Use your own Mac or Linux machine for agents\\..*"
+- takeScreenshot: parity-computers-connected
+# COMP-03, COMP-04: an invite.
+# The section title has the same text; the button is the second match.
+- tapOn:
+    text: "Add a computer"
+    index: 1
+- extendedWaitUntil:
+    visible: "Paste this on the computer"
+    timeout: 15000
+- assertVisible: "Copy"
+- assertVisible: "Share"
+- assertVisible: "I've run it"
+- tapOn: "Copy"
+- extendedWaitUntil:
+    visible: "Copied"
+    timeout: 3000
+- takeScreenshot: parity-computers-invite
+- tapOn: "I've run it"
+# COMP-06: removing Tailscale asks first; cancelled here.
+- scrollUntilVisible:
+    element: "Remove Tailscale from this server"
+- tapOn: "Remove Tailscale from this server"
+- assertVisible: "Remove Tailscale\\?"
+- assertVisible: "This server leaves your Tailscale network\\."
+- tapOn: "Cancel"
+# Computers is its own sheet with Done; back out of it and of Settings.
+- repeat:
+    times: 3
+    while:
+      notVisible: "Agents, tasks, messages"
+    commands:
+      - tapOn: "Done"
+      - waitForAnimationToEnd
+- assertVisible: "Agents, tasks, messages"

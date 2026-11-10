@@ -1,0 +1,33 @@
+# Settings → People → ann (invited and paired by the runner, one phone). Rows: SET-06 (name and device count, "ann's chats"
+# opens Person, Remove; the footer "Each has their own chats; their messages show as them."), SET-07 (confirm text;
+# the red error is not provoked), PERS-01 (title, Person row with address, Chats with "None yet").
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: "Manage servers"
+    timeout: 10000
+- scrollUntilVisible:
+    element: "People"
+- assertVisible: "ann.*1 device"
+- assertVisible: "ann's chats"
+- assertVisible: "Remove"
+- assertVisible: "Each has their own chats; their messages show as them\\."
+- takeScreenshot: parity-people-section
+# SET-07
+- tapOn: "Remove"
+- assertVisible: "Remove ann\\?"
+- assertVisible: "ann's 1 device will stop connecting\\. Their chats stay\\."
+- takeScreenshot: parity-people-remove-confirm
+- tapOn:
+    point: "30%,58%"
+# SET-06 → PERS-01
+- tapOn: "ann's chats"
+- extendedWaitUntil:
+    visible: "Chats"
+    timeout: 10000
+- assertVisible: "ann"
+- assertVisible: "Person.*"
+- assertVisible: "None yet"
+- takeScreenshot: parity-people-person

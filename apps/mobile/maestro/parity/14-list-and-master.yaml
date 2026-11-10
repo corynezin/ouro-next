@@ -1,0 +1,74 @@
+# The Agents list header, search (iOS 26 shows its cancel as a button labelled "close"), ordering, states, and the master's card and chat. The runner makes alpha then
+# zulu (both active in the last minute), a stopped "sleeper", "helper" with an open ask, a group "#team" where helper
+# posts, and has master reply naming five agents (zulu, alpha, mybot, asker, formatter) and ask a question of its own.
+# Rows: AG-04, AG-06, AG-07, AG-16, AG-20, AG-39, AG-43, CHAT-68, CHAT-69.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- assertVisible: "Ouro"
+- assertVisible: "Chats, 1 unread"
+# Agents active in the last minute are alphabetical, ahead of the rest.
+- assertVisible:
+    text: "zulu, stand-in, zulu, .*"
+    below:
+      text: "alpha, stand-in, alpha, .*"
+# The master's own ask stays out of the Asks section.
+- assertNotVisible: ".*Master question.*"
+- scrollUntilVisible:
+    element: "sleeper, .*"
+- assertVisible: "sleeper, stand-in, sleeper, .*, stopped, .*"
+- assertVisible: "formatter, stand-in, formatter, .*, idle, .*"
+# The rest by latest activity: mybot (flow 08) acted after asker last did (flow 07), both minutes ago.
+- scrollUntilVisible:
+    element: "asker, .*"
+- assertVisible:
+    text: "asker, stand-in, asker, .*"
+    below:
+      text: "mybot, stand-in, mybot, .*"
+- scrollUntilVisible:
+    element: "Ouro"
+    direction: UP
+# Search: Cancel clears the text and brings the whole list back.
+- tapOn: "Agents, tasks, messages"
+- inputText: "zzzz"
+- assertNotVisible: "formatter, .*"
+- tapOn: "close"
+- extendedWaitUntil:
+    visible: "formatter, .*"
+    timeout: 5000
+- assertVisible: "Agents, tasks, messages"
+- takeScreenshot: parity-list-top
+- tapOn: "Master agent"
+- extendedWaitUntil:
+    visible: "Message master"
+    timeout: 10000
+# Mention chips: the first four named agents, in order; "mybots" is not mybot, and formatter is the fifth.
+- assertVisible: "Open zulu"
+- assertVisible:
+    text: "Open alpha"
+    rightOf: "Open zulu"
+- assertVisible:
+    text: "Open mybot"
+    rightOf: "Open alpha"
+- assertVisible:
+    text: "Open asker"
+    rightOf: "Open mybot"
+- assertNotVisible: "Open formatter"
+- assertVisible: "Master question\\?"
+# The strip of other agents' open asks.
+- assertVisible: "questionmark.circle, helper, Need a hand\\?"
+- takeScreenshot: parity-master-chat
+- tapOn: "Open alpha"
+- extendedWaitUntil:
+    visible: "Message alpha"
+    timeout: 10000
+- tapOn:
+    point: "38,84"
+- extendedWaitUntil:
+    visible: "Message master"
+    timeout: 10000
+- tapOn: "questionmark.circle, helper, Need a hand\\?"
+- extendedWaitUntil:
+    visible: "Message helper"
+    timeout: 10000
+- runFlow: _to-list.yaml

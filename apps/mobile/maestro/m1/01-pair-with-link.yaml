@@ -1,0 +1,24 @@
+# Pairs a fresh install by opening the link `ouro pair` printed. Needs LINK.
+appId: dev.claudeinbox.ouronext
+---
+- launchApp:
+    clearState: true
+# A fresh install opens on Welcome (invite code); the pair form is behind its link.
+- extendedWaitUntil:
+    visible: "I have my own server: pair with a code"
+    timeout: 15000
+- tapOn: "I have my own server: pair with a code"
+- extendedWaitUntil:
+    visible: "Pair"
+    timeout: 15000
+- takeScreenshot: 01-pair-form
+- openLink: ${LINK}
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "No agents yet."
+    timeout: 20000
+- takeScreenshot: 02-paired

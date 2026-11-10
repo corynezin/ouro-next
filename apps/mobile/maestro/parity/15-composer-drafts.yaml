@@ -1,0 +1,75 @@
+# The composer: the Attach sheet with no image on the clipboard, a sent message trimmed, and a draft kept per
+# conversation through an app kill. Uses mybot (flow 08) and formatter (flow 13).
+# Rows: CHAT-58 (no-image case), CHAT-64 (trim), CHAT-67 (kill).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- retry:
+    maxRetries: 3
+    commands:
+      - runFlow: _to-list.yaml
+      - scrollUntilVisible:
+          element: "formatter, .*"
+          centerElement: true
+      - waitForAnimationToEnd
+      - tapOn: "formatter, .*"
+      - extendedWaitUntil:
+          visible: "Message formatter"
+          timeout: 5000
+- tapOn: "Attach"
+- assertVisible: "Photo Library"
+- assertVisible: "Camera"
+- assertVisible: "Files"
+- assertNotVisible: "Paste image"
+- tapOn: "Cancel"
+- tapOn: "Message formatter"
+- inputText: "   trimmed words   "
+- tapOn: "Send"
+- extendedWaitUntil:
+    visible: "trimmed words"
+    timeout: 10000
+- runFlow: _to-list.yaml
+- retry:
+    maxRetries: 3
+    commands:
+      - runFlow: _to-list.yaml
+      - scrollUntilVisible:
+          element: "mybot, .*"
+          centerElement: true
+      - waitForAnimationToEnd
+      - tapOn: "mybot, .*"
+      - extendedWaitUntil:
+          visible: "Message mybot"
+          timeout: 5000
+- tapOn: "Message mybot"
+- inputText: "draft for mybot"
+- runFlow: _to-list.yaml
+# Drafts are per conversation: formatter's composer is empty.
+- retry:
+    maxRetries: 3
+    commands:
+      - runFlow: _to-list.yaml
+      - scrollUntilVisible:
+          element: "formatter, .*"
+          centerElement: true
+      - waitForAnimationToEnd
+      - tapOn: "formatter, .*"
+      - extendedWaitUntil:
+          visible: "Message formatter"
+          timeout: 5000
+- assertNotVisible: "draft for mybot"
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible: "Agents, tasks, messages|Message formatter"
+    timeout: 20000
+- runFlow: _to-list.yaml
+- scrollUntilVisible:
+    element: "mybot, .*"
+    centerElement: true
+- tapOn: "mybot, .*"
+- extendedWaitUntil:
+    visible: "draft for mybot"
+    timeout: 10000
+- takeScreenshot: parity-draft-after-kill
+- runFlow: _to-list.yaml

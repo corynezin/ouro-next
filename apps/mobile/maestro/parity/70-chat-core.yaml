@@ -1,0 +1,30 @@
+# The chat's core: bubbles, receipts, the composer. Agent "speaker" replied with a long paragraph (setup in the runner).
+# Rows: CHAT-01, CHAT-07, CHAT-08, CHAT-09, CHAT-11, CHAT-12, CHAT-17, CHAT-53, CHAT-63, CHAT-64.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- extendedWaitUntil:
+    visible: "speaker, .*"
+    timeout: 20000
+# Unread before opening (CHAT-17): the row says so, and opening clears it.
+- takeScreenshot: parity-speaker-unread
+- tapOn: "speaker, .*"
+- extendedWaitUntil:
+    visible: ".*long paragraph.*"
+    timeout: 15000
+- assertVisible: "speaker"
+- takeScreenshot: parity-chat-core
+# Send with spaces around the text: trimmed, and the field keeps focus (CHAT-63, CHAT-64).
+- tapOn: "Message speaker"
+- inputText: "  ping one  "
+- tapOn: "Send"
+- extendedWaitUntil:
+    visible: "ping one"
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "stand-in received: ping one"
+    timeout: 20000
+- takeScreenshot: parity-chat-receipts
+- inputText: "typed straight away"
+- assertVisible: "typed straight away"
+- eraseText: 30

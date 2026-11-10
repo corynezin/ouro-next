@@ -1,0 +1,20 @@
+# Plan usage in Settings and on the list's line; needs #112 (plan usage on the phone). Setup (runner): agent "usage"
+# reported a Claude plan reading through the stand-in: 5-hour 20% and weekly 7%, resetting in 3 hours and a day later.
+# Not yet run on the simulator: selectors may need adjusting on the first run.
+# Rows: SET-13, AG-09 (the Claude part, by eye).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- extendedWaitUntil:
+    visible: ".*Claude: 7%.*"
+    timeout: 20000
+- takeScreenshot: parity-list-usage-line
+- tapOn: "Settings"
+- scrollUntilVisible:
+    element: "Plan usage"
+- assertVisible: "5-hour.*"
+- assertVisible: "Weekly.*"
+- assertVisible: ".*20% \\(resets .*\\).*"
+- assertVisible: "The subscription's 5-hour and weekly limits as maestro last saw them \\(it learns them from agents' turns\\)\\."
+- takeScreenshot: parity-settings-plan-usage
+- tapOn: "Done"

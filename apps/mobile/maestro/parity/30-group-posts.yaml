@@ -1,0 +1,75 @@
+# Groups: two agents' coloured posts, unread cleared by opening, @ mentions, an empty group, joining one you aren't in,
+# and opening at a found post. Setup (runner): roomie and roomer posted in "Lounge" (you, roomie, roomer); "Quiet" (you,
+# roomie) has no posts; roomie made "Annex" with roomer, without you. Colours checked by eye. Not yet run on the
+# simulator: selectors may need adjusting on the first run.
+# Rows: ROOM-02, ROOM-04, ROOM-08, ROOM-09 (agents by bare name), ROOM-10, ROOM-14, ROOM-16.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Chats.*"
+# ROOM-14: Lounge is unread until opened.
+- extendedWaitUntil:
+    visible: "person\\.2\\.fill, Lounge, 3, .*, 2"
+    timeout: 20000
+- tapOn: "person\\.2\\.fill, Lounge.*"
+- extendedWaitUntil:
+    visible: "roomer says hi"
+    timeout: 10000
+- assertVisible: "roomie says hi"
+- takeScreenshot: parity-room-senders
+# ROOM-08, ROOM-09: @ lists the members but you; typing narrows it; a pick inserts "@name ".
+- tapOn: "Message Lounge"
+- inputText: "@"
+- assertVisible: "Mention roomie"
+- assertVisible: "Mention roomer"
+- takeScreenshot: parity-room-mentions
+- inputText: "roomi"
+- assertNotVisible: "Mention roomer"
+- tapOn: "Mention roomie"
+- inputText: "hello"
+- assertVisible: "@roomie hello"
+- tapOn: "Send"
+- extendedWaitUntil:
+    visible: "@roomie hello"
+    timeout: 10000
+- tapOn:
+    point: "38,84"
+- assertVisible: "person\\.2\\.fill, Lounge.*"
+- assertNotVisible: "person\\.2\\.fill, Lounge, 3, .*, 2"
+# ROOM-04: a group with no posts.
+- tapOn: "person\\.2\\.fill, Quiet.*"
+- extendedWaitUntil:
+    visible: "No messages yet\\."
+    timeout: 10000
+- takeScreenshot: parity-room-empty
+- tapOn:
+    point: "38,84"
+# ROOM-10: Annex is under Other chats; Join (with "Joining…" while it asks) gives the composer.
+- tapOn: "Other chats, \\d+"
+- tapOn: "person\\.2\\.fill, Annex.*"
+- assertVisible: "Only members can post here\\."
+- tapOn: "Join"
+- takeScreenshot: parity-room-joining
+- extendedWaitUntil:
+    visible: "Message Annex"
+    timeout: 10000
+- tapOn:
+    point: "38,84"
+# ROOM-16: a found post opens the group at it, marked (by eye).
+- tapOn: "Chats and messages"
+- inputText: "roomer says"
+- extendedWaitUntil:
+    visible: ".*roomer says hi.*"
+    timeout: 15000
+# The hit in the group (its title is the group's name), not the one in the agent chat.
+- tapOn: ".*Lounge.*says hi.*"
+- extendedWaitUntil:
+    visible: "Message Lounge"
+    timeout: 10000
+- takeScreenshot: parity-room-jump-marked
+# Back from a search hit lands in the Chats search, still open: close it, then go to the list.
+- tapOn:
+    point: "38,84"
+- tapOn:
+    point: "366,503"
+- runFlow: _to-list.yaml

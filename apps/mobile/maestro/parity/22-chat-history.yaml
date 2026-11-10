@@ -1,0 +1,39 @@
+# A long chat: opening at a found message, then earlier pages. Setup (runner): "chatty" replied hist01 … hist70, so
+# the first page (50) stops short of hist01..hist20. Not yet run on the simulator: selectors may need adjusting.
+# Rows: CHAT-70 (opens at a message from search and marks it, by eye on the screenshot), CHAT-15 (earlier pages load
+# on scrolling up; the footer), CHAT-07 (newest at the bottom).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Chats.*"
+- tapOn: "Chats and messages"
+- inputText: "hist03"
+- extendedWaitUntil:
+    visible: ".*hist03.*"
+    timeout: 15000
+- tapOn: ".*hist03.*"
+- extendedWaitUntil:
+    visible: "Message chatty"
+    timeout: 15000
+- assertVisible: "hist03"
+- takeScreenshot: parity-chat-jump-marked
+# Back from a search hit lands in the Chats search, still open: close it (the X beside the field), then go to the list.
+- tapOn:
+    point: "38,84"
+- tapOn:
+    point: "366,503"
+- runFlow: _to-list.yaml
+- scrollUntilVisible:
+    element: "chatty, .*"
+    centerElement: true
+- tapOn: "chatty, .*"
+- extendedWaitUntil:
+    visible: "hist70"
+    timeout: 15000
+- assertNotVisible: "hist01"
+- scrollUntilVisible:
+    element: "hist01"
+    direction: UP
+    timeout: 60000
+- takeScreenshot: parity-chat-earlier-loaded
+- assertNotVisible: "Earlier messages"

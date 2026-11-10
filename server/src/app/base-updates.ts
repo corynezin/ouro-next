@@ -1,0 +1,205 @@
+// Taking bases: which one is offered, and taking it. The base is merged beside the live source; a conflict goes to the
+// master agent, and nothing live changes. The merge goes live through the guardian, which builds, checks and switches to
+// it, rolling back if it turns out unhealthy; only then does the person's branch move to it. The ourod that starts a deploy
+// is replaced by it, so the update's state is stored and the next ourod follows the deployment to its end.
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { BaseStatus } from '@ouro/contract'
+import {
+  besideDirOf, changedBetween, commitBase, commitToDeploy, integratedBase, isMergedBeside, mergeBeside, mergeIntoPersonBranch,
+  receivedBase, removeBeside, unfinishedMergeIn,
+} from '../adapters/base-checkout.ts'
+import type { BaseSource, PublishedBase } from '../adapters/base-source.ts'
+import { deploymentOutcome } from '../adapters/guardian-client.ts'
+import type { GuardianClient } from '../adapters/guardian-client.ts'
+import { baseUpdateOf, conflictBrief, continueDecision, takeRefusal } from '../domain/base-update.ts'
+import type { BaseUpdateRecord } from '../domain/base-update.ts'
+import { CommandRefused } from './failure.ts'
+
+/** How often the base source is asked for a newer base. */
+const OFFER_CHECK_INTERVAL_MS = 30 * 60_000
+const DEPLOYMENT_POLL_MS = 1_000
+/** Where the app is in the source: a base that changes it is published to the phone once the server has it. */
+const APP_FOLDER = 'apps/mobile'
+
+export interface BaseUpdatesConfig {
+  /** The top of the person's copy of the source; null when this machine has none. */
+  sourceRoot: string | null
+  /** Null: nothing offers this machine bases. */
+  baseSource: BaseSource | null
+  /** Null: no guardian, so nothing can switch this machine to another release. */
+  guardian: GuardianClient | null
+  now: () => number
+  commit: (body: () => void) => void
+  readRecord: () => BaseUpdateRecord
+  /** Saves the record and marks the server entity changed; called inside a transaction. */
+  saveRecord: (record: BaseUpdateRecord) => void
+  /** The offer changed: marks the server entity changed; called inside a transaction. */
+  offerChanged: () => void
+  /** Tells the master agent; called inside a transaction. */
+  tellMasterAgent: (text: string) => void
+  log: (event: string, fields: Record<string, unknown>) => void
+}
+
+export class BaseUpdates {
+  private readonly config: BaseUpdatesConfig
+  /** Null: this machine takes no bases. Read from git at start and after each update. */
+  private integrated: number | null
+  private offered: PublishedBase | null = null
+  private lastOfferCheckAt = 0
+  private checkingOffer = false
+
+  constructor(config: BaseUpdatesConfig) {
+    this.config = config
+    this.integrated = config.sourceRoot === null ? null : integratedBase(config.sourceRoot)
+  }
+
+  status(): BaseStatus {
+    if (this.integrated === null) return { kind: 'not_taking' }
+    const offered = this.offered === null ? null : { n: this.offered.n, notes: this.offered.notes }
+    return { kind: 'taker', integrated: this.integrated, offered, update: baseUpdateOf(this.config.readRecord()) }
+  }
+
+  /** At start: an update this server's predecessor began is followed to its end. */
+  resume(): void {
+    const record = this.config.readRecord()
+    if (record.state === 'deploying') void this.follow(record.n, record.deploymentId, record.commit)
+    if (record.state === 'merging') {
+      // The merge itself is synchronous, so a restart in it means the server stopped while fetching the base.
+      this.config.commit(() => this.config.saveRecord({ state: 'failed', n: record.n, why: 'the server restarted while fetching it; take it again' }))
+    }
+  }
+
+  /** From the server's tick. */
+  tick(): void {
+    if (this.integrated === null || this.config.baseSource === null || this.checkingOffer) return
+    if (this.config.now() - this.lastOfferCheckAt < OFFER_CHECK_INTERVAL_MS) return
+    this.lastOfferCheckAt = this.config.now()
+    this.checkingOffer = true
+    void this.checkOffer().finally(() => { this.checkingOffer = false })
+  }
+
+  private async checkOffer(): Promise<void> {
+    let latest: PublishedBase | null
+    try {
+      latest = await this.config.baseSource!.latest()
+    } catch (error) {
+      this.config.log('base_offer_check_failed', { error: (error as Error).message })
+      return
+    }
+    const offered = latest !== null && this.integrated !== null && latest.n > this.integrated ? latest : null
+    if (offered?.n === this.offered?.n && offered?.notes === this.offered?.notes && offered?.treeHash === this.offered?.treeHash) return
+    this.offered = offered
+    this.config.commit(() => this.config.offerChanged())
+  }
+
+  /** The command's synchronous part: refuses, or records the update as begun. The work runs once the command commits. */
+  take(n: number): void {
+    if (this.integrated === null) throw new CommandRefused('base_not_offered', 'this machine takes no bases')
+    const refusal = takeRefusal(this.config.readRecord(), this.offered, n)
+    if (refusal !== null) throw new CommandRefused(refusal.code, refusal.message)
+    this.config.saveRecord({ state: 'merging', n })
+    const offered = this.offered!
+    setImmediate(() => void this.failingOnError(n, () => this.merge(offered)))
+  }
+
+  /** The command's synchronous part, after a conflict: refuses unless the merge beside is resolved and committed. */
+  carryOn(): void {
+    const decision = continueDecision(this.config.readRecord(), (n) => unfinishedMergeIn(besideDirOf(this.config.sourceRoot!, n)))
+    if (decision.kind === 'refused') throw new CommandRefused(decision.refusal.code, decision.refusal.message)
+    const { n } = decision
+    this.config.saveRecord({ state: 'merging', n })
+    setImmediate(() => void this.failingOnError(n, () => this.deploy(n)))
+  }
+
+  private async failingOnError(n: number, step: () => Promise<void>): Promise<void> {
+    try {
+      await step()
+    } catch (error) {
+      const why = (error as Error).message.slice(0, 300)
+      this.config.log('base_update_failed', { n, why })
+      this.config.commit(() => this.config.saveRecord({ state: 'failed', n, why }))
+    }
+  }
+
+  private async merge(base: PublishedBase): Promise<void> {
+    const { n, notes } = base
+    const root = this.config.sourceRoot!
+    if (receivedBase(root) < n) await this.receive(root, base)
+    // A failed attempt leaves its merge beside the live source, resolved and committed, so it is used as it is.
+    if (!isMergedBeside(root, n)) {
+      removeBeside(root, n)
+      const merged = mergeBeside(root, n)
+      if (merged.kind === 'conflicted') {
+        this.config.commit(() => {
+          this.config.saveRecord({ state: 'conflict', n, files: merged.files })
+          this.config.tellMasterAgent(conflictBrief(n, notes, merged.files, besideDirOf(root, n)))
+        })
+        return
+      }
+    }
+    await this.deploy(n)
+  }
+
+  private async receive(root: string, base: PublishedBase): Promise<void> {
+    const treeDir = mkdtempSync(join(tmpdir(), 'ouro-base-'))
+    try {
+      await this.config.baseSource!.fetch(base.n, treeDir)
+      commitBase(root, base.n, treeDir, base.treeHash)
+    } finally {
+      rmSync(treeDir, { recursive: true, force: true })
+    }
+  }
+
+  private async deploy(n: number): Promise<void> {
+    const guardian = this.config.guardian
+    if (guardian === null) throw new Error('this machine has no guardian to build and switch to it')
+    const commit = commitToDeploy(this.config.sourceRoot!, n)
+    const deployment = await guardian.deploy(commit)
+    this.config.commit(() => this.config.saveRecord({ state: 'deploying', n, deploymentId: deployment.id, commit }))
+    await this.follow(n, deployment.id, commit)
+  }
+
+  /** Until the deployment ends. If it switches releases, this server stops here and its successor's `resume` follows on. */
+  private async follow(n: number, deploymentId: string, commit: string): Promise<void> {
+    for (;;) {
+      let deployment
+      try {
+        deployment = await this.config.guardian!.deployment(deploymentId)
+      } catch (error) {
+        this.config.log('base_deployment_unreadable', { n, error: (error as Error).message })
+        await new Promise((done) => setTimeout(done, DEPLOYMENT_POLL_MS))
+        continue
+      }
+      if (deployment === null) {
+        return this.config.commit(() => this.config.saveRecord({ state: 'failed', n, why: 'the guardian restarted during the update and lost track of it; take it again if it is still offered' }))
+      }
+      const outcome = deploymentOutcome(deployment)
+      if (outcome.kind === 'live') return this.finish(n, commit)
+      if (outcome.kind === 'failed') {
+        const why = outcome.changedLive ? `${outcome.why}; it went live, turned out unhealthy, and the last good version is back` : outcome.why
+        return this.config.commit(() => this.config.saveRecord({ state: 'failed', n, why }))
+      }
+      await new Promise((done) => setTimeout(done, DEPLOYMENT_POLL_MS))
+    }
+  }
+
+  /** Live: the person's branch takes the merge, and the phone is next if the base changes the app. */
+  private finish(n: number, commit: string): void {
+    const root = this.config.sourceRoot!
+    const merge = mergeIntoPersonBranch(root, commit)
+    if (merge.kind === 'not_merged') {
+      return this.config.commit(() => this.config.saveRecord({ state: 'failed', n, why: `base ${n} is live, but your source's branch couldn't take it: ${merge.why}. Merge ${besideDirOf(root, n)} by hand` }))
+    }
+    removeBeside(root, n)
+    this.integrated = integratedBase(root)
+    if (this.offered !== null && this.offered.n <= (this.integrated ?? 0)) this.offered = null
+    const appChanged = changedBetween(root, merge.before, commit, APP_FOLDER)
+    this.config.commit(() => {
+      this.config.saveRecord({ state: 'idle' })
+      if (appChanged) this.config.tellMasterAgent(`Ouro base ${n} is live on this computer and changes the app. Publish it to the phone: ouro publish`)
+    })
+    this.config.log('base_update_live', { n, commit })
+  }
+}

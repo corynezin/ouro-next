@@ -1,0 +1,12 @@
+# Cold launch with the lock on, after the runner sent a failed match: the cover must hide everything.
+appId: dev.claudeinbox.ouronext
+---
+- tapOn: "Cancel"
+- assertVisible: "Ouro is locked"
+# The list stays in its window under the cover's own, where Maestro still reads it: what counts is that it takes no
+# touches. A tap on the row would open the chat.
+- tapOn: "greeter.*"
+- assertNotVisible: "Message greeter"
+- assertVisible: "Ouro is locked"
+- takeScreenshot: m5-05-locked
+- tapOn: "Unlock with Face ID"

@@ -1,0 +1,46 @@
+# Agent details in other states: an agent that doesn't exist, a finished one, and one that is busy, interrupted and
+# stopped. Rows: DET-02, DET-08, DET-12. Setup (runner): finisher ran `ouro done`; busybody is in a long `sleep`.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- openLink: ouronext://agent/ghost
+- extendedWaitUntil:
+    visible: "ghost is gone \\(archived\\?\\)"
+    timeout: 10000
+- takeScreenshot: parity-details-gone
+- tapOn:
+    point: "38,84"
+# DET-08: a finished agent shows its summary under Done, and has nothing to interrupt or stop.
+- runFlow: _to-list.yaml
+- openLink: ouronext://agent/finisher
+- extendedWaitUntil:
+    visible: "State, done"
+    timeout: 10000
+- scrollUntilVisible:
+    element: "All wrapped up"
+- assertVisible: "Done"
+- assertNotVisible: "Interrupt"
+- assertNotVisible: "Stop"
+- takeScreenshot: parity-details-done
+- tapOn:
+    point: "38,84"
+# A busy agent offers Interrupt and Stop; Interrupt goes away once it is idle, and Stop's note is orange text.
+- runFlow: _to-list.yaml
+- openLink: ouronext://agent/busybody
+- extendedWaitUntil:
+    visible: "State, running"
+    timeout: 10000
+- scrollUntilVisible:
+    element: "Archive"
+- assertVisible: "Interrupt"
+- assertVisible: "Stop"
+- tapOn: "Interrupt"
+- extendedWaitUntil:
+    notVisible: "Interrupt"
+    timeout: 30000
+- tapOn: "Stop"
+- extendedWaitUntil:
+    visible: "stopped busybody"
+    timeout: 10000
+- assertNotVisible: "Stop"
+- takeScreenshot: parity-details-stopped

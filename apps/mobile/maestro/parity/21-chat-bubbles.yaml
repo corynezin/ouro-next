@@ -1,0 +1,53 @@
+# Bubbles and receipts while the agent is busy. Setup (runner): "talker" replied with a link, then runs `sleep 60`, so
+# it is busy when the flow opens it. Colours, sizes and insets are checked by eye on the screenshots. Not yet run on the
+# simulator: selectors may need adjusting on the first run.
+# Rows: CHAT-07, CHAT-08, CHAT-09, CHAT-30 (by eye), CHAT-11 and CHAT-12 (queued, then read), CHAT-13 (one bubble, not
+# an echo), CHAT-14 (sending while busy), CHAT-48 (the timer moves), CHAT-63 (focus kept after sending), CHAT-65 (by eye:
+# keyboard up and down).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- scrollUntilVisible:
+    element: "talker, .*"
+    centerElement: true
+- tapOn: "talker, .*"
+- extendedWaitUntil:
+    visible: ".*See https://example\\.com/talk for more.*"
+    timeout: 15000
+# CHAT-48: the busy status bar's timer, a few seconds apart.
+- extendedWaitUntil:
+    visible: ".*\\d+:\\d\\d"
+    timeout: 15000
+- takeScreenshot: parity-chat-busy-timer-a
+- swipe:
+    start: "50%,40%"
+    end: "50%,45%"
+    duration: 3000
+- takeScreenshot: parity-chat-busy-timer-b
+# CHAT-12, CHAT-14: a message sent mid-turn waits in the agent's queue, in its own bubble.
+- tapOn: "Message talker"
+- inputText: "while busy"
+- tapOn: "Send"
+- extendedWaitUntil:
+    visible: ".*◌ queued.*"
+    timeout: 15000
+- takeScreenshot: parity-chat-queued
+# CHAT-63: the field keeps focus, so this types without tapping it again. A link of yours (CHAT-30) shows white.
+- inputText: "mine https://example.org/mine"
+- takeScreenshot: parity-chat-keyboard-up
+- tapOn: "Send"
+# CHAT-11, CHAT-12: once the turn ends the agent reads both.
+- extendedWaitUntil:
+    visible: "stand-in received: .*while busy.*"
+    timeout: 90000
+- extendedWaitUntil:
+    visible: ".*✓ read.*"
+    timeout: 30000
+# CHAT-13: the queued bubble became the server's message: one copy only.
+- assertVisible: "while busy"
+- assertNotVisible:
+    text: "while busy"
+    index: 1
+- assertNotVisible: ".*◌ queued.*"
+- hideKeyboard
+- takeScreenshot: parity-chat-bubbles

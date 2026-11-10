@@ -1,0 +1,76 @@
+# A busy agent. The runner made "worker" with a goal and holds it mid-turn at a stand-in barrier.
+# Rows: AG-52, AG-53, CHAT-04, CHAT-47.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- extendedWaitUntil:
+    visible: "worker, stand-in, worker, .*, thinking, .*"
+    timeout: 30000
+# Swipe on a running, busy agent with a goal: Interrupt, Pause goal, Stop.
+- swipe:
+    from: "worker, stand-in, worker.*"
+    direction: LEFT
+- assertVisible: "Interrupt"
+- assertVisible: "Pause goal"
+- assertVisible: "Stop"
+- takeScreenshot: parity-busy-swipe
+- tapOn: "Pause goal"
+- swipe:
+    from: "worker, stand-in, worker.*"
+    direction: LEFT
+- extendedWaitUntil:
+    visible: "Resume goal"
+    timeout: 10000
+- tapOn: "Resume goal"
+# The chat while busy: the status bar's spinner, status line and timer, and an enabled Interrupt.
+- tapOn: "worker, stand-in, worker.*"
+- extendedWaitUntil:
+    visible: "thinking  \\d+:\\d\\d"
+    timeout: 10000
+- assertVisible: "busy"
+- takeScreenshot: parity-busy-status
+- tapOn: "More"
+- assertVisible:
+    text: "Interrupt"
+    enabled: true
+- assertVisible: "Stop"
+- tapOn: "Interrupt"
+- extendedWaitUntil:
+    visible: "interrupted by you"
+    timeout: 10000
+# Once idle, Interrupt is there but disabled.
+- tapOn: "More"
+- assertVisible:
+    text: "Interrupt"
+    enabled: false
+- tapOn: "Stop"
+- assertVisible: "Stop worker\\?"
+- tapOn: "Stop"
+- extendedWaitUntil:
+    visible: "stopped worker"
+    timeout: 10000
+# A stopped agent's swipe offers Archive, which confirms.
+# Rows re-sort as agents' last activity ages past a minute, so a swipe can end on another row: start over from the list.
+- retry:
+    maxRetries: 3
+    commands:
+      - runFlow: _to-list.yaml
+      # Stopping re-sorts the list; swipe only once worker's row shows it, or the tap lands on the row that moved there.
+      - extendedWaitUntil:
+          visible: "worker, stand-in, worker, .*interrupted by you.*"
+          timeout: 10000
+      - waitForAnimationToEnd
+      - swipe:
+          from: "worker, stand-in, worker.*"
+          direction: LEFT
+      - assertVisible: "Archive"
+      - tapOn: "Archive"
+      - assertVisible: "Archive worker\\?"
+      - assertVisible: "It stops and leaves the list; nothing is deleted \\(Archived brings it back\\)\\."
+- takeScreenshot: parity-archive-confirm
+- tapOn:
+    text: "Archive"
+    index: 1
+- extendedWaitUntil:
+    notVisible: "worker, stand-in, worker.*"
+    timeout: 10000

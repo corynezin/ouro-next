@@ -1,0 +1,18 @@
+# Settings, Servers and the Chats list. Deep links stand in for the gear and the bar items until those carry
+# accessibility labels Maestro can tap.
+appId: dev.claudeinbox.ouronext
+---
+- openLink: ouronext://settings
+- waitForAnimationToEnd
+- assertVisible: "Manage servers"
+- takeScreenshot: m5-01-settings
+- scrollUntilVisible:
+    element: "Require Face ID to open"
+- openLink: ouronext://servers
+- waitForAnimationToEnd
+- assertVisible: "Add a server"
+- takeScreenshot: m5-02-servers
+- openLink: ouronext://chats
+- waitForAnimationToEnd
+- assertVisible: "greeter.*"
+- takeScreenshot: m5-03-chats

@@ -1,0 +1,72 @@
+# Settings, section by section. Not yet run on the simulator: selectors may need adjusting on the first run.
+# Rows: SET-02 (Computers, owner), SET-16 (the one permission prompt, allowed), SET-17, SET-19, SET-21, SET-22,
+# SET-23, SET-25 (Unpair confirm and the revoke footer, cancelled).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Settings"
+- extendedWaitUntil: {visible: "Manage servers", timeout: 10000}
+- scrollUntilVisible: {element: "Computers"}
+- assertVisible: "Run agents on your own Mac or Linux machine too\\."
+# SET-16: the only permission prompt, from this button.
+- scrollUntilVisible:
+    element: "Allow notifications on this phone"
+- tapOn: "Allow notifications on this phone"
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - tapOn: "Allow"
+# A result line always shows now. The runner's server has no APNs key, so with a token from iOS it says that; a simulator
+# that gives no token says so after 20 s.
+# The note sits at the end of the Notifications section, below the fold.
+- scrollUntilVisible:
+    element: "This server has no APNs key yet, so it can.t send notifications\\.|iOS gave this phone no push token\\. Try again later\\."
+    timeout: 40000
+# SET-17: what to be notified about, and the two toggles.
+- tapOn: "Every message"
+- extendedWaitUntil: {visible: "What needs me", timeout: 5000}
+- assertVisible: "Nothing"
+- tapOn: "What needs me"
+- assertVisible: "Urgent asks break through Focus"
+- assertVisible: "One banner per agent burst"
+- takeScreenshot: parity-settings-notifications
+# Back to the default, so flow 83's push for a message still shows its banner.
+- tapOn: "What needs me"
+- extendedWaitUntil: {visible: "Every message", timeout: 5000}
+- tapOn: "Every message"
+# SET-19: the fold choices.
+- scrollUntilVisible:
+    element: "Fold idle agents.*"
+- tapOn:
+    text: "Default.*"
+    below: "Fold idle agents.*"
+- extendedWaitUntil: {visible: "After 15 min", timeout: 5000}
+- assertVisible: "Off"
+- assertVisible: "After 15 min"
+- assertVisible: "After 8 h"
+- tapOn: "Default.*"
+# SET-21, SET-22: the App section and a check.
+- scrollUntilVisible:
+    element: "Check for an update"
+- assertVisible: "Running.*"
+- assertVisible: "Version.*"
+- assertVisible: "Runtime.*"
+- assertVisible: "Channel.*"
+- assertVisible: "Screens and logic update over the air, without an app build\\..*"
+- tapOn: "Check for an update"
+- extendedWaitUntil:
+    visible: "Up to date\\.|Updates are off in development builds\\.|Downloaded: tap the banner \\(or restart the app\\) to use it\\.|No server is set to give updates\\."
+    timeout: 30000
+- takeScreenshot: parity-settings-app
+# SET-23, SET-25: the bottom, its revoke footer, and Unpair's confirm, cancelled.
+- scrollUntilVisible:
+    element: "Unpair"
+- assertVisible: "Archived agents"
+- assertVisible: "On the computer, `ouro devices revoke .*` also revokes the token\\."
+- tapOn: "Unpair"
+- assertVisible: "Remove this server\\?"
+- assertVisible: "Ouro forgets this server on this phone; your other servers stay\\. Pair again with a new code \\(ouro pair\\)\\."
+- takeScreenshot: parity-settings-unpair-confirm
+- tapOn: "Cancel"
+- tapOn: "Done"

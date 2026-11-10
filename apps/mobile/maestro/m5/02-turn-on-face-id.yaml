@@ -1,0 +1,16 @@
+# Turns the lock on. The app asks Face ID to confirm; the runner answers with a simulated match.
+appId: dev.claudeinbox.ouronext
+---
+- openLink: ouronext://settings
+- waitForAnimationToEnd
+- scrollUntilVisible:
+    element: "Require Face ID to open"
+    centerElement: true
+# The SwiftUI Toggle flips only on the switch itself, not its label. Settings has other switches (Muted agents, Model
+# avatars), so the selector pins this one between its section headers.
+- tapOn:
+    text: "0"
+    rightOf: "Require Face ID to open"
+    below: "Privacy"
+    above: "Agents list"
+- takeScreenshot: m5-04-face-id-prompt

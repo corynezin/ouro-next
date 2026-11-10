@@ -1,0 +1,30 @@
+# The More menu's Set a goal (GOAL-02, a goal not yet set) and Log (LOG-01) for greeter. Starts on the agents list.
+appId: dev.claudeinbox.ouronext
+---
+- tapOn: "greeter.*"
+- tapOn: "More"
+- tapOn: "Set a goal"
+- extendedWaitUntil:
+    visible: "greeter: goal"
+    timeout: 10000
+- assertVisible: "the goal"
+- assertVisible: "Open-ended \\(never completes\\)"
+- assertVisible: "It works on the goal whenever it is idle; your messages come first\\."
+- assertVisible:
+    text: "Set goal"
+    enabled: false
+- tapOn: "the goal"
+- inputText: "Keep it tidy"
+- assertVisible:
+    text: "Set goal"
+    enabled: true
+- takeScreenshot: parity-goal-unset
+- tapOn: "greeter"
+- tapOn: "More"
+- tapOn: "Log"
+- extendedWaitUntil:
+    visible: "greeter · log"
+    timeout: 10000
+- assertVisible: "Refresh"
+- assertVisible: ".*→ from human: Say hello"
+- takeScreenshot: parity-log

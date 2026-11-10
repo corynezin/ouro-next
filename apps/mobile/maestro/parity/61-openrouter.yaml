@@ -1,0 +1,71 @@
+# Settings → Integrations → OpenRouter, against the stand-in accounts (the runner points OURO_INTEGRATIONS_STAND_IN_DIR at a
+# folder whose `accepted` file lists the keys it takes). Rows: SET-01, INT-09, INT-10, INT-11 (typed path; Paste from
+# clipboard is not exercised), INT-12.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: "Manage servers"
+    timeout: 10000
+# SET-01
+- assertVisible: "Integrations"
+- assertVisible: "Claude Code"
+- assertVisible: "ChatGPT"
+- assertVisible: "OpenRouter"
+- assertVisible: "GitHub"
+- takeScreenshot: parity-settings-integrations
+- tapOn: "OpenRouter"
+# INT-09
+- extendedWaitUntil:
+    visible: "Sign up for OpenRouter"
+    timeout: 10000
+- assertVisible: "Open OpenRouter to make a key"
+- assertVisible: "OpenRouter is a pay-as-you-go provider of many models.*It is stored only on your server\\."
+- assertVisible: "Add your key"
+- assertVisible: "Create a key on openrouter\\.ai/keys, then paste it here\\. It never leaves your server\\."
+- assertVisible: "OpenRouter API key"
+- assertVisible: "Paste from clipboard"
+- assertVisible: "Connect"
+- assertVisible: "Done"
+- takeScreenshot: parity-openrouter-not-configured
+# INT-11: a refused key shows the error and stays on the form.
+- tapOn: "sk-or-…"
+- inputText: "sk-or-nope"
+- pressKey: Enter
+- assertVisible: "That API key was not accepted\\."
+- takeScreenshot: parity-openrouter-refused
+# The keyboard covers the Connect button; Enter submits the field.
+- tapOn:
+    point: "30%,70%"
+- eraseText: 30
+- inputText: "sk-or-accepted"
+- pressKey: Enter
+# INT-10
+- extendedWaitUntil:
+    visible: "Spent, \\$0\\.00, \\$10\\.00 left"
+    timeout: 10000
+- assertVisible: "Connected"
+- assertVisible: "Agents run the OpenRouter models through this key\\. Usage is billed to your OpenRouter account\\."
+- assertVisible: "Replace the key"
+- assertNotVisible: "Sign up for OpenRouter"
+- takeScreenshot: parity-openrouter-connected
+# INT-12
+- scrollUntilVisible:
+    element: "Remove the OpenRouter key"
+- tapOn: "Remove the OpenRouter key"
+- assertVisible: "Remove the OpenRouter key\\?"
+- assertVisible: "Agents using the OpenRouter models \\(deepseek, qwen-coder, gemini-flash, haiku\\) will stop until you add a key again\\."
+- takeScreenshot: parity-openrouter-remove-confirm
+- tapOn:
+    text: "Remove"
+    point: "68%,57%"
+- extendedWaitUntil:
+    visible: "Sign up for OpenRouter"
+    timeout: 10000
+- assertVisible: "Add your key"
+# Leave Settings: Done closes this screen, then the sheet.
+- tapOn: "Done"
+- tapOn:
+    point: "88%,11%"
+- assertVisible: "Agents, tasks, messages"

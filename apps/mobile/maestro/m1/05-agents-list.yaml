@@ -1,0 +1,14 @@
+# Back to the agents list, which shows the agent and its last message.
+appId: dev.claudeinbox.ouronext
+---
+- tapOn:
+    point: "9%,7%"   # the header's back button
+- extendedWaitUntil:
+    visible: "greeter"
+    timeout: 10000
+- assertVisible: "stand-in received: Sent while offline"
+- swipe:
+    start: "50%,35%"
+    end: "50%,80%"
+    duration: 1500
+- takeScreenshot: 07-agents-list

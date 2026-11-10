@@ -1,0 +1,14 @@
+# Run after the server is back: Retry delivers the failed send, and the agent answers it once.
+appId: dev.claudeinbox.ouronext
+---
+- tapOn: ".*not sent.*"
+# The sheet offers every way out of a failed send.
+- assertVisible: "Edit"
+- assertVisible: "Delete"
+- assertVisible: "Cancel"
+- tapOn: "Retry"
+- extendedWaitUntil:
+    visible: "stand-in received: Sent while offline"
+    timeout: 30000
+- assertNotVisible: ".*not sent.*"
+- takeScreenshot: 06-retried

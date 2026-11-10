@@ -1,0 +1,68 @@
+{
+  "expo": {
+    "name": "Ouro Next",
+    "slug": "ouro-next",
+    "scheme": "ouronext",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "NEVER",
+      "fallbackToCacheTimeout": 0,
+      "url": "https://updates.ouronext.invalid/no-server-chosen",
+      "disableAntiBrickingMeasures": true
+    },
+    "ios": {
+      "bundleIdentifier": "dev.claudeinbox.ouronext",
+      "appleTeamId": "U2Q2D6ZQP2",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "NSLocalNetworkUsageDescription": "Connects to your agents' computer.",
+        "NSCameraUsageDescription": "Take a photo to send to an agent.",
+        "NSPhotoLibraryUsageDescription": "Pick photos to send to an agent.",
+        "NSPhotoLibraryAddUsageDescription": "Save images your agents send you.",
+        "NSFaceIDUsageDescription": "Unlock Ouro Next.",
+        "NSMicrophoneUsageDescription": "Record video to send to an agent.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "com.apple.developer.usernotifications.time-sensitive": true
+      }
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-sqlite",
+      "expo-video",
+      "expo-camera",
+      "expo-image-picker",
+      "expo-document-picker",
+      "expo-local-authentication",
+      [
+        "expo-notifications",
+        {
+          "mode": "production",
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
+      "expo-sharing",
+      "expo-web-browser",
+      "expo-image",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Pick photos to send to an agent.",
+          "savePhotosPermission": "Save images your agents send you.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ]
+    ]
+  }
+}

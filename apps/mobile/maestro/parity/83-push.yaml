@@ -1,0 +1,36 @@
+# Pushes, sent to the simulator with `simctl push` in the payload the server sends. Setup (runner): "pusher" replied;
+# the runner pushes a message from it every 4 s from the start, so one lands while the list is open. The runner first runs
+# _allow-notifications (a fresh install has no permission, so alone it would show no banner), then starts the push.
+# Rows: PUSH-03 (a tap opens the chat over Agents), PUSH-02 (a push for the chat on screen shows no banner: second half).
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+# The banner belongs to iOS, not the app, so Maestro can't select it: wait for the pusher row (made by the push's
+# message) and tap the banner by position. The screenshot shows it.
+- extendedWaitUntil:
+    visible: "pusher, .*"
+    timeout: 20000
+- takeScreenshot: parity-push-banner
+- tapOn:
+    point: "50%,10%"
+- extendedWaitUntil:
+    visible: "Message pusher"
+    timeout: 10000
+- tapOn:
+    point: "38,84"
+- assertVisible: "Agents, tasks, messages"
+# The runner then pushes "Again" repeatedly; with pusher's chat on screen there is no banner.
+- scrollUntilVisible:
+    element: "pusher, .*"
+    centerElement: true
+- tapOn: "pusher, .*"
+- extendedWaitUntil:
+    visible: "Message pusher"
+    timeout: 10000
+- swipe:
+    start: "50%,40%"
+    end: "50%,45%"
+    duration: 20000
+- assertNotVisible: "Again from pusher"
+- takeScreenshot: parity-push-suppressed
+- runFlow: _to-list.yaml

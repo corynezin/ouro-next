@@ -1,0 +1,62 @@
+# Settings → Integrations → GitHub against the stand-in accounts (accepted token ghp_accepted).
+# Rows: INT-13, INT-14 (typed path), INT-15 (the stand-in grants `repo` only, so the note names `workflow`), INT-16.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: "Manage servers"
+    timeout: 10000
+- tapOn: "GitHub"
+# INT-13
+- extendedWaitUntil:
+    visible: "Connect GitHub"
+    timeout: 10000
+- assertVisible: "Give Ouro access to GitHub so agents can push code, open pull requests, read repositories, and more\\. The server stores your token and never shares it with your phone\\."
+- takeScreenshot: parity-github-not-connected
+- tapOn: "Connect GitHub"
+# INT-14
+- assertVisible: "Open GitHub to create a token"
+- assertVisible: "Personal access token"
+- assertVisible: "Paste from clipboard"
+- assertVisible: "Connect"
+- assertVisible: "Create a classic personal access token on GitHub with repo, workflow, read:org, and gist scopes, then paste it here\\. Ouro stores it only on your server\\."
+- tapOn: "ghp_… or github_pat_…"
+- inputText: "ghp_nope"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "GitHub did not accept that token\\."
+    timeout: 10000
+- takeScreenshot: parity-github-refused
+# The field takes no focus after a refusal; a fresh form does.
+- tapOn: "Done"
+- tapOn: "GitHub"
+- tapOn: "Connect GitHub"
+- tapOn: "ghp_… or github_pat_…"
+- inputText: "ghp_accepted"
+- takeScreenshot: parity-github-typed
+- pressKey: Enter
+# INT-15
+- extendedWaitUntil:
+    visible: "Disconnect stand-in"
+    timeout: 15000
+- assertVisible: "Connected"
+- assertVisible: "Account"
+- assertVisible: "Scopes"
+- assertVisible: "Missing scopes: workflow\\. Create a new token with these scopes for full agent access\\."
+- assertVisible: "Replace this token"
+- takeScreenshot: parity-github-connected
+# INT-16
+- tapOn: "Disconnect stand-in"
+- assertVisible: "Disconnect stand-in\\?"
+- assertVisible: "Agents will no longer be able to push code, open PRs, or read repos on your behalf\\."
+- takeScreenshot: parity-github-disconnect-confirm
+- tapOn:
+    point: "68%,58%"
+- extendedWaitUntil:
+    visible: "Connect GitHub"
+    timeout: 10000
+- tapOn: "Done"
+- tapOn:
+    point: "88%,11%"
+- assertVisible: "Agents, tasks, messages"

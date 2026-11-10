@@ -1,0 +1,70 @@
+# asker's goal through set, pause with a reason, resume, mark done, reopen, edit to open-ended and clear.
+# Rows: GOAL-03 (◎ ∞ ‖ ✓), GOAL-04, GOAL-05, GOAL-08, GOAL-09, GOAL-11, GOAL-12.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "asker, stand-in.*"
+- tapOn: "More"
+- tapOn: "Set a goal"
+- tapOn: "the goal"
+- inputText: "Tidy"
+- tapOn: "Set goal"
+- extendedWaitUntil:
+    visible: "◎ active · cycle \\d+"
+    timeout: 10000
+- assertVisible: "between goal cycles · next .*"
+- assertVisible: "Kind, finishes when met"
+- assertVisible: "Pause…"
+- assertVisible: "Edit…"
+- assertVisible: "Mark done…"
+- assertVisible: "Clear goal"
+- takeScreenshot: parity-goal-active
+- tapOn: "Pause…"
+- assertVisible: "Pause asker's goal\\?"
+- assertVisible: "No more cycles until you resume; you can still talk to it\\."
+- tapOn: "why \\(optional\\)"
+- inputText: "later"
+- pressKey: Enter
+- tapOn: "Pause"
+- extendedWaitUntil:
+    visible: "‖ paused by you: later"
+    timeout: 10000
+- assertVisible: "Resume"
+- assertNotVisible: "Pause…"
+- tapOn: "Resume"
+- extendedWaitUntil:
+    visible: "◎ active.*"
+    timeout: 10000
+- tapOn: "Mark done…"
+- assertVisible: "Mark the goal done\\?"
+- assertVisible: "summary \\(optional\\)"
+- tapOn: "Done"
+- extendedWaitUntil:
+    visible: "✓ complete"
+    timeout: 10000
+- assertVisible: "Summary"
+- assertVisible: "Reopen"
+- assertNotVisible: "Mark done…"
+- tapOn: "Reopen"
+- extendedWaitUntil:
+    visible: "◎ active.*"
+    timeout: 10000
+- tapOn: "Edit…"
+- assertVisible: "Replaces the goal; its counters restart, notes are kept\\."
+- assertVisible: "Tidy"
+- tapOn:
+    point: "340,293"   # the Open-ended switch; a SwiftUI Toggle flips only on the switch
+- tapOn: "Replace goal"
+- extendedWaitUntil:
+    visible: "∞ active.*"
+    timeout: 10000
+- assertVisible: "Kind, open-ended \\(never completes\\)"
+- assertNotVisible: "Mark done…"
+- tapOn: "Clear goal"
+- assertVisible: "Clear asker's goal\\?"
+- assertVisible: "The agent stays; the goal's files are kept\\."
+- tapOn:
+    point: "68%,57%"   # the alert's Clear goal
+- extendedWaitUntil:
+    visible: "Set goal"
+    timeout: 10000

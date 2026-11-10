@@ -1,0 +1,22 @@
+# Archived list rows and the unarchive sheet. Rows: ARC-03. Setup (runner): retired and second were archived, then a new
+# agent took the name second. Also records the row layout in a screenshot (ARC-02).
+appId: dev.claudeinbox.ouronext
+---
+- openLink: ouronext://archived
+- waitForAnimationToEnd
+# The detail line is the latest summary, else the task; whether the stand-in's first turn has a summary yet when the
+# agent is archived is timing.
+- assertVisible: "second, .*, (Another|stand-in.*), name in use by another agent"
+- assertVisible: "retired, .*, (Old job done|stand-in.*)"
+- assertVisible: "Tap an agent to unarchive it\\."
+- takeScreenshot: parity-archived-rows
+# A name in use opens nothing; a free one opens a sheet titled with its name.
+- tapOn: "second, .*"
+- assertNotVisible: "Unarchive"
+- tapOn: "retired, .*"
+- assertVisible: "retired"
+- assertVisible: "Unarchive"
+- assertVisible: "Cancel"
+- tapOn: "Cancel"
+- assertNotVisible: "Unarchive"
+- assertVisible: "retired, .*"

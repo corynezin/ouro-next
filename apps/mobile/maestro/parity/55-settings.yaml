@@ -1,0 +1,69 @@
+# Settings: the Server section, Invite a friend through to the code and its share sheet, the App rows, a check for an
+# update, and Archived agents. Rows: SET-04, SET-08 (without the error path), SET-09, SET-23 (Unpair, no account).
+# Starts on the agents list. Screenshots here would show a pairing code: none are taken after the invite.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: "Manage servers"
+    timeout: 10000
+- assertVisible: "Address, http://127\\.0\\.0\\.1:\\d+"
+- assertVisible: "This device, .*"
+- assertVisible: "You, .*"
+- assertVisible: "Connected: .*, API v\\d+"
+- takeScreenshot: parity-settings-server
+# SET-08: the button is disabled while the name is blank.
+- scrollUntilVisible:
+    element: "Their name"
+- assertVisible:
+    text: "Invite a friend"
+    enabled: false
+- assertVisible: "A one-time code they paste in the Ouro app \\(or a link they tap\\)\\. The code lasts 10 minutes and gives them full access to this server\\."
+- tapOn: "Their name"
+- inputText: "Sam"
+- pressKey: Enter
+- assertVisible:
+    text: "Invite a friend"
+    enabled: true
+- tapOn:
+    text: "Invite a friend"
+    below: "Sam"
+# SET-09
+- extendedWaitUntil:
+    visible: "Code, .*"
+    timeout: 10000
+- assertVisible: "Expires, .*"
+- assertVisible: "Server, http://127\\.0\\.0\\.1:\\d+"
+- assertVisible: "Share link"
+- tapOn: "Share link"
+- waitForAnimationToEnd
+- assertVisible: "ouronext://pair\\?url=.*"
+- tapOn:
+    point: "50%,10%"   # outside the share sheet
+- waitForAnimationToEnd
+- tapOn:
+    text: "Done"
+    below: "Share link"
+- assertVisible: "Their name"
+# SET-21 rows and the check result.
+- scrollUntilVisible:
+    element: "Check for an update"
+- assertVisible: "Running, .*"
+- assertVisible: "Version, .*"
+- assertVisible: "Runtime, .*"
+- assertVisible: "Channel, production"
+- tapOn: "Check for an update"
+- extendedWaitUntil:
+    visible: "Up to date\\."
+    timeout: 20000
+- takeScreenshot: parity-settings-app
+# SET-23: Archived agents closes Settings and pushes Archived; Unpair is the last row.
+- scrollUntilVisible:
+    element: "Unpair"
+- assertVisible: "Unpair"
+- tapOn: "Archived agents"
+- extendedWaitUntil:
+    visible: "Archived"
+    timeout: 10000
+- assertNotVisible: "Unpair"

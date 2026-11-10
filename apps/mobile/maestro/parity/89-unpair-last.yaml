@@ -1,0 +1,20 @@
+# Removing the last server returns to onboarding (SERVERS-11; 58 removed another one and stayed). Runs last: it unpairs.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "Settings"
+- scrollUntilVisible:
+    element: "Unpair"
+- tapOn: "Unpair"
+- assertVisible: "Remove this server\\?"
+- assertVisible: "Ouro forgets this server on this phone; your other servers stay\\..*"
+- tapOn:
+    point: "68%,57%"   # the alert's Remove
+- extendedWaitUntil:
+    visible: "I have my own server: pair with a code"
+    timeout: 15000
+- tapOn: "I have my own server: pair with a code"
+- extendedWaitUntil:
+    visible: "Paste from clipboard and pair"
+    timeout: 15000
+- takeScreenshot: parity-unpaired

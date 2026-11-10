@@ -1,0 +1,39 @@
+# An agent reply in markdown (fixtures/markdown.md, sent by the runner as agent "formatter"): headings, both bold and
+# italic markers, inline code, a named link, -, * and • bullets with nesting, 1. and 2) numbering, a quote, a bare URL
+# (not linked inside code), a closed ts fence and an unclosed one. Markers are gone from the text; sizes, colours and
+# rules were checked by eye on the screenshot. Then the code Copy buttons and the bubble's long-press menu.
+# Rows: CHAT-27, CHAT-28, CHAT-29, CHAT-31, CHAT-32, CHAT-33.
+appId: dev.claudeinbox.ouronext
+---
+- runFlow: _to-list.yaml
+- tapOn: "formatter.*"
+- extendedWaitUntil:
+    visible: "Big heading, Small heading, .*"
+    timeout: 15000
+- assertVisible: "Big heading, Small heading, Some bold, also bold, italic and also italic text with inline code and a named link\\., •, dash point, •, nested point, •, star point, •, dot point, 1\\., step one, 2\\., step two, quoted words, See https://example\\.org/page, then stop\\. Not https://in\\.code/x here\\., ts, Copy code, const answer = 42, .*And an open fence:, code, Copy code, never closed.*"
+- takeScreenshot: parity-markdown
+# The two code blocks' Copy buttons sit inside the bubble's accessibility element, so they're tapped by point.
+- tapOn:
+    point: "301,685"
+- extendedWaitUntil:
+    visible: "Copied"
+    timeout: 3000
+- extendedWaitUntil:
+    notVisible: "Copied"
+    timeout: 5000
+- tapOn:
+    point: "301,599"
+- extendedWaitUntil:
+    visible: "Copied"
+    timeout: 3000
+- extendedWaitUntil:
+    notVisible: "Copied"
+    timeout: 5000
+- longPressOn: "Big heading, .*"
+- assertVisible: "Copy"
+- assertVisible: "Select text"
+- assertVisible: "Cancel"
+- tapOn: "Copy"
+- extendedWaitUntil:
+    visible: "Copied"
+    timeout: 3000
