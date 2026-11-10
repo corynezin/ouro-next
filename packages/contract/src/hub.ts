@@ -13,6 +13,8 @@ export const HubErrorCode = z.enum([
   'not_found',
   /** Only accounts the hub's operator lets publish may publish or withdraw a base. */
   'not_publisher',
+  /** The server can't be deleted: it is the account's primary one, or is still being made. */
+  'server_not_deletable',
   /** The hub makes no more computers than its operator allows, and that many exist already. */
   'hub_full',
   'internal',
@@ -29,6 +31,7 @@ export const httpStatusOfHubError: Record<HubErrorCode, number> = {
   invite_invalid: 403,
   not_found: 404,
   not_publisher: 403,
+  server_not_deletable: 409,
   hub_full: 503,
   internal: 500,
 }
