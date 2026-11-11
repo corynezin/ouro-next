@@ -3,7 +3,7 @@
 A ground-up rewrite of Ouro: new server and new iPhone app, with the same features, journeys and UI.
 It runs separately from the live system.
 
-This repository is Ouro Next's main line. Bases are its releases: tags `base-<n>`, cut by the release workflow. People develop in a private copy and send changes here as pull requests.
+This repository is Ouro Next's main line. Bases are its releases: tags `base-<n>`, cut by the release workflow. Each has a version, `major.minor.patch`, kept in package.json and server/package.json, stepped by the workflow (`tools/set-version.ts`) and tagged `v<version>` beside the base; the app shows it in Settings → Updates. People develop in a private copy and send changes here as pull requests.
 
 ## Running the server
 

@@ -6,6 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { versionOf } from './base-source.ts'
 import type { BaseRelease, BaseSource } from './base-source.ts'
 
 const execFileAsync = promisify(execFile)
@@ -48,15 +49,17 @@ async function advertisedBases(url: string): Promise<{ commits: Map<number, stri
   return { commits, withdrawn }
 }
 
-/** The message of tag `base-<n>`, read from a scratch copy that holds only that tag. */
-async function notesOf(url: string, n: number): Promise<string> {
+/** The message of tag `base-<n>` and the version in its server/package.json, read from a scratch copy that holds only that tag. */
+async function notesOf(url: string, n: number): Promise<{ notes: string; version: string | null }> {
   const scratch = mkdtempSync(join(tmpdir(), 'ouro-git-bases-'))
   const gitDir = join(scratch, 'repo.git')
   try {
     mkdirSync(gitDir)
     await git(['init', '--quiet', '--bare'], { gitDir })
     await git(['fetch', '--quiet', '--no-tags', '--depth=1', url, `+refs/tags/base-${n}:refs/tags/base-${n}`], { gitDir })
-    return (await git(['for-each-ref', '--format=%(contents)', `refs/tags/base-${n}`], { gitDir })).trim()
+    const notes = (await git(['for-each-ref', '--format=%(contents)', `refs/tags/base-${n}`], { gitDir })).trim()
+    const packageJson = await git(['show', `refs/tags/base-${n}:server/package.json`], { gitDir }).catch(() => '')
+    return { notes, version: versionOf(packageJson) }
   } finally {
     rmSync(scratch, { recursive: true, force: true })
   }
@@ -70,7 +73,7 @@ export function gitBaseSource(url: string): BaseSource {
       const offered = [...commits.keys()].filter((n) => !withdrawn.has(n))
       if (offered.length === 0) return null
       const n = Math.max(...offered)
-      return { n, notes: await notesOf(url, n), commit: commits.get(n)! } satisfies BaseRelease
+      return { n, ...await notesOf(url, n), commit: commits.get(n)! } satisfies BaseRelease
     },
     async fetchTagsInto(root) {
       // Not forced: a base tag that moved is refused, never quietly replaced.

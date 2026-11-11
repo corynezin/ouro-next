@@ -1,12 +1,18 @@
 name: release
-# Cuts the next base: an annotated tag `base-<n>` on main, whose message is the notes, and a GitHub release for it.
-# Servers read only the tags. Withdrawing base n is an annotated tag `base-<n>-withdrawn`.
+# Cuts the next base: Ouro's version is stepped (tools/set-version.ts) and committed to main, then that commit gets an
+# annotated tag `base-<n>`, whose message is the notes, a tag `v<version>`, and a GitHub release "Ouro <version>".
+# Servers read only the base tags, and the version from the base's server/package.json. Withdrawing base n is an annotated
+# tag `base-<n>-withdrawn`.
 on:
   workflow_dispatch:
     inputs:
       notes:
         description: What changed, as people will read it in the app
         required: true
+      bump:
+        description: How much the version steps (major, minor or patch), or the version itself, like 1.0.0
+        required: true
+        default: minor
 
 permissions:
   contents: write
@@ -30,15 +36,21 @@ jobs:
       - run: npm run lint:imports
       - run: npm run typecheck
       - run: npm run test:unit
-      - name: Tag and release the next base
+      - name: Version, tag and release the next base
         env:
           NOTES: ${{ inputs.notes }}
+          BUMP: ${{ inputs.bump }}
           GH_TOKEN: ${{ github.token }}
         run: |
           last=$(git tag --list 'base-*' | grep -E '^base-[0-9]+$' | sed 's/^base-//' | sort -n | tail -1)
           n=$(( ${last:-0} + 1 ))
+          version=$(node tools/set-version.ts "$BUMP")
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then echo "v$version is already released"; exit 1; fi
           git config user.name "Ouro Next"
           git config user.email "bases@ouro-next.invalid"
+          git commit -am "Ouro $version"
+          git push origin HEAD:main
           git tag -a "base-$n" -m "$NOTES"
-          git push origin "base-$n"
-          gh release create "base-$n" --title "Base $n" --notes "$NOTES" --verify-tag
+          git tag -a "v$version" -m "Ouro $version (base $n)"
+          git push origin "base-$n" "v$version"
+          gh release create "v$version" --title "Ouro $version" --notes "$NOTES" --verify-tag
