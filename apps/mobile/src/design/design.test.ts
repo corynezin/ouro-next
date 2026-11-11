@@ -98,6 +98,7 @@ test('model aliases and full ids share the same visuals', () => {
   for (const [alias, full] of [
     ['or-haiku', 'anthropic/claude-haiku-5.5'],
     ['sonnet', 'claude-sonnet-5-5[1m]'],
+    ['fable', 'claude-fable-5-2'],
     ['deepseek', 'deepseek/deepseek-v4-pro'],
     ['deepseek-flash', 'deepseek/deepseek-v4.1-flash'],
     ['gemini-flash', 'google/gemini-3.8-flash'],
@@ -113,6 +114,7 @@ test('unfamiliar models of a known company keep the company and no guessed tier'
 })
 
 test('avatars classify models by company and tier, and unknown ones stay neutral', () => {
+  assert.deepEqual(avatarModel('fable'), { company: 'anthropic', capability: 'flagship' })
   assert.deepEqual(avatarModel('opus'), { company: 'anthropic', capability: 'flagship' })
   assert.deepEqual(avatarModel('sonnet[1m]'), { company: 'anthropic', capability: 'balanced' })
   assert.deepEqual(avatarModel('or-haiku'), { company: 'anthropic', capability: 'fast' })

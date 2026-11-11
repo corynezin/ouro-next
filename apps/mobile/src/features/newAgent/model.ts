@@ -12,13 +12,13 @@ const GROUP_TITLES: { provider: ModelOption['provider']; title: string }[] = [
 
 /** How the reference names a model in the pickers. The server's label says more (a version, a route), for agents. */
 const MODEL_NAMES: Record<string, string> = {
-  opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku',
+  fable: 'Fable 5.2', opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', haiku: 'Haiku 5.5',
   deepseek: 'DeepSeek', 'deepseek-flash': 'DeepSeek Flash',
   'qwen-coder': 'Qwen Coder', 'gemini-flash': 'Gemini Flash', 'or-haiku': 'Haiku',
 }
 
 /** The reference's order within each group, most capable first; a model it doesn't list keeps the server's order, after. */
-const MODEL_ORDER = ['opus', 'sonnet', 'haiku', 'deepseek', 'qwen-coder', 'deepseek-flash', 'gemini-flash', 'or-haiku']
+const MODEL_ORDER = ['fable', 'opus', 'sonnet', 'haiku', 'deepseek', 'qwen-coder', 'deepseek-flash', 'gemini-flash', 'or-haiku']
 const orderOf = (id: string) => { const index = MODEL_ORDER.indexOf(id); return index === -1 ? MODEL_ORDER.length : index }
 
 /** The ChatGPT plan's models, which the plan decides, by their parts: `gpt-5-codex` is "GPT-5-Codex". */
@@ -40,7 +40,13 @@ export function modelGroups(models: readonly ModelOption[], current: string | nu
   return groups
 }
 
-export const canStartAgent = (task: string, busy: boolean) => !busy && !!task.trim()
+/** Files don't go to another computer yet: with some picked, an agent there can't start until they are removed. */
+export const canStartAgent = (task: string, busy: boolean, fileCount = 0, remote = false) => !busy && !!task.trim() && !(remote && fileCount > 0)
+
+export const FILES_COPY = {
+  add: 'Add files',
+  remoteRefused: "Files can't go to another computer yet: remove them to start it there.",
+} as const
 
 /** An agent name has no spaces: they are stripped as it is typed, as in the reference. */
 export const typedAgentName = (typed: string) => typed.replace(/\s/g, '')
@@ -77,8 +83,9 @@ export const PROMPT_CACHE_OPTIONS: readonly { lifetime: PromptCacheLifetime; lab
   { lifetime: '1h', label: '1 hour' },
 ]
 
-/** `promptCache` is null for a model without one. The lifetime is sent only when it isn't the server's default. */
-export function newAgentInput(task: string, name: string, model: string | null, promptCache: PromptCacheLifetime | null): CommandInput<'create_agent'> {
-  const input: CommandInput<'create_agent'> = { task, name: name.trim() || null, model, folder: null }
+/** `promptCache` is null for a model without one. The lifetime is sent only when it isn't the server's default.
+ * `attachmentIds`: the files already uploaded, which come in the task's message; sent only when there are some. */
+export function newAgentInput(task: string, name: string, model: string | null, promptCache: PromptCacheLifetime | null, attachmentIds: readonly string[] = []): CommandInput<'create_agent'> {
+  const input: CommandInput<'create_agent'> = { task, name: name.trim() || null, model, folder: null, ...(attachmentIds.length ? { attachmentIds: [...attachmentIds] } : {}) }
   return promptCache === '1h' ? { ...input, promptCacheLifetime: promptCache } : input
 }

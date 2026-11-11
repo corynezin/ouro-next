@@ -36,6 +36,11 @@ export function Markdown({ text, color = C.label, linkColor = C.link, fontSize =
   const blocks = parseBlocks(linkify(text))
   const only = blocks[0]
   if (blocks.length === 1 && only?.kind === 'paragraph') return <Text style={base} onLongPress={blockLong} onPress={onPress}>{renderInline(parseInline(only.text), o)}</Text>
+  // A lone list item in a shrink-wrapped bubble: the flex row would collapse the text to zero width (only "1." showing), so inline it.
+  if (blocks.length === 1 && (only?.kind === 'bullet' || only?.kind === 'numbered')) {
+    const mark = only.kind === 'bullet' ? '•' : `${only.number}.`
+    return <Text style={[base, { paddingLeft: only.indent * 14 }]} onLongPress={blockLong} onPress={onPress}>{`${mark} `}{renderInline(parseInline(only.text), o)}</Text>
+  }
   return (
     <View style={{ gap: 4 }}>
       {blocks.map((b, i) => {

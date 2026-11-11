@@ -1,6 +1,6 @@
 // Messaging between people and agents, through the real server and runners: a broadcast, the one reply reminder and
 // turning reminders off,
-// a file sent to an agent and back, and a message to an archived agent.
+// a file sent to an agent and back, a file given with a task, and a message to an archived agent.
 import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -150,6 +150,25 @@ test('a file sent to an agent can be read by it under its own name, and a file i
   assert.equal(reply.attachments[0]!.fileName, 'summary.txt')
   assert.equal(reply.attachments[0]!.mimeType, 'text/plain', 'its type from its name, as ouro reply --file sends none')
   assert.equal((await phone.download(reply.attachments[0]!.id)).toString(), 'tomatoes: water at dawn\nbeans: shade\n')
+})
+
+test('a file given with a task comes in the task itself, and the agent can read it', async () => {
+  // Room under the agent limit: reader is finished with.
+  const reader = await phone.agent('reader')
+  await phone.command('archive_agent', { agentId: reader.id })
+  await waitFor('reader to be archived', async () => (await phone.snapshot()).agents.some((agent) => agent.id === reader.id && agent.state.state === 'archived'))
+  const { attachment } = await phone.upload('recipe.txt', Buffer.from('bread: flour, water, salt\n'), 'text/plain')
+  assert.ok(attachment)
+  const readIt = 'f=$(printf "%s\\n" "$OURO_STANDIN_MODEL_CONTENT" | grep "/recipe.txt$"); ouro done "read: $(head -1 "$f")"'
+  await phone.command('create_agent', { task: `read the recipe\n${standInScript({ do: 'run', command: readIt })}`, name: 'baker', model: null, folder: null, attachmentIds: [attachment.id] })
+  const task = (await phone.conversation('baker'))[0]!
+  assert.deepEqual(task.attachments.map((a) => a.fileName), ['recipe.txt'])
+  const done = await waitFor('its result', async () => (await phone.conversation('baker')).find((message) => message.from !== 'human' && message.text.includes('read: ')) ?? null)
+  assert.match(done.text, /read: bread: flour, water, salt/)
+  await assert.rejects(phone.command('create_agent', { task: 'no file', name: 'nofile', model: null, folder: null, attachmentIds: ['missing'] }),
+    (error: unknown) => error instanceof CommandFailed && error.code === 'not_found', 'a missing file refuses it, and nothing is made')
+  assert.equal((await phone.snapshot()).agents.some((agent) => agent.name === 'nofile'), false)
+  await phone.command('archive_agent', { agentId: (await phone.agent('baker')).id })
 })
 
 test('a file up to 25 MB is taken, and a larger one is refused', async () => {

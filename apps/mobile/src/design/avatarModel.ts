@@ -11,8 +11,8 @@ export const COMPANY_RING_COLORS: Record<AvatarCompany, string> = {
 /** Unknown models retain a neutral background instead of implying a capability rank. */
 export function avatarModel(model?: string): { company?: AvatarCompany; capability?: AvatarCapability } {
   const m = model?.toLowerCase().replace(/\[.*\]$/, '') ?? ''
-  if (/^(?:anthropic\/)?(?:claude-)?(?:opus|sonnet|haiku)(?:-|$)/.test(m) || m === 'or-haiku') {
-    return { company: 'anthropic', capability: m.includes('opus') ? 'flagship' : m.includes('haiku') ? 'fast' : 'balanced' }
+  if (/^(?:anthropic\/)?(?:claude-)?(?:fable|opus|sonnet|haiku)(?:-|$)/.test(m) || m === 'or-haiku') {
+    return { company: 'anthropic', capability: m.includes('fable') || m.includes('opus') ? 'flagship' : m.includes('haiku') ? 'fast' : 'balanced' }
   }
   if (/^(?:openai\/)?(?:gpt-|codex-)/.test(m)) {
     // Current Codex model families: Luna is fast, Sol/Terra balanced, Astra flagship.

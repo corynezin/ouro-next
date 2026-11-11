@@ -32,6 +32,7 @@ export const STAND_IN_MODEL_ID = 'stand-in'
 
 /** OpenRouter models run on Claude Code pointed at OpenRouter. `or-haiku` is Haiku billed there; `haiku` is the plan's. */
 export const MODEL_CATALOG: readonly CatalogModel[] = [
+  { id: 'fable', label: 'Claude Fable', provider: 'anthropic', providerModelId: 'claude-fable-5-2' },
   { id: 'opus', label: 'Claude Opus', provider: 'anthropic', providerModelId: 'opus' },
   { id: 'sonnet', label: 'Claude Sonnet', provider: 'anthropic', providerModelId: 'sonnet' },
   { id: 'haiku', label: 'Claude Haiku', provider: 'anthropic', providerModelId: 'haiku' },

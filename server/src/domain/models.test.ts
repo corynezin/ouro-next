@@ -6,6 +6,7 @@ test('a model is run by its provider; an unknown name is a Claude model by that 
   assert.equal(catalogModel('deepseek').provider, 'openrouter')
   assert.equal(catalogModel('deepseek').providerModelId, 'deepseek/deepseek-v4-pro')
   assert.equal(catalogModel('haiku').provider, 'anthropic')
+  assert.deepEqual(catalogModel('fable'), { id: 'fable', label: 'Claude Fable', provider: 'anthropic', providerModelId: 'claude-fable-5-2' })
   assert.deepEqual(catalogModel('claude-opus-5-5'), { id: 'claude-opus-5-5', label: 'claude-opus-5-5', provider: 'anthropic', providerModelId: 'claude-opus-5-5' })
   assert.equal(catalogModel('stand-in').provider, 'stand_in')
 })

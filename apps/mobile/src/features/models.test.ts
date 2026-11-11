@@ -437,8 +437,8 @@ test('summary bar prefers a newer live line and marks a stale summary', () => {
 
 test('status bar has a timer while busy', () => {
   const store = storeWith({})
-  assert.deepEqual(statusBar(store, agentOf({ id: 'a', name: 'a', state: inTurn(NOW - 65_000) }), live, NOW), { kind: 'agent', dot: 'busy', busy: true, text: 'thinking  1:05' })
-  assert.deepEqual(statusBar(store, agentOf({ id: 'a', name: 'a' }), live, NOW), { kind: 'agent', dot: 'running', busy: false, text: 'idle' })
+  assert.deepEqual(statusBar(store, agentOf({ id: 'a', name: 'a', state: inTurn(NOW - 65_000) }), live, NOW), { kind: 'agent', dot: 'busy', busy: true, label: 'thinking', text: 'thinking  1:05' })
+  assert.deepEqual(statusBar(store, agentOf({ id: 'a', name: 'a' }), live, NOW), { kind: 'agent', dot: 'running', busy: false, label: 'idle', text: 'idle' })
 })
 
 test('status bar: a lost connection replaces the stale state once the grace is over, as on the agents list', () => {
@@ -514,7 +514,7 @@ test('models group by source; unavailable ones are left out unless current', () 
 
 test('models are named as the reference names them; one it does not name keeps the server label', () => {
   const named = (id: string, provider: ModelOption['provider'], label = `${id} label`) => modelName({ id, label, provider })
-  assert.deepEqual(['opus', 'sonnet', 'haiku'].map((id) => named(id, 'anthropic')), ['Opus', 'Sonnet', 'Haiku'])
+  assert.deepEqual(['fable', 'opus', 'sonnet', 'haiku'].map((id) => named(id, 'anthropic')), ['Fable 5.2', 'Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5'])
   assert.deepEqual(['deepseek', 'deepseek-flash', 'qwen-coder', 'gemini-flash', 'or-haiku'].map((id) => named(id, 'openrouter')),
     ['DeepSeek', 'DeepSeek Flash', 'Qwen Coder', 'Gemini Flash', 'Haiku'])
   assert.equal(named('gpt-5-codex', 'openai'), 'GPT-5-Codex')
@@ -539,6 +539,14 @@ test('starting needs a task; a blank name lets the server generate one', () => {
   assert.equal(hasPromptCache(models, null), false)
   assert.equal(newAgentInput('do it', '', 'opus', '1h').promptCacheLifetime, '1h', 'a 1 hour cache is sent')
   assert.equal('promptCacheLifetime' in newAgentInput('do it', '', 'gpt', null), false, 'a model without a cache sends none')
+})
+
+test('files picked for a task go with it, by their uploaded ids, and keep it from starting on another computer', () => {
+  assert.deepEqual(newAgentInput('read this', '', null, null, ['att1', 'att2']).attachmentIds, ['att1', 'att2'])
+  assert.equal('attachmentIds' in newAgentInput('do it', '', null, null, []), false, 'no files sends none')
+  assert.equal(canStartAgent('read this', false, 2, false), true)
+  assert.equal(canStartAgent('read this', false, 2, true), false, 'files to another computer are refused there')
+  assert.equal(canStartAgent('read this', false, 0, true), true)
 })
 
 test('the Machine picker: here, then fully trusting computers by name; none of them, no picker', () => {
@@ -714,9 +722,9 @@ test('details: the latest summary as Lately with its age, stale once a turn bega
 })
 
 test("the model picker's groups are in the reference's order, most capable first (DET-03)", () => {
-  const models = ['or-haiku', 'gemini-flash', 'deepseek-flash', 'qwen-coder', 'deepseek', 'haiku', 'sonnet', 'opus'].map((id) => ({ id, label: id, provider: (['opus', 'sonnet', 'haiku'].includes(id) ? 'anthropic' : 'openrouter') as ModelOption['provider'], available: true }))
+  const models = ['or-haiku', 'gemini-flash', 'deepseek-flash', 'qwen-coder', 'deepseek', 'haiku', 'sonnet', 'opus', 'fable'].map((id) => ({ id, label: id, provider: (['fable', 'opus', 'sonnet', 'haiku'].includes(id) ? 'anthropic' : 'openrouter') as ModelOption['provider'], available: true }))
   assert.deepEqual(modelGroups(models, null).map((group) => [group.title, group.models.map((model) => model.label)]), [
-    ['Subscription', ['Opus', 'Sonnet', 'Haiku']],
+    ['Subscription', ['Fable 5.2', 'Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5']],
     ['OpenRouter', ['DeepSeek', 'Qwen Coder', 'DeepSeek Flash', 'Gemini Flash', 'Haiku']],
   ])
 })
