@@ -21,6 +21,10 @@ export interface ConversationFile {
 /** Claude Code's folder name for a working folder: every character but letters and digits becomes "-". */
 const claudeProjectFolderOf = (folder: string): string => resolve(folder).replace(/[^a-zA-Z0-9]/g, '-')
 
+/** Where Claude Code keeps the transcript of conversation `sessionId`, which ran in `ranIn`. */
+export const claudeTranscriptPathOf = (claudeConfigDir: string, sessionId: string, ranIn: string): string =>
+  join(claudeConfigDir, 'projects', claudeProjectFolderOf(ranIn), `${sessionId}.jsonl`)
+
 function filesUnder(root: string, dir: string): ConversationFile[] {
   if (!existsSync(dir)) return []
   return readdirSync(dir).sort().flatMap((name) => {
@@ -39,11 +43,10 @@ export function conversationFilesOf(runtime: ModelRuntime, sessionId: string, ra
       return [{ path, content: readFileSync(join(stores.agentStateDir, path)) }]
     }
     case 'claude_code': {
-      const project = join(stores.claudeConfigDir, 'projects', claudeProjectFolderOf(ranIn))
-      const transcript = join(project, `${sessionId}.jsonl`)
+      const transcript = claudeTranscriptPathOf(stores.claudeConfigDir, sessionId, ranIn)
       if (!existsSync(transcript)) return null
       // Beside the transcript, a folder of the same name holds what its subagents and tools kept.
-      return [{ path: relative(stores.claudeConfigDir, transcript), content: readFileSync(transcript) }, ...filesUnder(stores.claudeConfigDir, join(project, sessionId))]
+      return [{ path: relative(stores.claudeConfigDir, transcript), content: readFileSync(transcript) }, ...filesUnder(stores.claudeConfigDir, join(dirname(transcript), sessionId))]
     }
     case 'codex':
       return null

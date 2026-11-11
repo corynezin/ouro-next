@@ -29,6 +29,7 @@ import { ChatRoomScreen } from '../features/room/Screen.tsx'
 import { RemoteChatScreen } from '../features/remoteAgent/Screen.tsx'
 import { DetailsScreen } from '../features/details/Screen.tsx'
 import { GoalScreen } from '../features/goal/Screen.tsx'
+import { ContextRequestScreen, ContextScreen } from '../features/context/Screen.tsx'
 import { LogScreen } from '../features/log/Screen.tsx'
 import { AllSummariesScreen } from '../features/summaries/AllSummariesScreen.tsx'
 import { SummariesScreen } from '../features/summaries/Screen.tsx'
@@ -181,6 +182,8 @@ export function AppRoot({ core, hostedServers, updates, lock, push, otherServers
                     <Stack.Screen name="Agents" component={AgentsScreen} options={{ title: 'Agents', headerTitle: '', headerTransparent: false }} />
                     <Stack.Screen name="Chat" component={ChatScreen} options={{ title: '' }} />
                     <Stack.Screen name="Log" component={LogScreen} />
+                    <Stack.Screen name="Context" component={ContextScreen} />
+                    <Stack.Screen name="ContextRequest" component={ContextRequestScreen} />
                     <Stack.Screen name="Summaries" component={SummariesScreen} />
                     <Stack.Screen name="AllSummaries" component={AllSummariesScreen} options={{ title: 'Summaries' }} />
                     <Stack.Screen name="Agent" component={DetailsScreen} />

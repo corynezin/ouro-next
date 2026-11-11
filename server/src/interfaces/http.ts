@@ -3,7 +3,7 @@
 // socket already runs as the owner's user.
 import { createReadStream, statSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { CHANGES_HEARTBEAT_MS, ClaudeLoginFinishBody, GithubTokenBody, IdempotencyKey, MAX_ATTACHMENT_BYTES, PairRequest, SEARCH_DEFAULT_LIMIT, SecretKeyBody, UPDATE_ASSETS_PATH, UPDATE_MANIFEST_PATH, UPDATE_PROTOCOL_VERSION } from '@ouro/contract'
+import { CHANGES_HEARTBEAT_MS, ClaudeLoginFinishBody, ContextBlockPart, GithubTokenBody, IdempotencyKey, MAX_ATTACHMENT_BYTES, PairRequest, SEARCH_DEFAULT_LIMIT, SecretKeyBody, UPDATE_ASSETS_PATH, UPDATE_MANIFEST_PATH, UPDATE_PROTOCOL_VERSION } from '@ouro/contract'
 import { UPDATE_PLATFORM } from '../app/app-updates.ts'
 import { fileTypeOf } from '../domain/file-type.ts'
 import type { SyncFrame, Viewer } from '@ouro/contract'
@@ -167,6 +167,18 @@ export function createApiHandler(core: OuroCore, trust: ListenerTrust, logging: 
     if (log && method === 'GET') {
       return replyJson(response, 200, core.agentLog(decodeURIComponent(log[1]!), { after: integerParam(url, 'after'), before: integerParam(url, 'before') }))
     }
+
+    const contextList = /^\/v2\/agents\/([^/]+)\/context$/.exec(path)
+    if (contextList && method === 'GET') return replyJson(response, 200, core.agentContextList(decodeURIComponent(contextList[1]!)))
+    const contextText = /^\/v2\/agents\/([^/]+)\/context\/(\d+)\/text$/.exec(path)
+    if (contextText && method === 'GET') {
+      const part = ContextBlockPart.safeParse(url.searchParams.get('part'))
+      if (!part.success) throw new CommandRefused('invalid_request', 'part must be system, message or response')
+      const where = { part: part.data, item: integerParam(url, 'i') ?? 0, block: integerParam(url, 'k') ?? 0 }
+      return replyJson(response, 200, core.agentContextText(decodeURIComponent(contextText[1]!), Number(contextText[2]), where))
+    }
+    const contextOne = /^\/v2\/agents\/([^/]+)\/context\/(\d+)$/.exec(path)
+    if (contextOne && method === 'GET') return replyJson(response, 200, core.agentContext(decodeURIComponent(contextOne[1]!), Number(contextOne[2])))
 
     const summaries = /^\/v2\/agents\/([^/]+)\/summaries$/.exec(path)
     if (summaries && method === 'GET') {

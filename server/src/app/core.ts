@@ -10,7 +10,7 @@ import {
   AGENT_NAME_PATTERN, Change, turnFailureText, chatHandle, commands, SEARCH_MAX_LIMIT, WATCH_LEASE_MS, DEFAULT_GOAL_INTERVAL_SECONDS, MASTER_AGENT_NAME, MAX_ASK_SNOOZE_MS, OWNER_ADDRESS, parseAddress, PEER_ASK_SNOOZE_PROTOCOL, PEER_OWNER_ASKS_PROTOCOL, PEER_OWNER_MESSAGES_PROTOCOL, personAddress, RESERVED_AGENT_NAMES,
 } from '@ouro/contract'
 import type {
-  AgentEntity, AskEntity, AskSnooze, AttachmentRef, ChatEntity, CommandName, GoalEntity, CommandOutput, DeliveryWake, EntityKind, LogPage, LogRecord, MessageEntity, MessagePurpose, PairResponse, PlanUsage, PlanWindow,
+  AgentEntity, AskEntity, AskSnooze, AttachmentRef, ChatEntity, CommandName, GoalEntity, CommandOutput, DeliveryWake, EntityKind, ContextBlockPlace, ContextBlockText, ContextDetail, ContextList, LogPage, LogRecord, MessageEntity, MessagePurpose, PairResponse, PlanUsage, PlanWindow,
   IntegrationProvider, NotificationSettings, PushTokenRegistration, SearchPage, ServerEntity, ServerIdentity, Snapshot, SummaryPage, Viewer,
 } from '@ouro/contract'
 import { journalSize, readJournalBackward, readJournalForward } from '../adapters/journal-file.ts'
@@ -20,7 +20,9 @@ import { RunnerSupervisor } from '../adapters/runner-supervisor.ts'
 import type { SendPush } from '../adapters/apns.ts'
 import { checkoutIdentityOf, mainCheckoutOf, mergeThreeWay } from '../adapters/checkouts.ts'
 import type { IntegrationTools } from '../adapters/integrations.ts'
-import { conversationFilesOf, installConversation } from '../adapters/conversations.ts'
+import { claudeTranscriptPathOf, conversationFilesOf, installConversation } from '../adapters/conversations.ts'
+import { contextBlockText, contextDetail, contextRows, requestsOfTranscript } from '../adapters/context-debug.ts'
+import type { Rebuilt } from '../adapters/context-debug.ts'
 import type { ConversationStores } from '../adapters/conversations.ts'
 import { loadOrCreateMachineKey } from '../adapters/peer-transport.ts'
 import { pushTokenHash } from './notifier.ts'
@@ -1535,6 +1537,41 @@ export class OuroCore {
     const end = request.before ?? journalSize(path)
     const { records, start } = readJournalBackward(path, end, LOG_PAGE_BYTES)
     return { records: toLogRecords(records), startCursor: start, endCursor: end, hasEarlier: start > 0 }
+  }
+
+  /** The model requests of the agent's current Claude Code conversation, rebuilt from its transcript, or why there are none. */
+  private contextRequestsOf(agentId: string): { requests: Rebuilt[] } | { unavailable: string } {
+    const row = this.requireAgentRow(agentId)
+    const runtime = runtimeOf(launchModelFor(row.model, { openrouter: this.openrouterConfigured() }).model.provider)
+    if (runtime !== 'claude_code') return { unavailable: 'Only Claude Code agents keep a transcript to show.' }
+    if (row.providerSessionId === null) return { unavailable: 'This agent has no conversation yet.' }
+    const requests = requestsOfTranscript(claudeTranscriptPathOf(this.claudeConfigDir, row.providerSessionId, row.folder))
+    return requests === null ? { unavailable: "This conversation's transcript is not on this computer." } : { requests }
+  }
+
+  /** Every model request of the agent's current conversation, with its exact input and output tokens. */
+  agentContextList(agentId: string): ContextList {
+    const found = this.contextRequestsOf(agentId)
+    return 'unavailable' in found ? { requests: [], unavailable: found.unavailable } : { requests: contextRows(found.requests), unavailable: null }
+  }
+
+  /** Everything sent with one model request, and the reply. */
+  agentContext(agentId: string, n: number): ContextDetail {
+    const found = this.contextRequestsOf(agentId)
+    if ('unavailable' in found) throw new CommandRefused('not_found', found.unavailable)
+    const request = found.requests[n]
+    if (!request) throw new CommandRefused('not_found', 'no such request')
+    return contextDetail(request, n)
+  }
+
+  /** One block of a request, uncut: the phone shows long ones cut and fetches the rest on demand. */
+  agentContextText(agentId: string, n: number, where: ContextBlockPlace): ContextBlockText {
+    const found = this.contextRequestsOf(agentId)
+    if ('unavailable' in found) throw new CommandRefused('not_found', found.unavailable)
+    const request = found.requests[n]
+    const text = request ? contextBlockText(request, where) : null
+    if (text === null) throw new CommandRefused('not_found', 'no such block')
+    return { text }
   }
 
   agentSummaries(agentId: string, before: number | null, limit: number): SummaryPage {

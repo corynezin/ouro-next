@@ -126,6 +126,63 @@ export const LogPage = z.object({
 })
 export type LogPage = z.infer<typeof LogPage>
 
+/** `GET /v2/agents/<id>/context`: one row per model request the agent made, newest last. Tokens are exact, from the API's own usage. */
+export const ContextRequestRow = z.object({
+  n: z.number().int().nonnegative(),
+  at: z.number().int(),
+  model: z.string(),
+  messageCount: z.number().int(),
+  /** Everything sent: uncached + cache read + cache written. Null when the request got no usage back. */
+  inputTokens: z.number().int().nullable(),
+  outputTokens: z.number().int().nullable(),
+})
+export type ContextRequestRow = z.infer<typeof ContextRequestRow>
+
+export const ContextList = z.object({
+  requests: z.array(ContextRequestRow),
+  /** Why there is nothing to show, when there is nothing. */
+  unavailable: z.string().nullable(),
+})
+export type ContextList = z.infer<typeof ContextList>
+
+export const ContextBlock = z.object({
+  /** text, thinking, tool_use, tool_result, or another block type. */
+  type: z.string(),
+  /** A tool's name, when it has one. */
+  label: z.string(),
+  text: z.string(),
+  /** Estimated; see ContextDetail.exact. */
+  tokens: z.number().int(),
+  truncated: z.boolean(),
+})
+export type ContextBlock = z.infer<typeof ContextBlock>
+
+export const ContextBlockPart = z.enum(['system', 'message', 'response'])
+export type ContextBlockPart = z.infer<typeof ContextBlockPart>
+/** Where a block sits in a request: system block `item`; block `block` of message `item`; or block `block` of the reply. */
+export interface ContextBlockPlace { part: ContextBlockPart; item: number; block: number }
+
+/** `GET /v2/agents/<id>/context/<n>/text?part=system|message|response&i=<item>&k=<block>`: one block, uncut. */
+export const ContextBlockText = z.object({ text: z.string() })
+export type ContextBlockText = z.infer<typeof ContextBlockText>
+
+/** `GET /v2/agents/<id>/context/<n>`: everything sent with request n, and what came back. */
+export const ContextDetail = z.object({
+  n: z.number().int(),
+  at: z.number().int(),
+  model: z.string(),
+  usage: z.object({ uncached: z.number().int(), cacheRead: z.number().int(), cacheWrite: z.number().int(), output: z.number().int(), totalInput: z.number().int() }).nullable(),
+  /** True when the per-item counts were scaled to the API's reported input total; false when they are raw estimates. */
+  exact: z.boolean(),
+  totalInput: z.number().int(),
+  categories: z.array(z.object({ name: z.string(), tokens: z.number().int() })),
+  system: z.array(ContextBlock),
+  tools: z.array(z.object({ name: z.string(), description: z.string(), tokens: z.number().int() })),
+  messages: z.array(z.object({ role: z.string(), unresolved: z.boolean(), blocks: z.array(ContextBlock) })),
+  response: z.array(ContextBlock),
+})
+export type ContextDetail = z.infer<typeof ContextDetail>
+
 /** Unauthenticated, for pairing screens and for the guardian's probe of who is answering. */
 export const ServerIdentity = z.object({
   app: z.literal('ouro'),

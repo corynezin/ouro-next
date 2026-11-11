@@ -8,6 +8,9 @@ export type Routes = {
    * else at the newest. */
   Chat: { agentRef: string; at?: MessageAt }
   Log: { agentRef: string }
+  /** Every model request the agent made, and for one of them everything it was sent, with token counts. */
+  Context: { agentRef: string }
+  ContextRequest: { agentRef: string; n: number }
   Summaries: { agentRef: string }
   /** Every agent's latest summary. Reached only by a link, as in the reference. */
   AllSummaries: undefined
