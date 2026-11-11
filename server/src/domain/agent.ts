@@ -4,7 +4,7 @@
 // Exactly one live instance: `instanceGeneration` rises only when a launch is decided, a launch is decided only from a
 // state with no runner (or from `stopping` once its runner is confirmed gone), and reports from any other generation are
 // refused.
-import { compactionDue } from './compaction.ts'
+import { compactionDue, compactionPending } from './compaction.ts'
 import type { PromptCacheRecord } from './compaction.ts'
 import type { AgentState, Address, HoldReason, StoppedReason, StoppingOutcome, TurnActivity, TurnFailure } from '@ouro/contract'
 
@@ -622,13 +622,15 @@ export function dueEvent(lifecycle: AgentLifecycle, now: number, policy: AgentPo
     }
     case 'idle': {
       if (facts.hasQueuedWork) return null
-      if (policy.idleExitMs === null || facts.activeGoal) {
-        const beforeExpiry = { kind: 'before_cache_expiry', nextTurnAt: facts.nextGoalCycleAt } as const
-        return compactionDue(facts.promptCache, now, beforeExpiry) ? { type: 'compaction_requested' } : null
-      }
-      if (now < state.since + policy.idleExitMs) return null
-      // Compacted, it is idle again from now, and exits once the next idle period passes.
-      return compactionDue(facts.promptCache, now, { kind: 'before_idle_exit' }) ? { type: 'compaction_requested' } : { type: 'idle_timeout_reached' }
+      if (compactionDue(facts.promptCache, now, facts.nextGoalCycleAt)) return { type: 'compaction_requested' }
+      if (policy.idleExitMs === null || facts.activeGoal) return null
+      // Compacted just before its cache expired, it has nothing left to wait for. A relaunch restarts the idle period, so
+      // this doesn't wait for that either.
+      const compacted = facts.promptCache?.compacted === true
+      if (now < state.since + policy.idleExitMs && !compacted) return null
+      // A large context stays up until it is compacted just before its cache expires: a message before then finds it
+      // whole and warm. Exited, nothing could compact it.
+      return compactionPending(facts.promptCache, now) ? null : { type: 'idle_timeout_reached' }
     }
     case 'stopped':
     case 'held':
