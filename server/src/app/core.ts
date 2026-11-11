@@ -63,6 +63,8 @@ import {
 } from '../domain/message.ts'
 import { Store } from '../store/store.ts'
 import type { AgentRow, DeliveryRow, MessageRow, PeerRow, PersonRow } from '../store/store.ts'
+import { DEFAULT_EXPORT_COMMAND, publishCommittedApp } from './app-publishing.ts'
+import type { PublishedApp } from './app-publishing.ts'
 import { AppUpdates } from './app-updates.ts'
 import type { RegisterUpdateInput } from './app-updates.ts'
 import { CommandRefused } from './failure.ts'
@@ -130,6 +132,10 @@ export interface CoreConfig {
   peerMemoryPullIntervalMs: number
   /** Null: nothing offers this machine bases. */
   baseSource: BaseSource | null
+  /** The public base repository's name on GitHub, which the private copy's name must differ from. */
+  baseRepositoryName: string
+  /** Waits between tries of the first push to a private copy just made. */
+  firstPushRetryDelaysMs: number[]
   githubApi: GitHubApi
   /** Null: no guardian, so this machine can't switch releases by itself. */
   guardian: GuardianClient | null
@@ -288,13 +294,15 @@ export class OuroCore {
       tools: config.integrationTools,
       now: () => config.clock.now(),
       commit: (body) => this.commit(body),
+      integrationStored: (provider) => { if (provider === 'github') this.sourceBackup.refresh() },
       accountSignedIn: (account) => this.commit(() => this.releaseHolds('logged_out', (agent) => this.accountOf(agent) === account)),
       planUsageRead: (account, windows) => this.observePlanUsage(account, windows, config.clock.now()),
       log: config.log,
     })
     this.sourceBackup = new SourceBackupKeeper({
       sourceRoot: config.personSource?.root ?? null,
-      machineName: config.machineName,
+      baseRepositoryName: config.baseRepositoryName,
+      firstPushRetryDelaysMs: config.firstPushRetryDelaysMs,
       api: config.githubApi,
       githubToken: () => config.integrationTools.githubToken(),
       githubState: () => { const github = this.store.integrationOf('github'); return github?.provider === 'github' ? github.state.status : null },
@@ -312,6 +320,7 @@ export class OuroCore {
       readRecord: () => this.store.baseUpdateRecord(),
       saveRecord: (record) => this.store.saveBaseUpdateRecord(record),
       offerChanged: () => this.store.markChanged('server', 'server'),
+      publishApp: config.personSource === null ? null : () => this.publishApp(config.personSource!.appDir),
       tellMasterAgent: (text) => this.alert(MASTER_AGENT_NAME, text),
       log: config.log,
     })
@@ -1337,6 +1346,12 @@ export class OuroCore {
     const row = this.appUpdates.register(input)
     this.notifier.updatePublished(row.updateNumber)
     return { updateNumber: row.updateNumber, runtimeVersion: row.runtimeVersion }
+  }
+
+  /** Publishes the app in the person's source as `ouro publish` does, registering it here directly. */
+  private publishApp(appDir: string): Promise<PublishedApp> {
+    const exportCommand = this.config.agentBaseEnv.OURO_APP_EXPORT_COMMAND ?? DEFAULT_EXPORT_COMMAND
+    return publishCommittedApp(appDir, exportCommand, async (input) => this.registerAppUpdate(input), () => {})
   }
 
   private serverEntity(): ServerEntity {

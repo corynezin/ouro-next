@@ -12,6 +12,8 @@ import { deploymentOutcome } from '../adapters/guardian-client.ts'
 import type { GuardianClient } from '../adapters/guardian-client.ts'
 import { baseUpdateOf, conflictBrief, continueDecision, takeRefusal } from '../domain/base-update.ts'
 import type { BaseUpdateRecord } from '../domain/base-update.ts'
+import { NotPublished } from './app-publishing.ts'
+import type { PublishedApp } from './app-publishing.ts'
 import { CommandRefused } from './failure.ts'
 
 /** How often the base source is asked for a newer base. */
@@ -34,6 +36,8 @@ export interface BaseUpdatesConfig {
   saveRecord: (record: BaseUpdateRecord) => void
   /** The offer changed: marks the server entity changed; called inside a transaction. */
   offerChanged: () => void
+  /** Publishes the app as committed in the person's source, as `ouro publish` does; null when the server has no app folder. */
+  publishApp: (() => Promise<PublishedApp>) | null
   /** Tells the master agent; called inside a transaction. */
   tellMasterAgent: (text: string) => void
   log: (event: string, fields: Record<string, unknown>) => void
@@ -182,8 +186,11 @@ export class BaseUpdates {
     }
   }
 
-  /** Live: the person's branch takes the merge, and the phone is next if the base changes the app. */
-  private finish(n: number, commit: string): void {
+  /**
+   * Live: the person's branch takes the merge, and if the base changes the app the phone gets it. Publishing is after the
+   * deploy and can't undo it: when it fails, the master agent is told why and the update still counts as done.
+   */
+  private async finish(n: number, commit: string): Promise<void> {
     const root = this.config.sourceRoot!
     const merge = mergeIntoPersonBranch(root, commit)
     if (merge.kind === 'not_merged') {
@@ -193,10 +200,22 @@ export class BaseUpdates {
     this.integrated = integratedBase(root)
     if (this.offered !== null && this.offered.n <= (this.integrated ?? 0)) this.offered = null
     const appChanged = changedBetween(root, merge.before, commit, APP_FOLDER)
-    this.config.commit(() => {
-      this.config.saveRecord({ state: 'idle' })
-      if (appChanged) this.config.tellMasterAgent(`Ouro base ${n} is live on this computer and changes the app. Publish it to the phone: ouro publish`)
-    })
+    this.config.commit(() => this.config.saveRecord({ state: 'idle' }))
     this.config.log('base_update_live', { n, commit })
+    if (appChanged) await this.publishApp(n)
+  }
+
+  private async publishApp(n: number): Promise<void> {
+    const failed = (why: string) => {
+      this.config.log('base_update_app_not_published', { n, why })
+      this.config.commit(() => this.config.tellMasterAgent(`Ouro base ${n} is live on this computer and changes the app, but the app didn't reach the phone: ${why}. Fix that, then publish it: ouro publish`))
+    }
+    if (this.config.publishApp === null) return failed('this server has no app folder to publish from')
+    try {
+      const published = await this.config.publishApp()
+      this.config.log('base_update_app_published', { n, updateNumber: published.updateNumber })
+    } catch (error) {
+      failed(error instanceof NotPublished ? error.message : `publishing failed unexpectedly: ${(error as Error).message}`)
+    }
   }
 }

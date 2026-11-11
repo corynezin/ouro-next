@@ -30,7 +30,8 @@ export type Routes = {
   Claude: undefined
   ChatGPT: undefined
   OpenRouter: undefined
-  GitHub: undefined
+  /** `thenMakePrivateCopy`: the person came to connect GitHub to back up, so the private copy is made once it connects. */
+  GitHub: { thenMakePrivateCopy?: boolean } | undefined
   Pair: undefined
   SelectText: { text: string }
   /** A file sent in a chat, fetched with the session's authorisation. */

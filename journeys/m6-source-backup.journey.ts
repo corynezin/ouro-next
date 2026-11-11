@@ -55,13 +55,15 @@ test('connected, a private repository is made, and the branch and the base tags 
   mkdirSync(accountsDir, { recursive: true })
   appendFileSync(join(accountsDir, 'accepted'), 'ghp_backup\n')
   assert.equal((await phone.integration('POST', 'github/token', { token: 'ghp_backup' })).status, 200)
-  await waitFor('GitHub to show as connected', async () => (await backup()).state === 'not_backed_up' && (await backup() as { github: string }).github === 'connected')
+  assert.deepEqual(await backup(), { state: 'not_backed_up', github: 'connected' }, 'the status changes as GitHub connects, not on a later check')
 
   const made = await phone.command('create_source_backup', {})
-  assert.deepEqual(made.server.sourceBackup, { state: 'backed_up', repository: github.repositoryPath('ouro-next'), behind: false, lastPushError: null })
+  const madeStatus = made.server.sourceBackup
+  assert.ok(madeStatus.state === 'backed_up' && typeof madeStatus.lastPushedAt === 'number', 'it says when the copy was last pushed')
+  assert.deepEqual({ ...madeStatus, lastPushedAt: 0 }, { state: 'backed_up', repository: github.repositoryPath('ouro-next-private'), lastPushedAt: 0, behind: false, lastPushError: null })
   assert.equal(github.requestedPrivate.at(-1), true, 'the repository was asked for private')
   assert.equal(github.authorizations.at(-1), 'Bearer ghp_backup')
-  const bare = github.repositoryPath('ouro-next')
+  const bare = github.repositoryPath('ouro-next-private')
   const git = (...args: string[]) => run.git('--git-dir', bare, ...args)
   assert.equal((await git('rev-parse', 'refs/heads/main')).trim(), await head())
   assert.equal((await git('tag', '--list')).trim(), 'base-1')
@@ -69,14 +71,18 @@ test('connected, a private repository is made, and the branch and the base tags 
 })
 
 test('a version that goes live is pushed to the private copy by itself', async () => {
+  const before = await backup()
+  const lastPushedBefore = before.state === 'backed_up' ? before.lastPushedAt ?? 0 : 0
   run.editSource(DEFAULT_PROTOCOL, 'Keep notes short.', 'Keep notes very short.')
   const commit = await run.commitAll('shorter notes')
   const started = await run.control('POST', '/deploy', { reference: 'main', requestedBy: null }) as { id: string }
   assert.equal((await run.deploymentOutcome(started.id)).phase, 'live')
-  const pushed = async () => (await run.git('--git-dir', github.repositoryPath('ouro-next'), 'rev-parse', 'refs/heads/main')).trim()
+  const pushed = async () => (await run.git('--git-dir', github.repositoryPath('ouro-next-private'), 'rev-parse', 'refs/heads/main')).trim()
   await waitFor('the live version to reach the private copy', async () => await pushed() === commit, 60_000)
   await waitFor('the phone to see it backed up', async () => {
     const status = await backup()
     return status.state === 'backed_up' && !status.behind
   }, 60_000)
+  const after = await backup()
+  assert.ok(after.state === 'backed_up' && after.lastPushedAt !== null && after.lastPushedAt >= lastPushedBefore, 'the push time moves on')
 })

@@ -1,7 +1,7 @@
 // For tests and journeys: the part of GitHub's API that backing up uses, answered locally. A private repository made by
 // POST /user/repos is a bare repository under `dir`, and its clone URL is that folder, so pushes to it are local.
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { Server } from 'node:http'
 import { join } from 'node:path'
@@ -14,8 +14,12 @@ export interface StandInGitHub {
   takeName(name: string): void
   /** The authorization headers it saw, most recent last. */
   authorizations: string[]
+  /** The repository names it was asked to make, most recent last. */
+  requestedNames: string[]
   /** The `private` flag of each repository creation it saw, most recent last. */
   requestedPrivate: unknown[]
+  /** Repositories made from now on refuse their first `count` pushes, as a repository GitHub just made can. */
+  refuseFirstPushesOfNewRepositories(count: number): void
   close(): Promise<void>
 }
 
@@ -26,6 +30,8 @@ export async function startStandInGitHub(dir: string): Promise<StandInGitHub> {
   const taken = new Set<string>()
   const authorizations: string[] = []
   const requestedPrivate: unknown[] = []
+  const requestedNames: string[] = []
+  let refusedPushes = 0
   const server: Server = createServer((request, response) => {
     const answer = (status: number, body: object) => {
       response.writeHead(status, { 'content-type': 'application/json' })
@@ -40,12 +46,14 @@ export async function startStandInGitHub(dir: string): Promise<StandInGitHub> {
       const body = JSON.parse(text) as { name?: string; private?: unknown }
       requestedPrivate.push(body.private)
       const name = body.name ?? ''
+      requestedNames.push(name)
       if (!/^[A-Za-z0-9._-]+$/.test(name)) return answer(422, { message: 'Repository creation failed.' })
       const path = repositoryPath(name)
       if (taken.has(name) || existsSync(path)) return answer(422, { message: 'name already exists on this account' })
       mkdirSync(join(path, '..'), { recursive: true })
       const made = spawnSync('git', ['init', '--bare', '--quiet', path], { encoding: 'utf8' })
       if (made.status !== 0) return answer(500, { message: made.stderr })
+      if (refusedPushes > 0) refuseFirstPushes(path, refusedPushes)
       answer(201, { full_name: `${STAND_IN_GITHUB_USER}/${name}`, clone_url: path, private: body.private === true })
     })
   })
@@ -55,8 +63,19 @@ export async function startStandInGitHub(dir: string): Promise<StandInGitHub> {
     apiUrl: `http://127.0.0.1:${port}`,
     repositoryPath,
     takeName: (name) => { taken.add(name) },
+    refuseFirstPushesOfNewRepositories: (count) => { refusedPushes = count },
     authorizations,
     requestedPrivate,
+    requestedNames,
     close: () => new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections() }),
   }
+}
+
+/** A hook that rejects pushes until it has refused `count`, counting in a file beside it. */
+function refuseFirstPushes(bareRepository: string, count: number): void {
+  const counter = join(bareRepository, 'refusals-left')
+  writeFileSync(counter, `${count}\n`)
+  const hook = join(bareRepository, 'hooks', 'pre-receive')
+  writeFileSync(hook, `#!/bin/sh\nleft=$(cat '${counter}')\nif [ "$left" -gt 0 ]; then echo $((left - 1)) > '${counter}'; echo "refused for now" >&2; exit 1; fi\n`)
+  chmodSync(hook, 0o755)
 }

@@ -32,13 +32,16 @@ export type BaseStatus = z.infer<typeof BaseStatus>
  * Whether the person's own commits to the source, those on no base, are kept in a private repository of theirs on GitHub.
  * `not_applicable`: there is no source copy here, or it takes no bases. `nothing_to_back_up`: every commit is on a base.
  * `not_backed_up`: some are not, and there is no backup; `github` says whether GitHub is connected, which making one needs.
- * `backed_up`: `repository` is the backup's `owner/name`; `behind` is whether the live version isn't pushed to it yet, and
- * `lastPushError` why its last push failed.
+ * `making_private_copy`: the repository is being made on GitHub and the first push is on its way.
+ * `backed_up`: `repository` is the backup's `owner/name`; `lastPushedAt` is when the last push succeeded (null when this
+ * copy of the source has none recorded); `behind` is whether the live version isn't pushed to it yet, and `lastPushError`
+ * why its last push failed.
  */
 export const SourceBackup = z.discriminatedUnion('state', [
   z.object({ state: z.literal('not_applicable') }),
   z.object({ state: z.literal('nothing_to_back_up') }),
   z.object({ state: z.literal('not_backed_up'), github: z.enum(['connected', 'not_connected']) }),
-  z.object({ state: z.literal('backed_up'), repository: z.string(), behind: z.boolean(), lastPushError: z.string().nullable() }),
+  z.object({ state: z.literal('making_private_copy') }),
+  z.object({ state: z.literal('backed_up'), repository: z.string(), lastPushedAt: z.number().int().nullable(), behind: z.boolean(), lastPushError: z.string().nullable() }),
 ])
 export type SourceBackup = z.infer<typeof SourceBackup>

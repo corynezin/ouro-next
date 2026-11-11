@@ -113,7 +113,7 @@ OURO_NEXT_CONFIG_JSON=$(
       if (env.MODEL) ourodEnv.OURO_DEFAULT_MODEL = env.MODEL
       if (env.BASE_REPO) ourodEnv.OURO_BASE_REPO = env.BASE_REPO
       if (env.APNS_KEY_FILE) Object.assign(ourodEnv, { OURO_APNS_KEY_FILE: env.APNS_KEY_FILE, OURO_APNS_KEY_ID: env.APNS_KEY_ID, OURO_APNS_TEAM_ID: env.APNS_TEAM_ID })
-      process.stdout.write(JSON.stringify({ home: env.ROOT_HOME, listenPort: Number(env.PORT), sourceDir: env.SOURCE, sourceBranch: "main",
+      process.stdout.write(JSON.stringify({ home: env.ROOT_HOME, listenPort: Number(env.PORT), sourceDir: env.SOURCE, appSourceDir: env.SOURCE + "/apps/mobile", sourceBranch: "main",
         machineName: env.MACHINE, publicUrl: env.URL, ourodEnv }, null, 2) + "\n")'
 )
 if [ "$(cat "$config" 2>/dev/null)" != "$OURO_NEXT_CONFIG_JSON" ]; then
