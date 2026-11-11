@@ -20,10 +20,9 @@ import type { SendPush } from '../adapters/apns.ts'
 import { claudeSummarize } from '../adapters/summarizer.ts'
 import { neverSleeps, spriteTasksHold } from '../adapters/host-hold.ts'
 import type { HostHold } from '../adapters/host-hold.ts'
-import { folderBases } from '../adapters/base-source.ts'
-import type { BasePublishTarget, BaseSource } from '../adapters/base-source.ts'
-import { gitBasePublishTarget, gitBaseSource } from '../adapters/git-bases.ts'
-import { hubBasePublishTarget, hubBaseSource } from '../adapters/hub-bases.ts'
+import type { BaseSource } from '../adapters/base-source.ts'
+import { gitBaseSource } from '../adapters/git-bases.ts'
+import { httpGitHubApi } from '../adapters/github-api.ts'
 import { guardianClient } from '../adapters/guardian-client.ts'
 import { DEFAULT_LIVE_POLICY, DEFAULT_SUMMARY_POLICY } from '../domain/summary.ts'
 
@@ -89,31 +88,9 @@ function pushSenderFromEnvironment(): SendPush | null {
   }
 }
 
-/** A git repository (`OURO_BASE_REPO`) or the hub (`OURO_HUB_URL`) on installed machines; a folder in journeys. */
+/** The git repository at `OURO_BASE_REPO`, which bases are taken from. */
 function baseSourceOf(env: NodeJS.ProcessEnv): BaseSource | null {
-  if (env.OURO_HUB_URL && env.OURO_BASE_REPO) throw new Error('set OURO_HUB_URL or OURO_BASE_REPO, not both')
-  if (env.OURO_BASE_REPO && env.OURO_BASE_SOURCE_DIR) throw new Error('set OURO_BASE_REPO or OURO_BASE_SOURCE_DIR, not both')
-  if (env.OURO_BASE_REPO) return gitBaseSource(env.OURO_BASE_REPO)
-  if (env.OURO_HUB_URL && env.OURO_BASE_SOURCE_DIR) throw new Error('set OURO_HUB_URL or OURO_BASE_SOURCE_DIR, not both')
-  if (env.OURO_HUB_URL) return hubBaseSource(env.OURO_HUB_URL)
-  return env.OURO_BASE_SOURCE_DIR ? folderBases(env.OURO_BASE_SOURCE_DIR) : null
-}
-
-/**
- * Only the publisher has one: the base repository pushed to over `OURO_BASE_REPO_PUSH_URL` (the publisher's ssh key
- * authenticates), or the hub, as its account (`OURO_HUB_TOKEN_FILE`, a secret kept out of the environment).
- */
-function basePublishTargetOf(env: NodeJS.ProcessEnv): BasePublishTarget | null {
-  if (env.OURO_HUB_URL && env.OURO_BASE_REPO) throw new Error('set OURO_HUB_URL or OURO_BASE_REPO, not both')
-  if (env.OURO_BASE_REPO_PUSH_URL && !env.OURO_BASE_REPO) throw new Error('OURO_BASE_REPO_PUSH_URL needs OURO_BASE_REPO')
-  if (env.OURO_BASE_REPO_PUSH_URL && (env.OURO_HUB_TOKEN_FILE || env.OURO_BASE_PUBLISH_DIR)) throw new Error('set OURO_BASE_REPO_PUSH_URL, OURO_HUB_TOKEN_FILE or OURO_BASE_PUBLISH_DIR, only one')
-  if (env.OURO_BASE_REPO_PUSH_URL) return gitBasePublishTarget(env.OURO_BASE_REPO_PUSH_URL)
-  if (env.OURO_HUB_TOKEN_FILE && env.OURO_BASE_PUBLISH_DIR) throw new Error('set OURO_HUB_TOKEN_FILE or OURO_BASE_PUBLISH_DIR, not both')
-  if (env.OURO_HUB_TOKEN_FILE) {
-    if (!env.OURO_HUB_URL) throw new Error('OURO_HUB_TOKEN_FILE needs OURO_HUB_URL')
-    return hubBasePublishTarget(env.OURO_HUB_URL, readFileSync(env.OURO_HUB_TOKEN_FILE, 'utf8').trim())
-  }
-  return env.OURO_BASE_PUBLISH_DIR ? folderBases(env.OURO_BASE_PUBLISH_DIR) : null
+  return env.OURO_BASE_REPO ? gitBaseSource(env.OURO_BASE_REPO) : null
 }
 
 /** The guardian names the app inside the person's copy; the server is beside it there. */
@@ -173,8 +150,7 @@ const core = new OuroCore({
   peerMemoryPullIntervalMs: Number(environment.OURO_PEER_MEMORY_PULL_MS ?? 30_000),
   // The hub offers bases on installed machines, and the publisher machine publishes them there (M6); a folder stands in for it.
   baseSource: baseSourceOf(environment),
-  basePublishTarget: basePublishTargetOf(environment),
-  privateNamesFile: environment.OURO_PRIVATE_NAMES_FILE ?? null,
+  githubApi: httpGitHubApi(environment.OURO_GITHUB_API_URL ?? 'https://api.github.com'),
   guardian: agentBaseEnv.OURO_GUARDIAN_SOCKET ? guardianClient(agentBaseEnv.OURO_GUARDIAN_SOCKET) : null,
   tailscale: tailscaleSetupFromEnvironment(),
   log: logEvent,

@@ -2,15 +2,12 @@
 // master agent, and nothing live changes. The merge goes live through the guardian, which builds, checks and switches to
 // it, rolling back if it turns out unhealthy; only then does the person's branch move to it. The ourod that starts a deploy
 // is replaced by it, so the update's state is stored and the next ourod follows the deployment to its end.
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import type { BaseStatus } from '@ouro/contract'
 import {
-  besideDirOf, changedBetween, commitBase, commitToDeploy, integratedBase, isMergedBeside, mergeBeside, mergeIntoPersonBranch,
-  receivedBase, removeBeside, unfinishedMergeIn,
+  besideDirOf, branchHas, changedBetween, commitToDeploy, integratedBase, isMergedBeside, mergeBeside, mergeIntoPersonBranch,
+  receivedBase, removeBeside, trackBase, unfinishedMergeIn,
 } from '../adapters/base-checkout.ts'
-import type { BaseSource, PublishedBase } from '../adapters/base-source.ts'
+import type { BaseRelease, BaseSource } from '../adapters/base-source.ts'
 import { deploymentOutcome } from '../adapters/guardian-client.ts'
 import type { GuardianClient } from '../adapters/guardian-client.ts'
 import { baseUpdateOf, conflictBrief, continueDecision, takeRefusal } from '../domain/base-update.ts'
@@ -46,7 +43,7 @@ export class BaseUpdates {
   private readonly config: BaseUpdatesConfig
   /** Null: this machine takes no bases. Read from git at start and after each update. */
   private integrated: number | null
-  private offered: PublishedBase | null = null
+  private offered: BaseRelease | null = null
   private lastOfferCheckAt = 0
   private checkingOffer = false
 
@@ -81,15 +78,20 @@ export class BaseUpdates {
   }
 
   private async checkOffer(): Promise<void> {
-    let latest: PublishedBase | null
+    let latest: BaseRelease | null
     try {
       latest = await this.config.baseSource!.latest()
+      // A copy made from a base has its commit but not its tag: with the tags fetched, it knows the base it is on.
+      if (latest !== null && this.config.sourceRoot !== null) {
+        await this.config.baseSource!.fetchTagsInto(this.config.sourceRoot)
+        this.integrated = integratedBase(this.config.sourceRoot)
+      }
     } catch (error) {
       this.config.log('base_offer_check_failed', { error: (error as Error).message })
       return
     }
-    const offered = latest !== null && this.integrated !== null && latest.n > this.integrated ? latest : null
-    if (offered?.n === this.offered?.n && offered?.notes === this.offered?.notes && offered?.treeHash === this.offered?.treeHash) return
+    const offered = latest !== null && this.integrated !== null && latest.n > this.integrated && !branchHas(this.config.sourceRoot!, latest.commit) ? latest : null
+    if (offered?.n === this.offered?.n && offered?.notes === this.offered?.notes && offered?.commit === this.offered?.commit) return
     this.offered = offered
     this.config.commit(() => this.config.offerChanged())
   }
@@ -123,7 +125,7 @@ export class BaseUpdates {
     }
   }
 
-  private async merge(base: PublishedBase): Promise<void> {
+  private async merge(base: BaseRelease): Promise<void> {
     const { n, notes } = base
     const root = this.config.sourceRoot!
     if (receivedBase(root) < n) await this.receive(root, base)
@@ -142,14 +144,9 @@ export class BaseUpdates {
     await this.deploy(n)
   }
 
-  private async receive(root: string, base: PublishedBase): Promise<void> {
-    const treeDir = mkdtempSync(join(tmpdir(), 'ouro-base-'))
-    try {
-      await this.config.baseSource!.fetch(base.n, treeDir)
-      commitBase(root, base.n, treeDir, base.treeHash)
-    } finally {
-      rmSync(treeDir, { recursive: true, force: true })
-    }
+  private async receive(root: string, base: BaseRelease): Promise<void> {
+    await this.config.baseSource!.fetchTagsInto(root)
+    trackBase(root, base.n)
   }
 
   private async deploy(n: number): Promise<void> {

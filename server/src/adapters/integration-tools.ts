@@ -268,6 +268,11 @@ export function realIntegrationTools(options: { dataDir: string; anthropicKeyFil
       if (!result.ok) return { accepted: false, why: `GitHub refused it: ${result.output.trim().split('\n')[0]!.slice(0, 200)}` }
       return { accepted: true }
     },
+    async githubToken() {
+      const result = await runTool('gh', ['auth', 'token', '--hostname', 'github.com'])
+      const token = result?.ok ? result.output.trim().split('\n')[0]!.trim() : ''
+      return token === '' ? null : token
+    },
     async githubDisconnect() {
       const result = await runTool('gh', ['auth', 'logout', '--hostname', 'github.com'])
       if (!result) throw new ProviderUnreachable("GitHub's gh tool isn't installed or didn't answer")

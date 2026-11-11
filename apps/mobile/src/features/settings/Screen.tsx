@@ -23,7 +23,7 @@ import { AutoArchiveSection, ReplyRemindersSection } from './AutoArchiveSection.
 import { claudePlanRows, isClaudeOnPlan, planUsageFooter } from '../shared/planUsage.ts'
 import { NotificationSections } from './NotificationSections.tsx'
 import { OPENROUTER_CREDITS_FOOTER, openRouterCreditsText } from '../integrations/model.ts'
-import { BASE_UPDATE_STARTED, baseSection, binaryVersionText, channelText, connectedText, faceIdNote, foldKey, foldOptions, leaveAction, peopleRows, SETTINGS_COPY, unpairFooter, updateHomeIndex, updateHomeOptions } from './model.ts'
+import { BACKUP_MADE_TOAST, backupSection, BASE_UPDATE_STARTED, baseSection, binaryVersionText, channelText, connectedText, faceIdNote, foldKey, foldOptions, leaveAction, peopleRows, SETTINGS_COPY, unpairFooter, updateHomeIndex, updateHomeOptions } from './model.ts'
 import type { FaceIdCheck, PersonRow } from './model.ts'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
 
@@ -41,6 +41,8 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
   const [invite, setInvite] = useState<{ code: string; expiresAt: number; link: string } | null>(null)
   const [inviteFailure, setInviteFailure] = useState<string | null>(null)
   const [removeFailure, setRemoveFailure] = useState<string | null>(null)
+  const [backupWorking, setBackupWorking] = useState(false)
+  const [backupFailure, setBackupFailure] = useState<string | null>(null)
   const [baseTakeOutcome, setBaseTakeOutcome] = useState<{ text: string; color: 'orange' | 'red' } | null>(null)
   const personRows = peopleRows(session.store.people.values(), session.store.devices.values())
   const { field, blurFields } = useBlurFields()
@@ -87,6 +89,16 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
     setBaseTakeOutcome(taken.ok ? { text: BASE_UPDATE_STARTED, color: 'orange' } : { text: failureText(taken.failure), color: 'red' })
   }
 
+  const startBackup = async (action: 'connect_github' | 'make_private_copy') => {
+    setBackupFailure(null)
+    if (action === 'connect_github') return navigation.navigate('GitHub')
+    setBackupWorking(true)
+    const made = await session.command('create_source_backup', {})
+    setBackupWorking(false)
+    if (made.ok) toast(BACKUP_MADE_TOAST)
+    else setBackupFailure(failureText(made.failure))
+  }
+
   const hasHostedAccount = core.hostedAccount !== null
   const leave = leaveAction(hasHostedAccount)
   // Signing out also refuses while the saved server list is damaged, so nothing recovery needs is deleted.
@@ -100,6 +112,7 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
   const homeOptions = updateHomeOptions(savedServers)
   const creditsText = openRouterCreditsText(session.store.integration('openrouter')?.state ?? null)
   const base = server ? baseSection(server.release.base, viewer?.isOwner ?? false) : null
+  const backup = server ? backupSection(server.sourceBackup, viewer?.isOwner ?? false) : null
   const planRows = server ? claudePlanRows(server.planUsage.claude, isClaudeOnPlan(session.store.integration('claude')?.state ?? null), now) : null
 
   return (
@@ -161,6 +174,14 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
                 {inviteFailure !== null ? <Note text={inviteFailure} color="red" /> : null}
               </>
             )}
+          </Section>
+        ) : null}
+        {backup ? (
+          <Section title="Backup" footer={<Text>{backup.detail}</Text>}>
+            <Note text={backup.warning} color="orange" />
+            {backup.failure !== null ? <Note text={backup.failure} color="red" /> : null}
+            {backup.action !== null ? <Button label={backupWorking ? 'Making a private copy…' : backup.action.label} onPress={() => { void startBackup(backup.action!.kind) }} /> : null}
+            {backupFailure !== null ? <Note text={backupFailure} color="red" /> : null}
           </Section>
         ) : null}
         {base ? (

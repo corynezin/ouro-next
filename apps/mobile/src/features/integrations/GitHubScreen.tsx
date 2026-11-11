@@ -8,18 +8,23 @@ import { font, foregroundStyle } from '@expo/ui/swift-ui/modifiers'
 import { HeaderButton, KV, Note } from '../../design/form.tsx'
 import { confirm } from '../../design/menus.tsx'
 import { toast } from '../../design/Toast.tsx'
-import { useSession } from '../../navigation/coreContext.tsx'
+import { failureText } from '../../core/session/serverApi.ts'
+import { backupSection, BACKUP_MADE_TOAST } from '../settings/model.ts'
+import { useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
 import type { ScreenProps } from '../../navigation/routes.ts'
 import { actionOutcome, CHECKING_TEXT, GITHUB_TOKEN_PAGE, gitHubConnectedToast, gitHubMissingScopesNote, gitHubName, pasted } from './model.ts'
 import { SecretField, useIntegration } from './parts.tsx'
 
 export function GitHubScreen({ navigation }: ScreenProps<'GitHub'>) {
-  const { api } = useSession()
+  const session = useSession()
+  useSessionVersion(session)
+  const { api } = session
   const github = useIntegration('github')?.state ?? null
   const [token, setToken] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [makingCopy, setMakingCopy] = useState(false)
 
   const sendToken = async (text = token) => {
     const value = pasted(text)
@@ -43,10 +48,19 @@ export function GitHubScreen({ navigation }: ScreenProps<'GitHub'>) {
     })
   }
 
+  const makePrivateCopy = async () => {
+    setMakingCopy(true); setError(null)
+    const made = await session.command('create_source_backup', {})
+    setMakingCopy(false)
+    if (made.ok) toast(BACKUP_MADE_TOAST)
+    else setError(failureText(made.failure))
+  }
+
   useLayoutEffect(() => {
     navigation.setOptions({ title: 'GitHub', headerRight: () => <HeaderButton title="Done" bold onPress={() => navigation.goBack()} /> })
   }, [navigation])
 
+  const backup = session.store.server ? backupSection(session.store.server.sourceBackup, session.store.viewer?.isOwner ?? false) : null
   const missingScopes = github ? gitHubMissingScopesNote(github) : null
   return (
     <Host style={{ flex: 1 }}>
@@ -56,6 +70,12 @@ export function GitHubScreen({ navigation }: ScreenProps<'GitHub'>) {
             <KV k="Account" v={github.user} />
             <KV k="Scopes" v={github.scopes.join(', ')} />
             {missingScopes !== null ? <Note text={missingScopes} /> : null}
+          </Section>
+        ) : null}
+        {github?.status === 'connected' && backup?.action?.kind === 'make_private_copy' ? (
+          <Section title="Back up your changes" footer={<Text>{backup.detail}</Text>}>
+            <Note text={backup.warning} color="orange" />
+            <Button label={makingCopy ? 'Making a private copy…' : backup.action.label} onPress={() => { void makePrivateCopy() }} />
           </Section>
         ) : null}
         {error !== null ? <Section><Note text={error} /></Section> : null}

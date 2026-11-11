@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { DEFAULT_NOTIFICATION_SETTINGS } from '@ouro/contract'
 import type { NotificationSettings } from '@ouro/contract'
 import {
-  baseSection, BASE_FOOTER, binaryVersionText, changedNotificationSettings, channelText, connectedText, faceIdNote, foldKey, foldOptions, leaveAction, notificationSettingsOf, peopleRows, unpairFooter, NOTIFY_MODE_OPTIONS, QUIET_HOURS_TIMES, updateHomeIndex, updateHomeOptions,
+  backupSection, BACKUP_WARNING, baseSection, BASE_FOOTER, binaryVersionText, changedNotificationSettings, channelText, connectedText, faceIdNote, foldKey, foldOptions, leaveAction, notificationSettingsOf, peopleRows, unpairFooter, NOTIFY_MODE_OPTIONS, QUIET_HOURS_TIMES, updateHomeIndex, updateHomeOptions,
 } from './model.ts'
 import type { NotificationChange } from './model.ts'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
@@ -130,4 +130,20 @@ test('the Ouro section shows the merged base, the update under way, a conflict o
   const failed = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'failed', n: 4, why: 'the build broke' } }, true)!
   assert.deepEqual(failed.note, { text: "Base 4 didn't go in: the build broke. Nothing live changed unless it says so.", color: 'red' })
   assert.deepEqual(failed.take, { n: 4, label: 'Update to base 4' }, 'a failed base can be tried again')
+})
+
+test('the Backup section warns while changes on no base have no private copy, and starts the setup the viewer can', () => {
+  assert.equal(backupSection({ state: 'not_applicable' }, true), null)
+  assert.equal(backupSection({ state: 'nothing_to_back_up' }, true), null)
+  assert.equal(backupSection({ state: 'backed_up', repository: 'me/ouro-next', behind: false, lastPushError: null }, true), null)
+
+  const noGithub = backupSection({ state: 'not_backed_up', github: 'not_connected' }, true)!
+  assert.equal(noGithub.warning, BACKUP_WARNING)
+  assert.deepEqual(noGithub.action, { kind: 'connect_github', label: 'Connect GitHub to back up' })
+  assert.deepEqual(backupSection({ state: 'not_backed_up', github: 'connected' }, true)!.action, { kind: 'make_private_copy', label: 'Make a private copy' })
+  assert.equal(backupSection({ state: 'not_backed_up', github: 'connected' }, false)!.action, null, 'only the owner makes it')
+
+  const failed = backupSection({ state: 'backed_up', repository: 'me/ouro-next', behind: true, lastPushError: 'remote: denied' }, true)!
+  assert.equal(failed.failure, 'remote: denied')
+  assert.equal(failed.action, null)
 })

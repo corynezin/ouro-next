@@ -30,35 +30,42 @@ const baseRepoUrl = `file://${baseRepo}`
 let repositories = 0
 const newRepository = () => new DistributionRepository(join(dir, `distribution-${++repositories}.git`), { source: configured, reference: 'main' })
 
-function publishInRepo(text: string, trailer: string): void {
+const tagInRepo = (n: number, text: string, name = `base-${n}`): void => {
   writeFileSync(join(baseRepo, 'file.txt'), text)
   git(baseRepo, 'add', '-A')
-  git(baseRepo, 'commit', '--quiet', '--allow-empty', '-m', `notes for ${text.trim()}`, '-m', trailer)
+  git(baseRepo, 'commit', '--quiet', '--allow-empty', '-m', `Ouro base ${n}`)
+  git(baseRepo, 'tag', '-a', '-m', `notes for ${text.trim()}`, name)
 }
+const withdrawInRepo = (n: number): void => void git(baseRepo, 'tag', '-a', '-m', 'withdrawn', `base-${n}-withdrawn`, `base-${n}`)
 
 const commitMessage = (repository: DistributionRepository, commit: string) => execFileSync('git', ['--git-dir', repository.gitDir, 'log', '-1', '--format=%B', commit], { encoding: 'utf8' }).trim()
 const fileOf = (repository: DistributionRepository, commit: string) => execFileSync('git', ['--git-dir', repository.gitDir, 'show', `${commit}:file.txt`], { encoding: 'utf8' })
 
-test('computers start on the repository\'s newest base not withdrawn, and on the configured distribution before its first', async () => {
+test('computers start on the repository\'s newest base tag not withdrawn, and on the configured distribution before its first', async () => {
   const repository = newRepository()
-  // No commits on main yet.
+  // No tags yet, and a lightweight one is no release.
+  writeFileSync(join(baseRepo, 'file.txt'), 'untagged\n')
+  git(baseRepo, 'add', '-A')
+  git(baseRepo, 'commit', '--quiet', '-m', 'before bases')
+  git(baseRepo, 'tag', 'base-1')
   assert.equal(commitMessage(repository, await repository.startingCommitFromBaseRepo(baseRepoUrl)).endsWith('Ouro-Base: 0'), true)
+  git(baseRepo, 'tag', '-d', 'base-1')
 
-  publishInRepo('one\n', 'Ouro-Base: 1')
-  publishInRepo('two\n', 'Ouro-Base: 2')
+  tagInRepo(1, 'one\n')
+  tagInRepo(2, 'two\n')
   const onTwo = await repository.startingCommitFromBaseRepo(baseRepoUrl)
-  assert.match(commitMessage(repository, onTwo), /Ouro-Base: 2$/)
+  assert.equal(commitMessage(repository, onTwo), 'Ouro base 2')
   assert.equal(fileOf(repository, onTwo), 'two\n')
 
-  publishInRepo('two\n', 'Ouro-Base-Withdrawn: 2')
+  withdrawInRepo(2)
   const onOne = await repository.startingCommitFromBaseRepo(baseRepoUrl)
   assert.equal(fileOf(repository, onOne), 'one\n')
   assert.equal(execFileSync('git', ['--git-dir', repository.gitDir, 'cat-file', '-t', onTwo], { encoding: 'utf8' }).trim(), 'commit', 'the commit promised earlier is kept')
 
-  publishInRepo('three\n', 'Ouro-Base: 3')
-  assert.equal(fileOf(repository, await repository.startingCommitFromBaseRepo(baseRepoUrl)), 'three\n')
-  publishInRepo('three\n', 'Ouro-Base-Withdrawn: 3')
-  publishInRepo('one\n', 'Ouro-Base-Withdrawn: 1')
+  tagInRepo(10, 'ten\n')
+  assert.equal(fileOf(repository, await repository.startingCommitFromBaseRepo(baseRepoUrl)), 'ten\n')
+  withdrawInRepo(10)
+  withdrawInRepo(1)
   assert.match(commitMessage(repository, await repository.startingCommitFromBaseRepo(baseRepoUrl)), /Ouro-Base: 0$/)
 })
 

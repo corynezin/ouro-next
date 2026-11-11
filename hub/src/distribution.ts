@@ -58,35 +58,24 @@ export class DistributionRepository {
   }
 
   /**
-   * What a computer asked for now is made from when the bases live in the git repository at `baseRepo`: its newest base
-   * commit not withdrawn, kept as it is (the files, notes and `Ouro-Base: n` trailer a taker reads). The hub's own bases
-   * play no part. Before the repository's first base, the configured distribution as base 0. An unreachable repository
-   * is an error, never a quiet start on the wrong base.
+   * What a computer asked for now is made from when the bases live in the git repository at `baseRepo`: the commit of its
+   * newest annotated tag `base-<n>` that has no annotated `base-<n>-withdrawn` beside it, kept as it is, with the history
+   * the computer's source then shares with the repository. The hub's own bases play no part. Before the repository's first
+   * base, the configured distribution as base 0. An unreachable repository is an error, never a quiet start on the wrong base.
    */
   async startingCommitFromBaseRepo(baseRepo: string): Promise<string> {
-    const advertised = await this.git('ls-remote', baseRepo, 'refs/heads/main')
-    if (advertised === '') return await this.commitBeforeBases()
-    await this.git('fetch', '--quiet', '--no-tags', baseRepo, '+refs/heads/main:refs/base-repo/main')
-    const log = await this.git('log', '--format=%H%x00%B%x01', 'refs/base-repo/main')
-    const withdrawn = new Set<number>()
-    let newest: { n: number; commit: string } | null = null
-    // The log runs newest first, so a base's withdrawal is read before the base.
-    for (const entry of log.split('\x01').filter((text) => text.trim() !== '')) {
-      const [commit, message] = entry.trim().split('\0') as [string, string]
-      const trailerLines = message.trim().split(/\n\n/).at(-1)!.split('\n')
-      const numberOf = (name: string) => {
-        const found = trailerLines.map((line) => new RegExp(`^${name}: ([1-9][0-9]*)$`).exec(line)).find((match) => match !== null)
-        return found ? Number(found[1]) : null
-      }
-      const withdrawnNumber = numberOf('Ouro-Base-Withdrawn')
-      if (withdrawnNumber !== null) withdrawn.add(withdrawnNumber)
-      const n = numberOf(BASE_TRAILER)
-      if (n !== null && (newest === null || n > newest.n) && !withdrawn.has(n)) newest = { n, commit }
-    }
-    if (newest === null) return await this.commitBeforeBases()
+    const advertised = await this.git('ls-remote', '--tags', baseRepo, 'refs/tags/base-*')
+    // An annotated tag is advertised twice, the second time peeled (`^{}`); a lightweight tag only once, and is no release.
+    const annotated = new Set(advertised.split('\n').flatMap((line) => /\trefs\/tags\/(.+)\^\{\}$/.exec(line)?.[1] ?? []))
+    const withdrawn = new Set([...annotated].flatMap((name) => /^base-([1-9][0-9]*)-withdrawn$/.exec(name)?.[1] ?? []).map(Number))
+    const released = [...annotated].flatMap((name) => /^base-([1-9][0-9]*)$/.exec(name)?.[1] ?? []).map(Number).filter((n) => !withdrawn.has(n))
+    if (released.length === 0) return await this.commitBeforeBases()
+    const newest = Math.max(...released)
+    await this.git('fetch', '--quiet', '--no-tags', baseRepo, `+refs/tags/base-${newest}:refs/base-repo/base-${newest}`)
+    const commit = await this.git('rev-parse', '--verify', `refs/base-repo/base-${newest}^{commit}`)
     // Kept by a ref of its own, as a computer was promised it.
-    await this.git('update-ref', `refs/repo-bases/${newest.commit}`, newest.commit)
-    return newest.commit
+    await this.git('update-ref', `refs/repo-bases/${commit}`, commit)
+    return commit
   }
 
   /** The configured distribution's files as they are now, as base 0. */

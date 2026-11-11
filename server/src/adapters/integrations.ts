@@ -33,6 +33,8 @@ export interface IntegrationTools {
   openrouterClearKey(): Promise<void>
   githubStatus(): Promise<GithubIntegrationState>
   githubSetToken(token: string): Promise<ActionOutcome>
+  /** The connected account's token, for GitHub's API; null when GitHub isn't connected. Never logged. */
+  githubToken(): Promise<string | null>
   githubDisconnect(): Promise<void>
 }
 
@@ -133,8 +135,13 @@ export function standInIntegrationTools(dir: string, keyFiles: { openrouter: str
     githubSetToken: async (token) => {
       if (!accepts(token)) return refused
       update((state) => { state.github = { status: 'connected', user: 'stand-in', scopes: ['repo'] } })
+      writeFileSync(join(dir, 'github-token'), token)
       return accepted
     },
-    githubDisconnect: async () => update((state) => { state.github = { status: 'not_connected' } }),
+    githubToken: async () => (read().github.status === 'connected' && existsSync(join(dir, 'github-token')) ? readFileSync(join(dir, 'github-token'), 'utf8') : null),
+    githubDisconnect: async () => {
+      rmSync(join(dir, 'github-token'), { force: true })
+      update((state) => { state.github = { status: 'not_connected' } })
+    },
   }
 }

@@ -186,12 +186,13 @@ export const commands = {
   /** Carries on with a base update once its conflicts are resolved and the merge is committed beside the live source. */
   continue_base_update: defineCommand(['agent'], Empty, z.object({ server: ServerEntity })),
   /**
-   * On the publisher: makes the source's branch, once it is the live version, the next base, with `notes` saying what
-   * changed. The same files as the newest base publish nothing new: `alreadyPublished`, and the base keeps its own notes.
+   * Backs the source's own commits up: makes a private repository on the connected GitHub account (`ouro-next`, or
+   * `ouro-next-<this server's name>` where that name is taken), makes it the source's `backup` remote and pushes the branch and
+   * its base tags to it. Doing it again finds the backup. Refused with `github_not_connected`.
    */
-  publish_base: defineCommand(['person', 'agent'], z.object({ notes: z.string().trim().min(1) }), z.object({ base: BaseOffer, alreadyPublished: z.boolean() })),
-  /** On the publisher: base `n` is offered no more; a later base fixes it. Withdrawing it again changes nothing. */
-  withdraw_base: defineCommand(['person', 'agent'], z.object({ n: z.number().int().positive() }), z.object({ base: BaseOffer })),
+  create_source_backup: defineCommand(['person'], Empty, z.object({ server: ServerEntity })),
+  /** Pushes the source's branch and base tags to its backup now, rather than after the next deploy. Refused with `no_source_backup` before one. */
+  push_source_backup: defineCommand(['person', 'agent'], Empty, z.object({ server: ServerEntity })),
   /**
    * Reads a provider's usage now, rather than after its next turn: ChatGPT's plan windows, which come back in
    * `server.planUsage`, or the OpenRouter key's spend and credits, which arrive in its `integration` entity. Refused with
