@@ -1,15 +1,15 @@
 // Acting on another of the person's computers, through two real servers: stop, interrupt, a new model and archive are done
 // on an agent there at once and show here at once, and a new agent can be started there, by the person or by an agent;
 // a computer that can't be reached refuses at once, safe to retry; and only a fully trusted computer may act at all, which
-// the other computer checks. What such an agent says to the person, and its asks, reach the computer the person talks to
-// it from, where the asks are answered.
+// the other computer checks. An agent's log there is read from here, by a fully trusted computer only. What such an
+// agent says to the person, and its asks, reach the computer the person talks to it from, where the asks are answered.
 import assert from 'node:assert/strict'
 import { createPrivateKey, createPublicKey } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
-import { PEER_API_PREFIX } from '@ouro/contract'
-import type { MessageEntity, PeerControl, PeerCreateAgent, RemoteAgentEntity } from '@ouro/contract'
+import { LogPage, PEER_API_PREFIX } from '@ouro/contract'
+import type { MessageEntity, PeerControl, PeerLogRequest, PeerCreateAgent, RemoteAgentEntity } from '@ouro/contract'
 import type { z } from 'zod'
 import { signatureHeaders } from '../server/src/adapters/peer-transport.ts'
 import { CommandFailed, JourneyRun, standInScript, waitFor } from './harness.ts'
@@ -90,6 +90,29 @@ async function signedAsAlpha(alphaIdAtBeta: string, route: string, body: string)
   const path = `${PEER_API_PREFIX}${route}`
   return await fetch(`${beta.url}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...signatureHeaders(alphaKey, alphaIdAtBeta, 'POST', path, body, Date.now()) }, body })
 }
+
+test("an agent's log is read from its computer, page by page, and only by a computer it trusts fully", async () => {
+  const copy = await betaAgent('logged')
+  const latest = await alphaPhone.remoteLog(copy.id)
+  assert.equal(latest.status, 200)
+  const page = LogPage.parse(latest.body)
+  assert.ok(page.records.some((record) => record.kind === 'text' && record.text.includes('ready')), JSON.stringify(page.records))
+  const since = LogPage.parse((await alphaPhone.remoteLog(copy.id, { after: page.endCursor })).body)
+  assert.deepEqual(since.records, [], 'nothing new since')
+
+  const alphaIdAtBeta = (await betaPhone.snapshot()).computers.find((computer) => computer.name === 'alpha')!.id
+  await betaPhone.command('set_computer_trust', { computerId: alphaIdAtBeta, trust: 'limited' })
+  try {
+    await waitFor('details withheld at alpha', async () => (await alphaPhone.snapshot()).remoteAgents.find((agent) => agent.id === copy.id)?.details === null)
+    assert.equal((await alphaPhone.remoteLog(copy.id)).status, 403)
+    const direct = await signedAsAlpha(alphaIdAtBeta, '/log', JSON.stringify({ agentName: 'logged', after: null, before: null } satisfies PeerLogRequest))
+    assert.equal(direct.status, 403, 'beta checks too')
+  } finally {
+    await betaPhone.command('set_computer_trust', { computerId: alphaIdAtBeta, trust: 'full' })
+    // Out of the way, so the tests after this one stay under beta's agent limit.
+    await betaPhone.command('archive_agent', { agentId: (await betaPhone.agent('logged')).id })
+  }
+})
 
 test("only a fully trusted computer may act, and the other computer checks", async () => {
   const copy = await betaAgent('guarded')

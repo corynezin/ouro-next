@@ -1,5 +1,5 @@
 // An agent on another of the person's computers: the direct chat with it, its open asks, its status, and with full trust
-// its controls.
+// its latest summary, its log and its controls.
 // Renders remoteAgent/model.ts.
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, Text, View, useWindowDimensions } from 'react-native'
@@ -26,7 +26,7 @@ export function RemoteChatScreen({ navigation, route }: ScreenProps<'RemoteChat'
   const { remoteAgentId } = route.params
   const session = useSession()
   const version = useSessionVersion(session)
-  useNow(30_000)
+  const now = useNow(1000)
   const headerHeight = useHeaderHeight()
   const bannerHeight = useBannerHeight()
   const titleWidth = useWindowDimensions().width - 160 // clear of the back and menu buttons
@@ -48,7 +48,7 @@ export function RemoteChatScreen({ navigation, route }: ScreenProps<'RemoteChat'
     messages: timeline?.messages ?? [], outbox: session.outbox.entriesIn(remoteAgentId), viewerAddress: store.viewer?.address, recipientLastOutputAt: null,
   }), [version, chatId, remoteAgentId])
 
-  const header = remote && computer ? remoteChatModel(remote, computer) : null
+  const header = remote && computer ? remoteChatModel(remote, computer, now) : null
   const asks = remote ? remoteAsksOf(store, remote) : []
   const panel = asksPanel(asks.map(openCopyOf), answeringAskId, Date.now())
   const actions = remote && computer ? remoteActionsOf(remote, computer) : []
@@ -59,7 +59,8 @@ export function RemoteChatScreen({ navigation, route }: ScreenProps<'RemoteChat'
     if (!done.ok) setNote(failureText(done.failure))
   }
 
-  const menuKey = actions.map((action) => action.kind).join(',')
+  const canReadLog = header?.canReadLog ?? false
+  const menuKey = `${actions.map((action) => action.kind).join(',')}|${canReadLog}`
   useLayoutEffect(() => {
     navigation.setOptions({
       title: header?.title ?? '',
@@ -69,13 +70,16 @@ export function RemoteChatScreen({ navigation, route }: ScreenProps<'RemoteChat'
           <Text style={{ fontSize: 11, color: C.secondary }} numberOfLines={1}>{header.subtitle}</Text>
         </View>
       ),
-      unstable_headerRightItems: () => actions.length ? [barMenu('ellipsis.circle', 'More', actions.map((action) => ({
-        title: ACTION_TITLE[action.kind],
-        destructive: action.kind === 'stop',
-        onPress: action.kind === 'archive' && remote
-          ? () => confirm(REMOTE_COPY.archiveTitle(remote.name), REMOTE_COPY.archiveMessage, 'Archive', () => { void control(action) })
-          : () => { void control(action) },
-      })))] : [],
+      unstable_headerRightItems: () => actions.length || canReadLog ? [barMenu('ellipsis.circle', 'More', [
+        ...(canReadLog ? [{ title: 'Log', onPress: () => navigation.navigate('RemoteLog', { remoteAgentId }) }] : []),
+        ...actions.map((action) => ({
+          title: ACTION_TITLE[action.kind],
+          destructive: action.kind === 'stop',
+          onPress: action.kind === 'archive' && remote
+            ? () => confirm(REMOTE_COPY.archiveTitle(remote.name), REMOTE_COPY.archiveMessage, 'Archive', () => { void control(action) })
+            : () => { void control(action) },
+        })),
+      ])] : [],
     })
   }, [navigation, header?.title, header?.subtitle, titleWidth, menuKey])
 
@@ -140,7 +144,13 @@ export function RemoteChatScreen({ navigation, route }: ScreenProps<'RemoteChat'
         ) : undefined}
       />
       {note !== null && <Text style={{ color: C.orange, fontSize: 12, paddingHorizontal: 18, paddingVertical: 3, backgroundColor: C.bar }} numberOfLines={2}>{note}</Text>}
-      <Text style={{ color: C.secondary, fontSize: 12, paddingHorizontal: 18, paddingVertical: 4, backgroundColor: C.bar }} numberOfLines={2}>{header.statusText}</Text>
+      {header.summaryLine !== null && (
+        <Text style={{ color: C.label, fontSize: 12, paddingHorizontal: 18, paddingVertical: 3, backgroundColor: C.bar }} numberOfLines={1}>{header.summaryLine}</Text>
+      )}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 18, paddingVertical: 4, backgroundColor: C.bar }}>
+        {header.busy && <ActivityIndicator size="small" style={{ transform: [{ scale: 0.7 }] }} />}
+        <Text style={{ color: C.secondary, fontSize: 12, flexShrink: 1 }} numberOfLines={2}>{header.statusText}</Text>
+      </View>
       <AsksPanel rows={panel.rows} hint={panel.hint} setAnsweringAskId={setAnsweringAskId} onChoose={chooseAnswer}
         onOptions={(ask, toggle) => openSnoozeSheet(session, ask, setNote, [{ title: ask.answering ? 'Reply to all instead' : 'Answer just this', onPress: toggle }])} />
       <Composer initialText={session.drafts.textOf(remoteAgentId)} onTextChange={(text) => session.drafts.setText(remoteAgentId, text)}

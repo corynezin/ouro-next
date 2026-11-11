@@ -3,8 +3,10 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
+import type { HostedServer } from '@ouro/contract'
 import type { HostedAccount } from '../../core/accounts/hostedAccount.ts'
-import { firstServerSetup, hostedServerSetup } from '../../core/hub/hostedSetup.ts'
+import { firstServerSetup, hostedServerSetup, machineServerSetup } from '../../core/hub/hostedSetup.ts'
+import type { HubResult } from '../../core/hub/hubApi.ts'
 import type { SetupFlow } from '../../core/hub/setupFlow.ts'
 import { C } from '../../design/colors.ts'
 import { Page, pageStyles as s, Primary, Secondary } from '../../design/onboardingPage.tsx'
@@ -96,6 +98,19 @@ export function HostedServerSetupView({ account, server, onLeave }: { account: H
   return (
     <View style={{ flex: 1, padding: 24, gap: 12, backgroundColor: C.background }}>
       <SetupContent flow={flow} title={SETUP_SCREEN_COPY.serverTitle(server.label)} inline failureMessage={null}
+        tryAgain={() => flow.flow.start()} failureActions={leave} progressActions={leave} />
+    </View>
+  )
+}
+
+/** Inside Servers, for a server the open one makes on a cloud account. Leaving stops watching; the open server carries on. */
+export function MachineSetupView({ label, read, onLeave }: { label: string; read: () => Promise<HubResult<HostedServer>>; onLeave: () => void }) {
+  const core = useCore()
+  const flow = useSetupFlow((onChange) => machineServerSetup(core, read, onChange))
+  const leave = <Secondary title="Leave" onPress={onLeave} />
+  return (
+    <View style={{ flex: 1, padding: 24, gap: 12, backgroundColor: C.background }}>
+      <SetupContent flow={flow} title={SETUP_SCREEN_COPY.serverTitle(label)} inline failureMessage={null}
         tryAgain={() => flow.flow.start()} failureActions={leave} progressActions={leave} />
     </View>
   )

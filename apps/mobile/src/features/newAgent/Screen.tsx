@@ -1,10 +1,12 @@
 // Start an agent that reports to you, here or on another of your computers. A sheet.
-import { useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { Form, Host, Picker, Section, Text } from '@expo/ui/swift-ui'
 import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers'
 import { Field, HeaderButton, Note, useBlurFields } from '../../design/form.tsx'
 import { failureText } from '../../core/session/serverApi.ts'
-import { useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
+import { useCore, useCoreVersion, useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
+import type { SavedServer } from '../../core/accounts/savedServers.ts'
+import { serverShortName } from '../settings/model.ts'
 import type { ScreenProps } from '../../navigation/routes.ts'
 import type { PromptCacheLifetime } from '@ouro/contract'
 import { canStartAgent, hasPromptCache, machineFooter, machineOptions, modelGroups, newAgentInput, newRemoteAgentInput, PROMPT_CACHE_OPTIONS, typedAgentName } from './model.ts'
@@ -23,7 +25,12 @@ export function NewAgentScreen({ navigation }: ScreenProps<'New'>) {
   const { field, blurFields } = useBlurFields()
   const model = chosenModel ?? server?.defaultModel ?? null
   const groups = useMemo(() => modelGroups(server?.models ?? [], model), [version, model])
-  const machines = useMemo(() => machineOptions(session.store.computers.values()), [version])
+  const core = useCore()
+  const coreVersion = useCoreVersion(core)
+  const [savedServers, setSavedServers] = useState<SavedServer[]>([])
+  useEffect(() => { core.servers.list().then(setSavedServers, () => {}) }, [core, coreVersion])
+  const hereLabel = serverShortName(savedServers, session.serverId, server?.machineName ?? null)
+  const machines = useMemo(() => machineOptions(session.store.computers.values(), savedServers, hereLabel), [version, savedServers, hereLabel])
   const machine = machines.find((option) => option.key === machineKey) ?? null
   const remoteComputerId = machine?.computerId ?? null
   const cacheShown = hasPromptCache(server?.models ?? [], model)

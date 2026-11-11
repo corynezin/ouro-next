@@ -1,12 +1,14 @@
 // One server's HTTP API, typed from `contract`. Never throws: every outcome is a value, and every answer is validated.
 import {
   AttachmentRef, AwsActionResult, AwsIntegrationState, ChatgptLoginStart, ClaudeLoginStart, CommandRequest, commands, ErrorResponse, HistoryPage,
-  IntegrationActionResult, LogPage, SearchPage, Snapshot, SummaryPage, SyncFrame,
+  IntegrationActionResult, LogPage, MachineList, NewMachine, SearchPage, Snapshot, SpritesActionResult, SpritesIntegrationState, SummaryPage, SyncFrame,
 } from '@ouro/contract'
-import type { ApiError, AwsCredentialsBody, CommandInput, CommandName, CommandOutput } from '@ouro/contract'
-import type { z } from 'zod'
+import type { ApiError, AwsCredentialsBody, CreateMachineBody, CommandInput, CommandName, CommandOutput } from '@ouro/contract'
+import { z } from 'zod'
 import { TailscaleStatus } from '@ouro/contract'
 import type { Clock, HttpRequest, HttpResponse, HttpStream, IdSource, Network } from '../platform/ports.ts'
+
+const EmptyAnswer = z.object({})
 
 export interface ServerEndpoint { url: string; token: string }
 
@@ -120,6 +122,12 @@ export class ServerApi {
     return this.read(`/v2/agents/${encodeURIComponent(agentId)}/log${query}`, LogPage)
   }
 
+  /** A page of the log of an agent on another computer: this server reads it from there. */
+  remoteLog(remoteAgentId: string, position: { before: number } | { after: number } | null) {
+    const query = !position ? '' : 'before' in position ? `?before=${position.before}` : `?after=${position.after}`
+    return this.read(`/v2/remote-agents/${encodeURIComponent(remoteAgentId)}/log${query}`, LogPage)
+  }
+
   /** Newest first, from before summary number `beforeNumber` when given. */
   summaries(agentId: string, page: { beforeNumber: number | null; limit: number }) {
     const before = page.beforeNumber === null ? '' : `&before=${page.beforeNumber}`
@@ -151,6 +159,25 @@ export class ServerApi {
   awsStatus() { return this.integrationRoute('GET', 'aws', null, AwsIntegrationState) }
   awsSetCredentials(credentials: AwsCredentialsBody) { return this.integrationRoute('POST', 'aws/credentials', credentials, AwsActionResult) }
   awsDisconnect() { return this.integrationRoute('POST', 'aws/disconnect', null, AwsActionResult) }
+  spritesStatus() { return this.integrationRoute('GET', 'sprites', null, SpritesIntegrationState) }
+  spritesSetToken(token: string) { return this.integrationRoute('POST', 'sprites/token', { token }, SpritesActionResult) }
+  spritesDisconnect() { return this.integrationRoute('POST', 'sprites/disconnect', null, SpritesActionResult) }
+
+  /** Where this server can make new servers, and the ones it is making or made that no phone has paired with yet. */
+  machines() { return this.read('/v2/machines', MachineList) }
+  /** Poll this while it is made: once ready it carries a pairing code. */
+  machine(id: string) { return this.read(`/v2/machines/${encodeURIComponent(id)}`, NewMachine) }
+  createMachine(body: CreateMachineBody) {
+    return this.exchange((signal) => this.network.request({
+      method: 'POST', url: this.url('/v2/machines'), headers: this.headers(true), body: JSON.stringify(body), signal,
+    }), COMMAND_TIMEOUT_MS, NewMachine)
+  }
+  /** Destroys the machine and forgets it. */
+  deleteMachine(id: string) {
+    return this.exchange((signal) => this.network.request({
+      method: 'DELETE', url: this.url(`/v2/machines/${encodeURIComponent(id)}`), headers: this.headers(false), body: null, signal,
+    }), COMMAND_TIMEOUT_MS, EmptyAnswer)
+  }
 
   /** Reissuing with the same key returns the first result and repeats nothing. */
   command<N extends CommandName>(name: N, input: CommandInput<N>, idempotencyKey: string): Promise<ApiResult<CommandOutput<N>>> {

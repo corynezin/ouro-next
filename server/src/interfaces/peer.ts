@@ -53,6 +53,7 @@ async function answer(peers: Peers, request: PeerHttpRequest): Promise<unknown> 
   if (request.method === 'POST' && route === '/move-check') return peers.receiveMoveCheck(peer, parseBody(request.body))
   if (request.method === 'POST' && route === '/move') return peers.receiveMove(peer, parseBody(request.body))
   if (request.method === 'POST' && route === '/agents') return peers.receiveAgentsRequest(peer)
+  if (request.method === 'POST' && route === '/log') return peers.receiveLogRequest(peer, parseBody(request.body))
   if (request.method === 'POST' && route === '/memory') return peers.receiveMemoryRequest(peer, parseBody(request.body))
   if (request.method === 'POST' && route === '/group-updates') return peers.receiveGroupUpdate(peer, parseBody(request.body))
   if (request.method === 'POST' && route === '/owner-messages') return peers.receiveOwnerMessage(peer, parseBody(request.body))

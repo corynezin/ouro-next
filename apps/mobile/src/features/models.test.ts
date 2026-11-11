@@ -541,13 +541,14 @@ test('starting needs a task; a blank name lets the server generate one', () => {
   assert.equal('promptCacheLifetime' in newAgentInput('do it', '', 'gpt', null), false, 'a model without a cache sends none')
 })
 
-test('the Machine picker: here, then fully trusting computers by name; none of them, no picker', () => {
-  const computer = (id: string, name: string, trust: ComputerEntity['trust']): ComputerEntity => ({
-    id, name, trust, status: 'online', lastSeenAt: NOW, release: 'r1', agentsRunning: 0, agentCount: 0, incompatibility: null, joinedAt: 1,
+test('the Machine picker: here, then fully trusting computers by their names in Settings; none of them, no picker', () => {
+  const computer = (id: string, name: string, trust: ComputerEntity['trust'], address: string | null = null): ComputerEntity => ({
+    id, name, trust, status: 'online', lastSeenAt: NOW, release: 'r1', agentsRunning: 0, agentCount: 0, incompatibility: null, joinedAt: 1, address,
   })
-  assert.deepEqual(machineOptions([computer('c3', 'pi', 'limited')]), [])
-  assert.deepEqual(machineOptions([computer('c1', 'mac', 'full'), computer('c2', 'linux', 'full'), computer('c3', 'pi', 'limited')]).map((option) => [option.label, option.computerId]),
-    [['Cloud computer', null], ['linux', 'c2'], ['mac', 'c1']])
+  const saved = [{ id: 's9', label: 'Work box', url: 'https://mac.test/', deviceName: 'phone', deviceId: 'd', personName: null, hostedServerId: null }]
+  assert.deepEqual(machineOptions([computer('c3', 'pi', 'limited')], saved, 'Home'), [])
+  assert.deepEqual(machineOptions([computer('c1', 'mac', 'full', 'https://mac.test'), computer('c2', 'linux', 'full', 'https://linux.test'), computer('c3', 'pi', 'limited')], saved, 'Home').map((option) => [option.label, option.computerId]),
+    [['Home', null], ['linux', 'c2'], ['Work box', 'c1']], 'a paired computer goes by its Settings name; the others by their own')
   assert.equal(machineFooter('mac'), 'It runs on mac and reports to you here.')
   assert.deepEqual(newRemoteAgentInput('c1', 'do it', ' bob ', null, null), { computerId: 'c1', task: 'do it', name: 'bob', model: null, folder: null })
   assert.equal(newRemoteAgentInput('c1', 'do it', '', 'opus', '1h').promptCacheLifetime, '1h', 'a 1 hour cache goes to the other computer too')

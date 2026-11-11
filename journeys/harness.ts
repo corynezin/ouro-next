@@ -381,6 +381,13 @@ export class AppClient {
     return SummaryPage.parse(await response.json())
   }
 
+  /** A page of the log of an agent on another computer, read through this server: its status and body. */
+  async remoteLog(remoteAgentId: string, position: { after?: number; before?: number } = {}): Promise<{ status: number; body: unknown }> {
+    const query = new URLSearchParams(Object.entries(position).map(([key, value]): [string, string] => [key, String(value)]))
+    const response = await this.request(`/v2/remote-agents/${encodeURIComponent(remoteAgentId)}/log?${query}`)
+    return { status: response.status, body: await response.json() }
+  }
+
   async search(query: string, limit?: number): Promise<SearchPage> {
     const params = new URLSearchParams({ q: query, ...(limit === undefined ? {} : { limit: String(limit) }) })
     const response = await this.request(`/v2/search?${params}`)

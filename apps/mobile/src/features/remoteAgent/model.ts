@@ -3,7 +3,7 @@ import { MASTER_AGENT_NAME } from '@ouro/contract'
 import type { ComputerEntity, RemoteAgentEntity, RemoteAskEntity } from '@ouro/contract'
 import type { IdleFold } from '../../core/accounts/preferences.ts'
 import type { NewSend } from '../../core/session/outbox.ts'
-import { ago, oneLine } from '../../design/format.ts'
+import { ago, oneLine, timerText } from '../../design/format.ts'
 import { activityOf, directChatWith, foldMinutes, stateOf } from '../shared/agentFacts.ts'
 import type { ListPlace, StoreView } from '../shared/agentFacts.ts'
 
@@ -112,15 +112,30 @@ export function remoteActionsOf(remote: RemoteAgentEntity, computer: ComputerEnt
   return actions
 }
 
-export interface RemoteChatModel { title: string; subtitle: string; statusText: string }
+export interface RemoteChatModel {
+  title: string
+  subtitle: string
+  statusText: string
+  busy: boolean
+  /** Its latest one-line summary, as its computer last told this one. */
+  summaryLine: string | null
+  /** Its log is read from its computer, which shows it only to a computer it trusts fully. */
+  canReadLog: boolean
+}
 
-/** The bare name as the title with its computer beneath, and its status, which says so when that computer shows no more. */
-export function remoteChatModel(remote: RemoteAgentEntity, computer: ComputerEntity): RemoteChatModel {
+/** The bare name as the title with its computer beneath, and its status, which says so when that computer shows no more.
+ * While it works, the status runs a timer, as a local agent's does. */
+export function remoteChatModel(remote: RemoteAgentEntity, computer: ComputerEntity, now: number): RemoteChatModel {
   const status = remoteStatusText(remote, computer)
+  const statusLabel = remote.details ? status : `${status} · ${REMOTE_COPY.limited}`
+  const activity = remote.details && computer.status !== 'offline' ? activityOf(remote.details) : null
   return {
     title: remote.name,
     subtitle: `@${computer.name}`,
-    statusText: remote.details ? status : `${status} · ${REMOTE_COPY.limited}`,
+    statusText: activity ? `${statusLabel}  ${timerText(now - activity.since)}` : statusLabel,
+    busy: activity !== null,
+    summaryLine: remote.details?.summaryLine ?? null,
+    canReadLog: remote.details !== null,
   }
 }
 

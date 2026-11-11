@@ -1,7 +1,7 @@
 // The accounts this server's agents use, as the screens show them. Each reads its provider's `integration` entity, which
 // is absent until the server has first asked that provider's tool. Pure.
 import type {
-  AwsActionResult, AwsIntegrationState, ChatgptIntegrationState, ClaudeIntegrationState, GithubIntegrationState, IntegrationActionResult, IntegrationEntity,
+  AwsActionResult, AwsIntegrationState, SpritesActionResult, SpritesIntegrationState, ChatgptIntegrationState, ClaudeIntegrationState, GithubIntegrationState, IntegrationActionResult, IntegrationEntity,
   OpenrouterIntegrationState, PlanUsage, PlanWindow,
 } from '@ouro/contract'
 import type { ApiResult } from '../../core/session/serverApi.ts'
@@ -150,4 +150,25 @@ export const awsIdentityText = (arn: string | null) => (arn === null ? null : ar
 export function awsCredentialsOf(accessKeyId: string, secretAccessKey: string, region: string) {
   const values = { accessKeyId: accessKeyId.trim(), secretAccessKey: secretAccessKey.trim(), region: region.trim().toLowerCase() }
   return values.accessKeyId && values.secretAccessKey && values.region ? values : null
+}
+
+// ---- Sprites ----
+
+/** Fly.io's sign-in: Sprites tokens are made in the Fly.io dashboard, under the person's organization, whose address this
+ * app doesn't know. From there: Sprites → Tokens. */
+export const SPRITES_TOKENS_PAGE = 'https://fly.io/app/sign-in'
+
+export type SpritesOutcome = { kind: 'accepted'; state: SpritesIntegrationState } | { kind: 'failed'; text: string }
+
+/** The Sprites API refusing the token is said in the server's words. */
+export function spritesOutcome(result: ApiResult<SpritesActionResult>, refusedText: string): SpritesOutcome {
+  if (!result.ok) return { kind: 'failed', text: failureText(result.failure) }
+  if (!result.value.accepted) return { kind: 'failed', text: result.value.why.trim() || refusedText }
+  return { kind: 'accepted', state: result.value.state }
+}
+
+/** What the screen sends: the token without the spaces or line breaks a paste brings, or null while there is none. */
+export function spritesTokenOf(typed: string): string | null {
+  const token = typed.replace(/\s+/g, '')
+  return token || null
 }

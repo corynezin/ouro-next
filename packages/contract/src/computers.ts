@@ -27,6 +27,8 @@ export const ComputerEntity = z.object({
   /** Why the two can't work together (their protocol versions don't overlap), fit to show; null: they can. */
   incompatibility: z.string().nullable(),
   joinedAt: z.number().int(),
+  /** Where its peer API is reached, which is also the URL a phone pairs with; absent from servers before it was sent. */
+  address: z.string().nullable().optional(),
 })
 export type ComputerEntity = z.infer<typeof ComputerEntity>
 
@@ -41,7 +43,7 @@ export const PEER_API_PREFIX = '/peer/v1'
 /** The wire protocol this release speaks, and the oldest it still speaks. Two machines work together when each one's
  * protocol is within the other's range. `hello` and `forget` keep their shapes forever, so any two versions can see each
  * other and part; every other request passes only between machines that work together. */
-export const PEER_PROTOCOL = 5
+export const PEER_PROTOCOL = 6
 export const PEER_MIN_PROTOCOL = 1
 /** The first protocol with POST /owner-messages: a machine sends it only to peers that speak it. */
 export const PEER_OWNER_MESSAGES_PROTOCOL = 2
@@ -52,6 +54,8 @@ export const PEER_MEMORY_PROTOCOL = 4
 /** The first protocol with POST /owner-ask-snoozes and the `snooze_changed` owner-ask update: a machine sends them only to
  * peers that speak it. */
 export const PEER_ASK_SNOOZE_PROTOCOL = 5
+/** The first protocol with POST /log: a machine asks it only of peers that speak it. */
+export const PEER_LOG_PROTOCOL = 6
 
 /** A machine as it introduces itself. `address`: where its peer API is reached. */
 export const PeerIdentity = z.object({
@@ -173,6 +177,11 @@ export type PeerAskSnoozeResult = z.infer<typeof PeerAskSnoozeResult>
 /** A memory note: its file name in a memory folder, and its text. */
 export const PeerNote = z.object({ file: z.string(), text: z.string() })
 export type PeerNote = z.infer<typeof PeerNote>
+
+/** POST /log, signed, from a fully trusted peer: a page of one agent's log, as `GET /v2/agents/<id>/log` answers it
+ * (`after` follows, `before` pages back, neither is the latest page). Answered with a LogPage. */
+export const PeerLogRequest = z.object({ agentName: z.string(), after: z.number().int().nonnegative().nullable(), before: z.number().int().nonnegative().nullable() })
+export type PeerLogRequest = z.infer<typeof PeerLogRequest>
 
 /** POST /memory, signed, only between machines that trust each other fully: the asker's notes, for the projects it has. */
 export const PeerMemoryRequest = z.object({ projectKeys: z.array(z.string()).max(1000) })

@@ -70,6 +70,7 @@ import type { RegisterUpdateInput } from './app-updates.ts'
 import { CommandRefused } from './failure.ts'
 import { Notifier } from './notifier.ts'
 import { Integrations } from './integrations.ts'
+import type { Machines } from './machines.ts'
 import { Peers } from './peers.ts'
 import { BaseUpdates } from './base-updates.ts'
 import { SourceBackupKeeper } from './source-backup.ts'
@@ -141,6 +142,8 @@ export interface CoreConfig {
   guardian: GuardianClient | null
   /** Whether Ouro sets Tailscale up on this server, and with what. */
   tailscale: TailscaleSetup
+  /** New servers this one makes on its cloud accounts; absent where none can be made, as in journeys. */
+  machines?: Machines | null
   log: (event: string, fields: Record<string, unknown>) => void
 }
 
@@ -254,6 +257,7 @@ export class OuroCore {
   /** Unanswered handoffs, by agent: how many, and when the next is due. */
   private readonly handoffRetries = new Map<string, { attempts: number; at: number }>()
   readonly tailscale: TailscaleConnection
+  readonly machines: Machines | null
 
   constructor(config: CoreConfig) {
     this.config = config
@@ -324,6 +328,7 @@ export class OuroCore {
       tellMasterAgent: (text) => this.alert(MASTER_AGENT_NAME, text),
       log: config.log,
     })
+    this.machines = config.machines ?? null
     this.tailscale = new TailscaleConnection({ setup: config.tailscale, hostname: tailscaleHostnameOf(config.machineName), now: () => config.clock.now(), log: config.log })
     this.notifier = new Notifier({
       store: this.store,
@@ -366,6 +371,10 @@ export class OuroCore {
       memoryProjectKeys: () => this.memory.projectKeys(),
       memoryForPeer: (peer, projectKeys) => this.memory.notesForPeer({ machineId: peer.machineId }, projectKeys),
       memoryFromPeer: (peer, memory) => this.memory.takeNotesFromPeer({ machineId: peer.machineId, name: peer.name }, memory),
+      logForPeer: (request) => {
+        const agent = this.store.activeAgentByName(request.agentName)
+        return agent ? this.agentLog(agent.id, { after: request.after, before: request.before }) : null
+      },
       moveCheckFromPeer: (peer, check) => this.moveCheckFromPeer(peer, check),
       moveFromPeer: (peer, move) => this.commit(() => this.moveFromPeer(peer, move)),
       agentCards: (trust) => this.store.listUnarchivedAgents().map((agent) => this.agentCard(agent, trust)),
@@ -1547,6 +1556,11 @@ export class OuroCore {
     const end = request.before ?? journalSize(path)
     const { records, start } = readJournalBackward(path, end, LOG_PAGE_BYTES)
     return { records: toLogRecords(records), startCursor: start, endCursor: end, hasEarlier: start > 0 }
+  }
+
+  /** A page of the log of an agent on another computer, read from there. */
+  remoteAgentLog(remoteAgentId: string, request: { after: number | null; before: number | null }): Promise<LogPage> {
+    return this.peers.remoteLog(remoteAgentId, request)
   }
 
   agentSummaries(agentId: string, before: number | null, limit: number): SummaryPage {

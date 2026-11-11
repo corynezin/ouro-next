@@ -3,13 +3,14 @@
 // socket already runs as the owner's user.
 import { createReadStream, statSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { AwsCredentialsBody, CHANGES_HEARTBEAT_MS, ClaudeLoginFinishBody, GithubTokenBody, IdempotencyKey, MAX_ATTACHMENT_BYTES, PairRequest, SEARCH_DEFAULT_LIMIT, SecretKeyBody, UPDATE_ASSETS_PATH, UPDATE_MANIFEST_PATH, UPDATE_PROTOCOL_VERSION } from '@ouro/contract'
+import { AwsCredentialsBody, CHANGES_HEARTBEAT_MS, CreateMachineBody, SpritesTokenBody, ClaudeLoginFinishBody, GithubTokenBody, IdempotencyKey, MAX_ATTACHMENT_BYTES, PairRequest, SEARCH_DEFAULT_LIMIT, SecretKeyBody, UPDATE_ASSETS_PATH, UPDATE_MANIFEST_PATH, UPDATE_PROTOCOL_VERSION } from '@ouro/contract'
 import { UPDATE_PLATFORM } from '../app/app-updates.ts'
 import { fileTypeOf } from '../domain/file-type.ts'
 import type { SyncFrame, Viewer } from '@ouro/contract'
 import type { Caller, OuroCore } from '../app/core.ts'
 import { CommandRefused } from '../app/failure.ts'
 import type { Integrations } from '../app/integrations.ts'
+import type { Machines } from '../app/machines.ts'
 import { handlePeerRequest, isPeerPath, PEER_MOVE_PATH } from './peer.ts'
 import type { z } from 'zod'
 
@@ -140,6 +141,12 @@ export function createApiHandler(core: OuroCore, trust: ListenerTrust, logging: 
       return replyJson(response, 200, core.executeCommand(caller, command[1]!, key.data, body.input, prepared))
     }
 
+    if (path === '/v2/machines' || path.startsWith('/v2/machines/') || path.startsWith('/v2/integrations/sprites')) {
+      if (caller.kind !== 'person' || !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner makes servers')
+      if (!core.machines) throw new CommandRefused('not_found', 'this server makes no servers')
+      return replyJson(response, 200, await machineAction(core.machines, method, path, request))
+    }
+
     if (path.startsWith('/v2/integrations/')) {
       if (caller.kind !== 'person') throw new CommandRefused('forbidden', 'accounts are set up from the app')
       return replyJson(response, 200, await integrationAction(core.integrations, method, path.slice('/v2/integrations/'.length), request))
@@ -166,6 +173,12 @@ export function createApiHandler(core: OuroCore, trust: ListenerTrust, logging: 
     const log = /^\/v2\/agents\/([^/]+)\/log$/.exec(path)
     if (log && method === 'GET') {
       return replyJson(response, 200, core.agentLog(decodeURIComponent(log[1]!), { after: integerParam(url, 'after'), before: integerParam(url, 'before') }))
+    }
+
+    const remoteLog = /^\/v2\/remote-agents\/([^/]+)\/log$/.exec(path)
+    if (remoteLog && method === 'GET') {
+      if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner reads logs on other computers')
+      return replyJson(response, 200, await core.remoteAgentLog(decodeURIComponent(remoteLog[1]!), { after: integerParam(url, 'after'), before: integerParam(url, 'before') }))
     }
 
     const summaries = /^\/v2\/agents\/([^/]+)\/summaries$/.exec(path)
@@ -300,6 +313,32 @@ function streamChanges(core: OuroCore, viewer: Viewer, caller: Caller, url: URL,
     unsubscribeRevocation()
   })
   pump()
+}
+
+/** New servers, and the Sprites account they can be made on. The token passes straight through: never logged. */
+async function machineAction(machines: Machines, method: string, path: string, request: IncomingMessage): Promise<unknown> {
+  const body = <S extends z.ZodType>(schema: S) => async (): Promise<z.infer<S>> => {
+    const parsed = schema.safeParse(await readJson(request))
+    if (!parsed.success) throw new CommandRefused('invalid_request', 'that request is missing what this action needs')
+    return parsed.data
+  }
+  const one = /^\/v2\/machines\/([^/]+)$/.exec(path)
+  if (one && method === 'GET') return await machines.get(decodeURIComponent(one[1]!))
+  if (one && method === 'DELETE') {
+    await machines.remove(decodeURIComponent(one[1]!))
+    return {}
+  }
+  switch (`${method} ${path}`) {
+    case 'GET /v2/machines': return await machines.list()
+    case 'POST /v2/machines': {
+      const { provider, label } = await body(CreateMachineBody)()
+      return await machines.create(provider, label)
+    }
+    case 'GET /v2/integrations/sprites': return await machines.spritesStatus()
+    case 'POST /v2/integrations/sprites/token': return await machines.spritesSetToken((await body(SpritesTokenBody)()).token)
+    case 'POST /v2/integrations/sprites/disconnect': return await machines.spritesDisconnect()
+    default: throw new CommandRefused('not_found', `no such route: ${method} ${path}`)
+  }
 }
 
 /** The accounts' routes. Codes, keys and tokens pass straight to the provider's tool: never stored here or logged. */

@@ -1,4 +1,5 @@
-// The person's other computers as rows, and the words around adding and removing one. Pure: Screen.tsx only draws this.
+// The person's other computers (each one's state, as Servers shows it), the words around linking one with a command, and
+// Tailscale. Pure: the screens only draw this.
 import type { ComputerEntity, ComputerTrust, TailscaleState } from '@ouro/contract'
 
 export interface ComputerRow {
@@ -86,12 +87,16 @@ export const TAILSCALE_COPY = {
   removeTitle: 'Remove Tailscale?',
   removeMessage: 'This server leaves your Tailscale network.',
   requestFailed: 'Tailscale request failed.',
+  open: 'Open Tailscale',
+  notNeeded: "This server reaches your computers without Tailscale. Connect it only if its agents need your other devices on your Tailscale network.",
 } as const
 
 export const COMPUTERS_COPY = {
   listTitle: 'Your computers',
   listFooter: 'When starting an agent, pick one under Machine.',
-  addTitle: 'Add a computer',
+  addTitle: 'Link a computer',
+  makeCommand: 'Make a command',
+  tailscaleFirst: 'This server reaches computers over Tailscale: connect it first.',
   addFooter: 'Use your own Mac or Linux machine for agents. Anything an agent can do on it, your Ouro server can ask for: it has your files and your logins, as you have. Add only computers you trust that with. It must stay on and awake for agents to run there.',
   making: 'Making an invite…',
   inviteTitle: 'Paste this on the computer',

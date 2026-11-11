@@ -1,5 +1,6 @@
-// Settings: integrations (connected or not, Tailscale among them), servers by short name, people and an invite page (the
-// owner's), computers, notifications (on or off, and urgent), updates (Ouro, backup and the app), archived agents, and signing out or
+// Settings: integrations (connected or not, Tailscale among them), servers by short name (each linked one is a computer the
+// others can run agents on), people and an invite page (the owner's),
+// notifications (on or off, and urgent), updates (Ouro, backup and the app), archived agents, and signing out or
 // unpairing. Notifications are in NotificationsSection. Renders settings/model.ts.
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { Linking } from 'react-native'
@@ -23,7 +24,7 @@ import {
 } from './model.ts'
 import type { PersonRow } from './model.ts'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
-import type { AwsIntegrationState, TailscaleState } from '@ouro/contract'
+import type { AwsIntegrationState, SpritesIntegrationState, TailscaleState } from '@ouro/contract'
 
 export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
   const updates = useUpdateFlow()
@@ -51,6 +52,14 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
     load()
     return navigation.addListener('focus', load)
   }, [navigation, session])
+  // Sprites, likewise; only the owner makes servers with it. An older server has no such route: then no row.
+  const [sprites, setSprites] = useState<{ state: SpritesIntegrationState | null; failed: boolean }>({ state: null, failed: false })
+  useEffect(() => {
+    if (!isOwner) return undefined
+    const load = () => { void session.api.spritesStatus().then((result) => setSprites(result.ok ? { state: result.value, failed: false } : { state: null, failed: true })) }
+    load()
+    return navigation.addListener('focus', load)
+  }, [navigation, session, isOwner])
   const [tailscale, setTailscale] = useState<{ state: TailscaleState | null; failed: boolean }>({ state: null, failed: false })
   useEffect(() => {
     if (!isOwner) return undefined
@@ -117,7 +126,6 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
   })
   const base = server ? baseSection(server.release.base, isOwner) : null
   const backup = server ? backupSection(server.sourceBackup, isOwner, now) : null
-  const computerCount = session.store.computers.size
 
   return (
     <Host style={{ flex: 1 }}>
@@ -125,7 +133,8 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
         <Section title="Integrations">
           {integrations.map((row) => <StatusRow key={row.key} title={row.title} status={row.status} onPress={() => navigation.navigate(row.route)} />)}
           <StatusRow title="AWS" status={awsStatusText(aws.state, aws.failed)} onPress={() => navigation.navigate('AWS')} />
-          {isOwner ? <StatusRow title="Tailscale" status={tailscaleStatusText(tailscale.state, tailscale.failed)} onPress={() => navigation.navigate('Computers')} /> : null}
+          {isOwner && !sprites.failed ? <StatusRow title="Sprites" status={awsStatusText(sprites.state, sprites.failed)} onPress={() => navigation.navigate('Sprites')} /> : null}
+          {isOwner ? <StatusRow title="Tailscale" status={tailscaleStatusText(tailscale.state, tailscale.failed)} onPress={() => navigation.navigate('Tailscale')} /> : null}
         </Section>
 
         <Section title="Servers">
@@ -149,12 +158,6 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
             ))}
             {removeFailure !== null ? <Note text={removeFailure} color="red" /> : null}
             <StatusRow title="Invite someone" onPress={() => navigation.navigate('Invite')} />
-          </Section>
-        ) : null}
-
-        {isOwner ? (
-          <Section title="Computers">
-            <StatusRow title={computerCount > 0 ? 'Your computers' : 'Add a computer'} status={computerCount > 0 ? String(computerCount) : null} onPress={() => navigation.navigate('Computers')} />
           </Section>
         ) : null}
 

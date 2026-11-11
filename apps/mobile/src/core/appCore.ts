@@ -147,6 +147,35 @@ export class AppCore {
   }
 
   /**
+   * Links two saved servers as each other's computers: `host` makes a one-use invite and `joiner` joins with it, so the
+   * person never copies a command. Words for the failure, or null if it worked. Only a server's owner may do either.
+   */
+  async linkServers(joiner: SavedServer, host: SavedServer): Promise<string | null> {
+    const [joining, hosting] = await Promise.all([this.servers.withToken(joiner), this.servers.withToken(host)])
+    if (!joining || !hosting) return NO_TOKEN_MESSAGE
+    const invite = await this.outboxFor(hosting).api.command('create_computer_invite', {}, this.deps.ids.newId())
+    if (!invite.ok) return failureText(invite.failure)
+    // `ouro computers join <address> <code>`
+    const [address, code] = invite.value.command.trim().split(/\s+/).slice(-2)
+    if (!address || !code) return 'The invite had no address.'
+    const joined = await this.outboxFor(joining).api.command('join_computer', { address, code }, this.deps.ids.newId())
+    return joined.ok ? null : failureText(joined.failure)
+  }
+
+  /** A server just added links itself with every other saved server it isn't linked with yet. Quietly best-effort: a server
+   * the person doesn't own, or can't be reached, stays unlinked and shows Link in Servers. */
+  private async linkWithOtherServers(added: SavedServer) {
+    const others = (await this.servers.list()).filter((server) => server.id !== added.id)
+    if (!others.length) return
+    const snapshot = await this.snapshotOf(added)
+    if (!snapshot?.ok) return
+    const linked = snapshot.value.computers.flatMap((computer) => computer.address ? [computer.address.replace(/\/+$/, '')] : [])
+    for (const other of others) {
+      if (!linked.includes(other.url.replace(/\/+$/, ''))) await this.linkServers(added, other).catch(() => null)
+    }
+  }
+
+  /**
    * Asks a server this phone is leaving to stop pushing to it. Not waited on and not retried: an unreachable server is
    * forgotten all the same, and its pushes then name a device this phone no longer has, so they open nothing.
    */
@@ -185,6 +214,7 @@ export class AppCore {
     // The first server paired gives this phone its updates, until the person picks another.
     if (this.preferences.current.updateHomeServerId === null) this.preferences.set('updateHomeServerId', server.id)
     await this.activate({ server, token: deviceToken })
+    void this.linkWithOtherServers(server).catch(() => {})
     return server
   }
 

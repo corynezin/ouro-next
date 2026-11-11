@@ -2,7 +2,9 @@
 // go. Each machine keeps the other as a peer, with the key it signs with. Requests between peers are signed; the invite's
 // code is the only credential for the one request that isn't, joining.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { PEER_ASK_SNOOZE_PROTOCOL, PEER_MEMORY_PROTOCOL, PEER_MIN_PROTOCOL, PeerAskSnooze, PeerAskSnoozeResult, PEER_PROTOCOL, PeerMemory, PeerMemoryRequest, PEER_SIGNATURE_HEADERS, PeerAgentList, PeerControl, PeerControlResult, PeerCreateAgent, PeerCreateAgentResult, PeerGroupPost, PeerGroupUpdate, PeerHello, PeerJoinResult, PeerMessage, PeerMessageResult, PeerMove, PeerOwnerAsk, PeerOwnerMessage, PeerMoveCheck, PeerMoveCheckResult, PeerMoveResult } from '@ouro/contract'
+import { LogPage as LogPageSchema } from '@ouro/contract'
+import type { LogPage } from '@ouro/contract'
+import { PEER_ASK_SNOOZE_PROTOCOL, PEER_LOG_PROTOCOL, PeerLogRequest, PEER_MEMORY_PROTOCOL, PEER_MIN_PROTOCOL, PeerAskSnooze, PeerAskSnoozeResult, PEER_PROTOCOL, PeerMemory, PeerMemoryRequest, PEER_SIGNATURE_HEADERS, PeerAgentList, PeerControl, PeerControlResult, PeerCreateAgent, PeerCreateAgentResult, PeerGroupPost, PeerGroupUpdate, PeerHello, PeerJoinResult, PeerMessage, PeerMessageResult, PeerMove, PeerOwnerAsk, PeerOwnerMessage, PeerMoveCheck, PeerMoveCheckResult, PeerMoveResult } from '@ouro/contract'
 import type { ComputerEntity, ComputerInvite, ComputerStatus, ComputerTrust, PeerAgentCard, PeerClaudePlan, PeerIdentity, PeerJoinRequest, PeerSender, RemoteAgentAction, RemoteAgentEntity } from '@ouro/contract'
 import { PeerRefused, PeerUnreachable, peerRequest, sha256Hex, signatureValid } from '../adapters/peer-transport.ts'
 import type { MachineKey } from '../adapters/peer-transport.ts'
@@ -55,6 +57,8 @@ export interface PeersConfig {
   memoryForPeer: (peer: PeerRow, projectKeys: string[]) => PeerMemory
   /** Takes in a fully trusted peer's memory. Runs its own transaction. */
   memoryFromPeer: (peer: PeerRow, memory: PeerMemory) => void
+  /** A page of the log of this machine's agent of that name, for a fully trusted peer. Null: no such agent here. */
+  logForPeer: (request: PeerLogRequest) => LogPage | null
   /** Whether an agent of this name could move here now. Changes nothing. */
   moveCheckFromPeer: (peer: PeerRow, check: PeerMoveCheck) => PeerMoveCheckResult
   /** A fully trusted peer hands an agent over. Runs its own transaction. */
@@ -155,6 +159,7 @@ export class Peers {
       agentCount: peer.hello?.agentCount ?? null,
       incompatibility: incompatibilityOf(peer),
       joinedAt: peer.joinedAt,
+      address: peer.address,
     }
   }
 
@@ -353,6 +358,33 @@ export class Peers {
     const request: PeerMemoryRequest = { projectKeys: this.config.memoryProjectKeys() }
     const answer = PeerMemory.parse(await this.signed(peer, 'POST', '/memory', request))
     this.config.memoryFromPeer(peer, answer)
+  }
+
+  /** A page of an agent's log, read from its computer at once. Only a computer that trusts this one fully shows it. */
+  async remoteLog(remoteAgentId: string, position: { after: number | null; before: number | null }): Promise<LogPage> {
+    const copy = this.remoteAgentById(remoteAgentId)
+    if (!copy) throw new CommandRefused('not_found', 'no such agent on another computer')
+    const peer = this.requireWorkingPeer(copy.computerId)
+    if (copy.details === null) throw new CommandRefused('forbidden', `${peer.name} trusts this computer only to message its agents`)
+    if ((peer.hello?.protocol ?? 0) < PEER_LOG_PROTOCOL) throw new CommandRefused('peer_incompatible', `${peer.name} needs an update before its agents' logs can be read here`)
+    let answer: unknown
+    try {
+      answer = await this.signed(peer, 'POST', '/log', { agentName: copy.name, ...position } satisfies PeerLogRequest)
+    } catch (error) {
+      if (error instanceof PeerUnreachable) throw new CommandRefused('peer_unreachable', `${peer.name} can't be reached: ${error.message}`)
+      if (error instanceof PeerRefused) throw new CommandRefused('forbidden', `${peer.name} refused: ${error.message}`)
+      throw error
+    }
+    return LogPageSchema.parse(answer)
+  }
+
+  receiveLogRequest(peer: PeerRow, body: unknown): LogPage {
+    if (peer.trust !== 'full') throw new PeerRequestRefused('forbidden', `${this.config.machineName} shows its agents' logs only to computers it trusts fully`)
+    const request = PeerLogRequest.safeParse(body)
+    if (!request.success) throw new PeerRequestRefused('invalid_request', 'not a log request')
+    const page = this.config.logForPeer(request.data)
+    if (!page) throw new PeerRequestRefused('not_found', `no agent named ${request.data.agentName} here`)
+    return page
   }
 
   receiveMemoryRequest(peer: PeerRow, body: unknown): PeerMemory {
