@@ -1,6 +1,7 @@
 // Settings → Computers: the person's other computers, how far each is trusted, adding one with a one-time command, and
-// removing one. On a hosted server, Tailscale comes first: it is how that server reaches the computers. The list comes from sync, so a computer that joins or goes offline shows here by itself. Renders
-// computers/model.ts.
+// removing one. On a Sprite, Tailscale comes first: it is how that server reaches the computers. A server with its own
+// public address (an EC2 instance) can connect Tailscale too, but adding a computer doesn't wait for it. The list comes
+// from sync, so a computer that joins or goes offline shows here by itself. Renders computers/model.ts.
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { Linking, Share } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
@@ -14,8 +15,8 @@ import { toast } from '../../design/Toast.tsx'
 import { useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
 import type { ScreenProps } from '../../navigation/routes.ts'
 import {
-  computerRows, COMPUTERS_COPY, inviteFooter, isTailscaleChanging, removeConfirm, someOffline, TAILSCALE_COPY, TAILSCALE_POLL_MS, tailscaleConnectedFooter,
-  tailscaleGateOf,
+  computerRows, COMPUTERS_COPY, inviteFooter, isTailscaleChanging, removeConfirm, someOffline, TAILSCALE_COPY, TAILSCALE_POLL_MS, tailscaleBlocksComputers,
+  tailscaleConnectedFooter, tailscaleGateOf,
 } from './model.ts'
 import type { ComputerRow } from './model.ts'
 
@@ -43,9 +44,23 @@ export function ComputersScreen({ navigation }: ScreenProps<'Computers'>) {
   }, [session, changing])
   // Unknown until the first answer: neither the Tailscale section nor an invite shows yet.
   const gate = tailscale === null ? null : tailscaleGateOf(tailscale.tailscale)
-  const canAdd = tailscale !== null && gate === null
+  const canAdd = tailscale !== null && !tailscaleBlocksComputers(tailscale)
+  // Where Tailscale is optional, connecting it comes after adding a computer rather than before.
+  const optional = tailscale?.neededForComputers === false
   const tailscaleFailure = tailscale?.lastFailure?.message ?? null
   const removeTailscale = () => confirm(TAILSCALE_COPY.removeTitle, TAILSCALE_COPY.removeMessage, 'Remove', () => { void askTailscale('DELETE') })
+
+  const tailscaleGate = gate === null ? null : (
+    <Section
+      title={optional ? TAILSCALE_COPY.optionalTitle : TAILSCALE_COPY.gateTitle}
+      footer={<Text>{optional ? TAILSCALE_COPY.optionalFooter : TAILSCALE_COPY.gateFooter}</Text>}
+    >
+      {tailscaleFailure !== null ? <Note text={tailscaleFailure} /> : null}
+      {gate.kind === 'connect' ? <Button label={TAILSCALE_COPY.connect} onPress={() => { void askTailscale('POST') }} /> : null}
+      {gate.kind === 'working' ? <Text>{gate.text}</Text> : null}
+      {gate.kind === 'approve' ? <Button label={TAILSCALE_COPY.approve} onPress={() => { void Linking.openURL(gate.loginUrl) }} /> : null}
+    </Section>
+  )
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: 'Computers', headerRight: () => <HeaderButton title="Done" bold onPress={() => navigation.goBack()} /> })
@@ -87,14 +102,7 @@ export function ComputersScreen({ navigation }: ScreenProps<'Computers'>) {
           </Section>
         ) : null}
         {error ? <Section><Note text={error} /></Section> : null}
-        {gate !== null ? (
-          <Section title={TAILSCALE_COPY.gateTitle} footer={<Text>{TAILSCALE_COPY.gateFooter}</Text>}>
-            {tailscaleFailure !== null ? <Note text={tailscaleFailure} /> : null}
-            {gate.kind === 'connect' ? <Button label={TAILSCALE_COPY.connect} onPress={() => { void askTailscale('POST') }} /> : null}
-            {gate.kind === 'working' ? <Text>{gate.text}</Text> : null}
-            {gate.kind === 'approve' ? <Button label={TAILSCALE_COPY.approve} onPress={() => { void Linking.openURL(gate.loginUrl) }} /> : null}
-          </Section>
-        ) : null}
+        {optional ? null : tailscaleGate}
         {!canAdd ? null : invite ? (
           <Section title={COMPUTERS_COPY.inviteTitle} footer={<Text>{inviteFooter(invite.expiresAt, Date.now())}</Text>}>
             <Text modifiers={[font({ design: 'monospaced', textStyle: 'footnote' }), textSelection(true)]}>{invite.command}</Text>
@@ -107,6 +115,7 @@ export function ComputersScreen({ navigation }: ScreenProps<'Computers'>) {
             <Button label={making ? COMPUTERS_COPY.making : COMPUTERS_COPY.addTitle} onPress={making ? () => {} : () => { void add() }} />
           </Section>
         )}
+        {optional ? tailscaleGate : null}
         {rows.length ? (
           <Section title={COMPUTERS_COPY.trustTitle} footer={<Text>{COMPUTERS_COPY.trustFooter}</Text>}>
             {rows.map((row) => <Toggle key={row.id} label={row.name} isOn={row.trust === 'full'} onIsOnChange={(on) => { void setTrust(row, on) }} />)}
@@ -117,7 +126,7 @@ export function ComputersScreen({ navigation }: ScreenProps<'Computers'>) {
             {rows.map((row) => <Button key={row.id} label={`Remove ${row.name}`} role="destructive" onPress={() => remove(row)} />)}
           </Section>
         ) : null}
-        {tailscale?.tailscale.state === 'connected' && !rows.length ? (
+        {tailscale?.tailscale.state === 'connected' && (optional || !rows.length) ? (
           <Section title={TAILSCALE_COPY.connectedTitle} footer={<Text>{tailscaleConnectedFooter(tailscale.tailscale.ip)}</Text>}>
             {tailscaleFailure !== null ? <Note text={tailscaleFailure} /> : null}
             <Button label={TAILSCALE_COPY.remove} role="destructive" onPress={removeTailscale} />

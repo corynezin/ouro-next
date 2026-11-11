@@ -25,6 +25,14 @@ export type TailscaleState = z.infer<typeof TailscaleState>
 export const TailscaleFailure = z.object({ action: z.enum(['connect', 'remove']), message: z.string() })
 export type TailscaleFailure = z.infer<typeof TailscaleFailure>
 
-/** The answer to every `/v2/tailscale` request: GET reads it, POST starts connecting, DELETE starts removing. */
-export const TailscaleStatus = z.object({ tailscale: TailscaleState, lastFailure: TailscaleFailure.nullable() })
+/**
+ * The answer to every `/v2/tailscale` request: GET reads it, POST starts connecting, DELETE starts removing.
+ * `neededForComputers`: whether this server reaches linked computers only over Tailscale (a Sprite). A server with its own
+ * public address (an EC2 instance) can still connect, for the person's other devices. Missing from older servers: true.
+ */
+export const TailscaleStatus = z.object({
+  tailscale: TailscaleState,
+  lastFailure: TailscaleFailure.nullable(),
+  neededForComputers: z.boolean().default(true),
+})
 export type TailscaleStatus = z.infer<typeof TailscaleStatus>

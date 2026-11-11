@@ -21,3 +21,22 @@ in `journeys/live/`, are paid, and run only by hand.
 Only one journey process runs at a time on a machine, across every checkout: the harness takes a lock
 (`$TMPDIR/ouro-rebirth-journey.lock`) when a journey file loads it, and others print who holds it and wait. A lock left
 by a process that is gone is taken over.
+
+## Installing on a Mac
+
+`scripts/install-run-mac.sh` installs the server on a Mac as the person's launch agents: it runs while they're logged in
+and starts again when they log in. It needs Homebrew, and the Tailscale app signed in to the same tailnet as the person's
+other computers, which reach it there. On the Mac, with the person's copy of the source on GitHub:
+
+```sh
+brew install gh && gh auth login
+gh repo clone <you>/<your copy> ~/ouro/source
+~/ouro/source/scripts/install-run-mac.sh
+```
+
+It puts `ouro` on the PATH. Then join the person's other computers: run `ouro computers invite` on one of them and paste
+the command it prints on the Mac. Or pass it to the installer, which joins once the server is live:
+`OURO_NEXT_JOIN="ouro computers join <address> <code>" ~/ouro/source/scripts/install-run-mac.sh`. Running the installer
+again updates it to the copy's current commit.
+
+Logs are in `~/ouro/logs/`; `launchctl bootout gui/$(id -u)/com.ouro.ouro-guardian` and `…/com.ouro.ouro-host` stop it.

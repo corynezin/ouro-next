@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { ComputerEntity, TailscaleState } from '@ouro/contract'
-import { computerRows, computerStateText, inviteFooter, isTailscaleChanging, removeConfirm, someOffline, tailscaleConnectedFooter, tailscaleGateOf } from './model.ts'
+import { computerRows, computerStateText, inviteFooter, isTailscaleChanging, removeConfirm, someOffline, tailscaleBlocksComputers, tailscaleConnectedFooter, tailscaleGateOf } from './model.ts'
 
 const computer = (partial: Partial<ComputerEntity> & { name: string }): ComputerEntity => ({
   id: `id-${partial.name}`, trust: 'full', status: 'online', lastSeenAt: 1, release: 'r1', agentsRunning: 0, agentCount: 0,
@@ -44,4 +44,10 @@ test('Tailscale comes first on a hosted server: connect, its progress, the login
   assert.equal(isTailscaleChanging({ state: 'logging_in', loginUrl: 'x' }), true)
   assert.equal(tailscaleConnectedFooter('100.64.0.7'), 'Connected as 100.64.0.7.')
   assert.equal(tailscaleConnectedFooter(null), 'Connected as this server.')
+})
+
+test('Tailscale holds up linking a computer only on a server that reaches computers through it alone', () => {
+  assert.equal(tailscaleBlocksComputers({ tailscale: { state: 'not_connected' }, lastFailure: null, neededForComputers: true }), true)
+  assert.equal(tailscaleBlocksComputers({ tailscale: { state: 'not_connected' }, lastFailure: null, neededForComputers: false }), false)
+  assert.equal(tailscaleBlocksComputers({ tailscale: { state: 'connected', ip: null }, lastFailure: null, neededForComputers: true }), false)
 })

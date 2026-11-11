@@ -1,5 +1,5 @@
 // The person's other computers as rows, and the words around adding and removing one. Pure: Screen.tsx only draws this.
-import type { ComputerEntity, ComputerTrust, TailscaleState } from '@ouro/contract'
+import type { ComputerEntity, ComputerTrust, TailscaleState, TailscaleStatus } from '@ouro/contract'
 
 export interface ComputerRow {
   id: string
@@ -68,6 +68,9 @@ export function tailscaleGateOf(tailscale: TailscaleState): TailscaleGate | null
   }
 }
 
+/** Whether adding a computer must wait for Tailscale: only on a server that reaches computers through it alone. */
+export const tailscaleBlocksComputers = (status: TailscaleStatus) => status.neededForComputers && tailscaleGateOf(status.tailscale) !== null
+
 /** The server moves through these by itself, so the screen asks again every 2 seconds while one lasts. */
 export const isTailscaleChanging = (tailscale: TailscaleState) =>
   tailscale.state === 'installing' || tailscale.state === 'logging_in' || tailscale.state === 'removing'
@@ -86,6 +89,8 @@ export const TAILSCALE_COPY = {
   removeTitle: 'Remove Tailscale?',
   removeMessage: 'This server leaves your Tailscale network.',
   requestFailed: 'Tailscale request failed.',
+  optionalTitle: 'Tailscale',
+  optionalFooter: 'This server reaches your computers without Tailscale. Connect it only if its agents need your other devices on your Tailscale network. Install Tailscale on one of your devices and sign in first: https://tailscale.com/download. Then connect this server to the same account. Keep this screen open until it says connected.',
 } as const
 
 export const COMPUTERS_COPY = {

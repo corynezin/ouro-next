@@ -29,14 +29,14 @@ const settled = (label: string) => waitFor(label, async () => {
 const standInFile = (name: string) => join(run.tailscaleDir, name)
 
 test('not connected at first; connecting installs it and gives the login link, approving it connects', async () => {
-  assert.deepEqual(await tailscale('GET'), { tailscale: { state: 'not_connected' }, lastFailure: null })
+  assert.deepEqual(await tailscale('GET'), { tailscale: { state: 'not_connected' }, lastFailure: null, neededForComputers: true })
   const started = await tailscale('POST')
   assert.ok(['installing', 'logging_in'].includes(started.tailscale.state), JSON.stringify(started))
   const loggingIn = await settled('the login link')
-  assert.deepEqual(loggingIn, { tailscale: { state: 'logging_in', loginUrl: 'https://login.tailscale.invalid/a/ouro-journey' }, lastFailure: null })
+  assert.deepEqual(loggingIn, { tailscale: { state: 'logging_in', loginUrl: 'https://login.tailscale.invalid/a/ouro-journey' }, lastFailure: null, neededForComputers: true })
 
   writeFileSync(standInFile('approved'), '')
-  assert.deepEqual(await tailscale('GET'), { tailscale: { state: 'connected', ip: '100.64.0.7' }, lastFailure: null })
+  assert.deepEqual(await tailscale('GET'), { tailscale: { state: 'connected', ip: '100.64.0.7' }, lastFailure: null, neededForComputers: true })
 })
 
 test('removing takes it off; a failed remove says why and leaves it connected', async () => {
@@ -45,13 +45,14 @@ test('removing takes it off; a failed remove says why and leaves it connected', 
   assert.deepEqual(await settled('the failed remove'), {
     tailscale: { state: 'connected', ip: '100.64.0.7' },
     lastFailure: { action: 'remove', message: 'Tailscale would not stop' },
+    neededForComputers: true,
   })
 
   rmSync(standInFile('fail-remove'))
   rmSync(standInFile('approved'))
   const removing = await tailscale('DELETE')
   assert.ok(['removing', 'not_connected'].includes(removing.tailscale.state), JSON.stringify(removing))
-  assert.deepEqual(await settled('the remove'), { tailscale: { state: 'not_connected' }, lastFailure: null })
+  assert.deepEqual(await settled('the remove'), { tailscale: { state: 'not_connected' }, lastFailure: null, neededForComputers: true })
 })
 
 test('a failed install says why, and connecting again starts afresh', async () => {
@@ -60,6 +61,7 @@ test('a failed install says why, and connecting again starts afresh', async () =
   assert.deepEqual(await settled('the failed install'), {
     tailscale: { state: 'not_connected' },
     lastFailure: { action: 'connect', message: 'could not save a restore point, so Tailscale was not installed' },
+    neededForComputers: true,
   })
   rmSync(standInFile('fail-install'))
   await tailscale('POST')
