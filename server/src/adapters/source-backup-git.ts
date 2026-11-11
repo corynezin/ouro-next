@@ -38,10 +38,21 @@ export const headOf = (root: string, ref: string): string | null => {
   return found.ok ? found.output : null
 }
 
+const PUSHED_AT_KEY = 'ouro.backupPushedAt'
+
+/** Recorded in the source's own git config, beside the `backup` remote, so it survives a restart. */
+export const recordPushedAt = (root: string, at: number): void => { git(root, 'config', PUSHED_AT_KEY, String(at)) }
+
+export function pushedAtOf(root: string): number | null {
+  const value = gitTry(root, 'config', '--get', PUSHED_AT_KEY)
+  return value.ok && /^\d+$/.test(value.output) ? Number(value.output) : null
+}
+
 /** The commit the backup's copy of `branch` is at, as of the last push. */
 export const backedUpHeadOf = (root: string, branch: string): string | null => headOf(root, `refs/remotes/${BACKUP_REMOTE}/${branch}`)
 
-export type Push = { kind: 'pushed' } | { kind: 'failed'; why: string }
+/** `gitOutput` is git's own words: for the log, not for the person. */
+export type Push = { kind: 'pushed' } | { kind: 'failed'; gitOutput: string }
 
 /**
  * Pushes `branch` and every base tag to the backup, never forcing and all or nothing: a base tag the backup has differently is refused, not
@@ -51,7 +62,7 @@ export function pushBranchAndBaseTags(root: string, branch: string): Promise<Pus
   return new Promise((resolve) => {
     const args = ['-C', root, '-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential', 'push', '--atomic', BACKUP_REMOTE, `refs/heads/${branch}:refs/heads/${branch}`, 'refs/tags/base-*:refs/tags/base-*']
     execFile('git', args, { timeout: PUSH_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' } }, (error, _stdout, stderr) => {
-      resolve(error === null ? { kind: 'pushed' } : { kind: 'failed', why: stderr.trim().split('\n').slice(-3).join('\n') || error.message })
+      resolve(error === null ? { kind: 'pushed' } : { kind: 'failed', gitOutput: stderr.trim().split('\n').slice(-3).join('\n') || error.message })
     })
   })
 }

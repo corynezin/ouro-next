@@ -11,6 +11,7 @@ import { startStandInGitHub } from '../adapters/stand-in-github.ts'
 import type { StandInGitHub } from '../adapters/stand-in-github.ts'
 import { CommandRefused } from './failure.ts'
 import { SourceBackupKeeper } from './source-backup.ts'
+import type { SourceBackupConfig } from './source-backup.ts'
 
 const made: string[] = []
 let github: StandInGitHub
@@ -48,6 +49,7 @@ function source(own: number): string {
 
 interface Fixture {
   keeper: SourceBackupKeeper
+  keeperConfig: SourceBackupConfig
   root: string
   changes: number
   liveCommit: { value: string | null }
@@ -55,13 +57,14 @@ interface Fixture {
   githubConnected: { value: boolean }
 }
 
-function fixture(own: number, machineName = 'Cory MacBook'): Fixture {
+function fixture(own: number, retryDelaysMs: number[] = [0, 0]): Fixture {
   const root = source(own)
-  const state: Fixture = { root, changes: 0, liveCommit: { value: null }, clock: { now: 0 }, githubConnected: { value: true }, keeper: null as never }
+  const state: Fixture = { root, changes: 0, liveCommit: { value: null }, clock: { now: 0 }, githubConnected: { value: true }, keeper: null as never, keeperConfig: null as never }
   const guardian = { confirmedLiveCommit: async () => state.liveCommit.value } as GuardianClient
-  state.keeper = new SourceBackupKeeper({
+  state.keeperConfig = {
     sourceRoot: root,
-    machineName,
+    baseRepositoryName: 'ouro-next',
+    firstPushRetryDelaysMs: retryDelaysMs,
     api: httpGitHubApi(github.apiUrl),
     githubToken: async () => (state.githubConnected.value ? 'stand-in-token' : null),
     githubState: () => (state.githubConnected.value ? 'connected' : 'not_connected'),
@@ -69,7 +72,8 @@ function fixture(own: number, machineName = 'Cory MacBook'): Fixture {
     now: () => state.clock.now,
     changed: () => { state.changes++ },
     log: () => {},
-  })
+  }
+  state.keeper = new SourceBackupKeeper(state.keeperConfig)
   return state
 }
 
@@ -100,10 +104,10 @@ test('a copy that takes no bases has nothing to back up', async () => {
 test('making the backup creates a private repository, makes it the backup remote and pushes the branch and the base tags', async () => {
   const f = fixture(2)
   await f.keeper.create()
-  assert.deepEqual(statusOf(f), { state: 'backed_up', repository: github.repositoryPath('ouro-next'), behind: false, lastPushError: null })
+  assert.deepEqual(statusOf(f), { state: 'backed_up', repository: github.repositoryPath('ouro-next-private'), lastPushedAt: 0, behind: false, lastPushError: null })
   assert.equal(github.requestedPrivate.at(-1), true)
   assert.ok(github.authorizations.at(-1)?.startsWith('Bearer '))
-  const bare = github.repositoryPath('ouro-next')
+  const bare = github.repositoryPath('ouro-next-private')
   assert.equal(git(bare, 'rev-parse', 'refs/heads/main'), git(f.root, 'rev-parse', 'HEAD'))
   assert.deepEqual(tagsIn(bare), ['base-1'])
   assert.ok(f.changes > 0, 'the server entity is told it changed')
@@ -111,16 +115,50 @@ test('making the backup creates a private repository, makes it the backup remote
   assert.equal(statusOf(f).state, 'backed_up', 'doing it again finds the backup')
 })
 
-test('a taken name falls back to the server\'s name, and a refused fallback is an error that leaves no backup', async () => {
-  github.takeName('ouro-next')
-  const f = fixture(1, 'Cory\'s MacBook!')
+test('while the copy is made the status says so, a second request is refused, and the push time is kept', async () => {
+  const f = fixture(1)
+  f.clock.now = 1_234
+  const seen: string[] = []
+  const first = f.keeper.create()
+  seen.push(statusOf(f).state)
+  await assert.rejects(f.keeper.create(), (error) => error instanceof CommandRefused && error.code === 'source_backup_in_progress')
+  await first
+  assert.deepEqual(seen, ['making_private_copy'])
+  assert.deepEqual(statusOf(f), { state: 'backed_up', repository: github.repositoryPath('ouro-next-private'), lastPushedAt: 1_234, behind: false, lastPushError: null })
+  const restarted = new SourceBackupKeeper(f.keeperConfig).status()
+  assert.equal(restarted.state === 'backed_up' && restarted.lastPushedAt, 1_234, 'the push time is in the source, not in memory')
+})
+
+test('the private copy is never named as the base repository: a taken name gets the next number, and none free is an error that leaves no backup', async () => {
+  github.takeName('ouro-next-private')
+  const f = fixture(1)
   await f.keeper.create()
-  assert.ok(github.repositoryPath('ouro-next-cory-s-macbook').length > 0)
-  assert.equal(git(github.repositoryPath('ouro-next-cory-s-macbook'), 'rev-parse', 'refs/heads/main'), git(f.root, 'rev-parse', 'HEAD'))
-  github.takeName('ouro-next-other')
-  const g = fixture(1, 'other')
-  await assert.rejects(g.keeper.create(), (error) => error instanceof CommandRefused && /already has repositories named ouro-next and ouro-next-other/.test(error.message))
+  assert.equal(git(github.repositoryPath('ouro-next-private-2'), 'rev-parse', 'refs/heads/main'), git(f.root, 'rev-parse', 'HEAD'))
+  assert.deepEqual(statusOf(f), { state: 'backed_up', repository: github.repositoryPath('ouro-next-private-2'), lastPushedAt: 0, behind: false, lastPushError: null })
+  assert.equal(github.requestedNames.includes('ouro-next'), false, 'the base repository\'s name is never asked for')
+  for (let n = 2; n <= 20; n++) github.takeName(`ouro-next-private-${n}`)
+  const g = fixture(1)
+  await assert.rejects(g.keeper.create(), (error) => error instanceof CommandRefused && /already has repositories named ouro-next-private to ouro-next-private-20/.test(error.message))
   assert.equal(statusOf(g).state, 'not_backed_up')
+})
+
+test('a repository GitHub just made may refuse the first pushes: they are tried again, and the copy is made', async () => {
+  github.refuseFirstPushesOfNewRepositories(2)
+  const f = fixture(1)
+  await f.keeper.create()
+  assert.deepEqual(statusOf(f), { state: 'backed_up', repository: github.repositoryPath('ouro-next-private'), lastPushedAt: 0, behind: false, lastPushError: null })
+  assert.equal(git(github.repositoryPath('ouro-next-private'), 'rev-parse', 'refs/heads/main'), git(f.root, 'rev-parse', 'HEAD'))
+})
+
+test('a first push that keeps being refused shows a plain reason, and git\'s own output goes to the log', async () => {
+  github.refuseFirstPushesOfNewRepositories(10)
+  const logged: { event: string; fields: Record<string, unknown> }[] = []
+  const f = fixture(1)
+  f.keeper = new SourceBackupKeeper({ ...f.keeperConfig, log: (event, fields) => logged.push({ event, fields }) })
+  await assert.rejects(f.keeper.create(), (error) => error instanceof CommandRefused && error.code === 'push_failed' && !/refused|rejected|remote/i.test(error.message))
+  const status = statusOf(f)
+  assert.equal(status.state === 'backed_up' && status.lastPushError !== null && !/refused|rejected|remote/i.test(status.lastPushError), true)
+  assert.ok(logged.some((entry) => entry.event === 'source_push_refused' && /remote rejected/.test(String(entry.fields.gitOutput))), 'the raw output is in the log')
 })
 
 test('without GitHub connected nothing is made, and pushing before there is a backup is refused', async () => {
@@ -134,7 +172,7 @@ test('without GitHub connected nothing is made, and pushing before there is a ba
 test('only a version the guardian confirmed live is pushed after a deploy, and a failed push waits before trying again', async () => {
   const f = fixture(1)
   await f.keeper.create()
-  const bare = github.repositoryPath('ouro-next')
+  const bare = github.repositoryPath('ouro-next-private')
   commit(f.root, 'later.txt')
   const head = git(f.root, 'rev-parse', 'HEAD')
   f.clock.now = 20_000

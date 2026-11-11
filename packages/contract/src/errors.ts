@@ -39,6 +39,7 @@ export const ErrorCode = z.enum([
   'source_backup_not_applicable',
   /** The source has no backup to push to yet. */
   'no_source_backup',
+  'source_backup_in_progress',
   /** GitHub or git refused the push to the backup; the message says why. */
   'push_failed',
   /** This server isn't one Ouro sets Tailscale up on. */
@@ -88,6 +89,7 @@ export const httpStatusOfError: Record<ErrorCode, number> = {
   github_not_connected: 409,
   source_backup_not_applicable: 409,
   no_source_backup: 409,
+  source_backup_in_progress: 409,
   push_failed: 502,
   tailscale_not_needed: 409,
   internal: 500,

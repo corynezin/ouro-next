@@ -1,7 +1,7 @@
 // Settings: this server, servers, people, computers and invites, privacy, the list, avatars, the app, archived agents, and
 // signing out or unpairing. Notifications are in NotificationSections. Plan usage from the server's readings. Renders settings/model.ts.
 import { Fragment, useEffect, useLayoutEffect, useState } from 'react'
-import { Share } from 'react-native'
+import { Linking, Share } from 'react-native'
 import { Button, Form, Host, Picker, Section, Text, Toggle } from '@expo/ui/swift-ui'
 import { disabled, font, foregroundStyle, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers'
 import * as Application from 'expo-application'
@@ -41,7 +41,6 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
   const [invite, setInvite] = useState<{ code: string; expiresAt: number; link: string } | null>(null)
   const [inviteFailure, setInviteFailure] = useState<string | null>(null)
   const [removeFailure, setRemoveFailure] = useState<string | null>(null)
-  const [backupWorking, setBackupWorking] = useState(false)
   const [backupFailure, setBackupFailure] = useState<string | null>(null)
   const [baseTakeOutcome, setBaseTakeOutcome] = useState<{ text: string; color: 'orange' | 'red' } | null>(null)
   const personRows = peopleRows(session.store.people.values(), session.store.devices.values())
@@ -91,10 +90,8 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
 
   const startBackup = async (action: 'connect_github' | 'make_private_copy') => {
     setBackupFailure(null)
-    if (action === 'connect_github') return navigation.navigate('GitHub')
-    setBackupWorking(true)
+    if (action === 'connect_github') return navigation.navigate('GitHub', { thenMakePrivateCopy: true })
     const made = await session.command('create_source_backup', {})
-    setBackupWorking(false)
     if (made.ok) toast(BACKUP_MADE_TOAST)
     else setBackupFailure(failureText(made.failure))
   }
@@ -112,7 +109,7 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
   const homeOptions = updateHomeOptions(savedServers)
   const creditsText = openRouterCreditsText(session.store.integration('openrouter')?.state ?? null)
   const base = server ? baseSection(server.release.base, viewer?.isOwner ?? false) : null
-  const backup = server ? backupSection(server.sourceBackup, viewer?.isOwner ?? false) : null
+  const backup = server ? backupSection(server.sourceBackup, viewer?.isOwner ?? false, now) : null
   const planRows = server ? claudePlanRows(server.planUsage.claude, isClaudeOnPlan(session.store.integration('claude')?.state ?? null), now) : null
 
   return (
@@ -178,9 +175,15 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
         ) : null}
         {backup ? (
           <Section title="Backup" footer={<Text>{backup.detail}</Text>}>
-            <Note text={backup.warning} color="orange" />
+            {backup.warning !== null ? <Note text={backup.warning} color="orange" /> : null}
             {backup.failure !== null ? <Note text={backup.failure} color="red" /> : null}
-            {backup.action !== null ? <Button label={backupWorking ? 'Making a private copy…' : backup.action.label} onPress={() => { void startBackup(backup.action!.kind) }} /> : null}
+            {backup.working !== null ? <Note text={backup.working} color="orange" /> : null}
+            {backup.copy !== null ? (backup.copy.url !== null
+              ? <Button label={backup.copy.headline} onPress={() => { void Linking.openURL(backup.copy!.url!) }} />
+              : <KV k="Backup" v={backup.copy.headline} />) : null}
+            {backup.copy?.lastPushedText != null ? <KV k="Last pushed" v={backup.copy.lastPushedText} /> : null}
+            {backup.copy?.pendingText != null ? <Note text={backup.copy.pendingText} color="orange" /> : null}
+            {backup.action !== null ? <Button label={backup.action.label} onPress={() => { void startBackup(backup.action!.kind) }} /> : null}
             {backupFailure !== null ? <Note text={backupFailure} color="red" /> : null}
           </Section>
         ) : null}

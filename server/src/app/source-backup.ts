@@ -5,17 +5,22 @@ import type { GithubIntegrationState, SourceBackup } from '@ouro/contract'
 import { GitHubRefused } from '../adapters/github-api.ts'
 import type { GitHubApi } from '../adapters/github-api.ts'
 import type { GuardianClient } from '../adapters/guardian-client.ts'
-import { backedUpHeadOf, backupOf, branchOut, commitsOnNoBase, headOf, pushBranchAndBaseTags, setBackupRemote } from '../adapters/source-backup-git.ts'
+import { backedUpHeadOf, backupOf, branchOut, commitsOnNoBase, headOf, pushBranchAndBaseTags, pushedAtOf, recordPushedAt, setBackupRemote } from '../adapters/source-backup-git.ts'
 import { CommandRefused } from './failure.ts'
 
 const CHECK_INTERVAL_MS = 10_000
 const RETRY_AFTER_FAILED_PUSH_MS = 60_000
+/** What the person is told of a failed push; git's own output goes to the log. */
+const PUSH_FAILED_REASON = "GitHub didn't accept the push. It is tried again every minute."
+const MAX_PRIVATE_NAME_NUMBER = 20
 
 export interface SourceBackupConfig {
   /** The person's copy of the source; null when there is none. */
   sourceRoot: string | null
-  /** This server's name, which tells its backup from another server's of the same person. */
-  machineName: string
+  /** The name of the public base repository on GitHub, whose name the private copy's must never be. */
+  baseRepositoryName: string
+  /** Waits between the tries of the first push to a repository just made, which GitHub can refuse for a few seconds. */
+  firstPushRetryDelaysMs: number[]
   api: GitHubApi
   /** The connected GitHub account's token; null when not connected. */
   githubToken: () => Promise<string | null>
@@ -34,6 +39,7 @@ export class SourceBackupKeeper {
   private lastCheckAt = -Infinity
   private lastFailedPushAt = -Infinity
   private working: Promise<void> | null = null
+  private makingPrivateCopy = false
 
   constructor(config: SourceBackupConfig) {
     this.config = config
@@ -56,8 +62,9 @@ export class SourceBackupKeeper {
   private read(): SourceBackup {
     const { sourceRoot } = this.config
     if (sourceRoot === null) return { state: 'not_applicable' }
+    if (this.makingPrivateCopy) return { state: 'making_private_copy' }
     const repository = backupOf(sourceRoot)
-    if (repository !== null) return { state: 'backed_up', repository, behind: this.behind(sourceRoot), lastPushError: this.lastPushError }
+    if (repository !== null) return { state: 'backed_up', repository, lastPushedAt: pushedAtOf(sourceRoot), behind: this.behind(sourceRoot), lastPushError: this.lastPushError }
     const own = commitsOnNoBase(sourceRoot)
     if (own === null) return { state: 'not_applicable' }
     if (own === 0) return { state: 'nothing_to_back_up' }
@@ -96,23 +103,49 @@ export class SourceBackupKeeper {
   async create(): Promise<void> {
     const { sourceRoot } = this.config
     if (sourceRoot === null || commitsOnNoBase(sourceRoot) === null) throw new CommandRefused('source_backup_not_applicable', 'this machine has no copy of the source that takes bases')
+    if (this.makingPrivateCopy) throw new CommandRefused('source_backup_in_progress', 'a private copy is already being made')
     if (backupOf(sourceRoot) === null) {
-      const token = await this.config.githubToken()
-      if (token === null) throw new CommandRefused('github_not_connected', 'connect GitHub first: the private copy is made on your account')
-      setBackupRemote(sourceRoot, (await this.createWith(token)).cloneUrl)
+      this.makingPrivateCopy = true
       this.refresh()
+      try {
+        await this.makePrivateCopy(sourceRoot)
+      } finally {
+        this.makingPrivateCopy = false
+        this.refresh()
+      }
+      return
     }
     await this.pushNow()
   }
 
-  /** `ouro-next`, or that with this server's name where the account has it already. */
+  private async makePrivateCopy(sourceRoot: string): Promise<void> {
+    const token = await this.config.githubToken()
+    if (token === null) throw new CommandRefused('github_not_connected', 'connect GitHub first: the private copy is made on your account')
+    setBackupRemote(sourceRoot, (await this.createWith(token)).cloneUrl)
+    await this.pushNewRepository()
+  }
+
+  /** A repository GitHub just made can refuse pushes for a few seconds, so the first one is tried again before it counts as failed. */
+  private async pushNewRepository(): Promise<void> {
+    for (const delay of this.config.firstPushRetryDelaysMs) {
+      try {
+        return await this.pushNow()
+      } catch (error) {
+        if (!(error instanceof CommandRefused && error.code === 'push_failed')) throw error
+        await new Promise((done) => setTimeout(done, delay))
+      }
+    }
+    await this.pushNow()
+  }
+
+  /** `<base repository>-private`, then `-private-2` and so on, the first the account doesn't have. Never the base repository's own name. */
   private async createWith(token: string) {
-    const names = ['ouro-next', `ouro-next-${nameSlug(this.config.machineName)}`]
+    const names = [`${this.config.baseRepositoryName}-private`, ...Array.from({ length: MAX_PRIVATE_NAME_NUMBER - 1 }, (_, i) => `${this.config.baseRepositoryName}-private-${i + 2}`)]
     for (const name of names) {
       const made = await this.createOnGitHub(token, name)
       if (made.kind === 'created') return made.repository
     }
-    throw new CommandRefused('provider_unreachable', `your GitHub account already has repositories named ${names.join(' and ')}`)
+    throw new CommandRefused('provider_unreachable', `your GitHub account already has repositories named ${names[0]} to ${names.at(-1)}`)
   }
 
   private async createOnGitHub(token: string, name: string) {
@@ -136,15 +169,14 @@ export class SourceBackupKeeper {
   private async push(root: string, branch: string): Promise<void> {
     const pushed = await pushBranchAndBaseTags(root, branch)
     if (pushed.kind === 'failed') {
-      this.lastPushError = pushed.why
+      this.config.log('source_push_refused', { gitOutput: pushed.gitOutput })
+      this.lastPushError = PUSH_FAILED_REASON
       this.lastFailedPushAt = this.config.now()
       this.refresh()
-      throw new CommandRefused('push_failed', pushed.why)
+      throw new CommandRefused('push_failed', PUSH_FAILED_REASON)
     }
     this.lastPushError = null
+    recordPushedAt(root, this.config.now())
     this.refresh()
   }
 }
-
-/** A server's name as part of a repository name: lowercase letters, digits and single hyphens. */
-const nameSlug = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'server'

@@ -93,6 +93,11 @@ function baseSourceOf(env: NodeJS.ProcessEnv): BaseSource | null {
   return env.OURO_BASE_REPO ? gitBaseSource(env.OURO_BASE_REPO) : null
 }
 
+/** `ouro-next` from `https://github.com/someone/ouro-next(.git)`; the base repository's name when none is configured. */
+function baseRepositoryNameOf(url: string | undefined): string {
+  return url?.replace(/\/+$/, '').split(/[/:]/).at(-1)?.replace(/\.git$/, '') || 'ouro-next'
+}
+
 /** The guardian names the app inside the person's copy; the server is beside it there. */
 function personSourceOf(appDir: string | undefined): { root: string; appDir: string; serverDir: string } | null {
   if (!appDir) return null
@@ -150,6 +155,8 @@ const core = new OuroCore({
   peerMemoryPullIntervalMs: Number(environment.OURO_PEER_MEMORY_PULL_MS ?? 30_000),
   // The hub offers bases on installed machines, and the publisher machine publishes them there (M6); a folder stands in for it.
   baseSource: baseSourceOf(environment),
+  baseRepositoryName: baseRepositoryNameOf(environment.OURO_BASE_REPO),
+  firstPushRetryDelaysMs: [2_000, 5_000, 10_000, 20_000],
   githubApi: httpGitHubApi(environment.OURO_GITHUB_API_URL ?? 'https://api.github.com'),
   guardian: agentBaseEnv.OURO_GUARDIAN_SOCKET ? guardianClient(agentBaseEnv.OURO_GUARDIAN_SOCKET) : null,
   tailscale: tailscaleSetupFromEnvironment(),
