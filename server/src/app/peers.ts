@@ -4,22 +4,28 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { LogPage as LogPageSchema } from '@ouro/contract'
 import type { LogPage } from '@ouro/contract'
-import { PEER_ASK_SNOOZE_PROTOCOL, PEER_LOG_PROTOCOL, PeerLogRequest, PEER_MEMORY_PROTOCOL, PEER_MIN_PROTOCOL, PeerAskSnooze, PeerAskSnoozeResult, PEER_PROTOCOL, PeerMemory, PeerMemoryRequest, PEER_SIGNATURE_HEADERS, PeerAgentList, PeerControl, PeerControlResult, PeerCreateAgent, PeerCreateAgentResult, PeerGroupPost, PeerGroupUpdate, PeerHello, PeerJoinResult, PeerMessage, PeerMessageResult, PeerMove, PeerOwnerAsk, PeerOwnerMessage, PeerMoveCheck, PeerMoveCheckResult, PeerMoveResult } from '@ouro/contract'
-import type { ComputerEntity, ComputerInvite, ComputerStatus, ComputerTrust, PeerAgentCard, PeerClaudePlan, PeerIdentity, PeerJoinRequest, PeerSender, RemoteAgentAction, RemoteAgentEntity } from '@ouro/contract'
-import { PeerRefused, PeerUnreachable, peerRequest, sha256Hex, signatureValid } from '../adapters/peer-transport.ts'
-import type { MachineKey } from '../adapters/peer-transport.ts'
+import { PeerMemoryPush, PeerPullRequest, PEER_API_PREFIX, PEER_NETWORK_HEADERS, PEER_NETWORKS_PROTOCOL, PeerNetworkJoinResult, PEER_ASK_SNOOZE_PROTOCOL, PEER_LOG_PROTOCOL, PeerLogRequest, PEER_MEMORY_PROTOCOL, PEER_MIN_PROTOCOL, PeerAskSnooze, PeerAskSnoozeResult, PEER_PROTOCOL, PeerMemory, PeerMemoryRequest, PEER_SIGNATURE_HEADERS, PeerAgentList, PeerControl, PeerControlResult, PeerCreateAgent, PeerCreateAgentResult, PeerGroupPost, PeerGroupUpdate, PeerHello, PeerJoinResult, PeerMessage, PeerMessageResult, PeerMove, PeerOwnerAsk, PeerOwnerMessage, PeerMoveCheck, PeerMoveCheckResult, PeerMoveResult } from '@ouro/contract'
+import type { NetworkInvite, NetworkRole, PeerNetworkJoinRequest, ComputerEntity, ComputerInvite, ComputerStatus, ComputerTrust, PeerAgentCard, PeerClaudePlan, PeerIdentity, PeerJoinRequest, PeerSender, RemoteAgentAction, RemoteAgentEntity } from '@ouro/contract'
+import { networkSignatureValid, PeerRefused, PeerUnreachable, peerRequest, sha256Hex, signatureValid } from '../adapters/peer-transport.ts'
+import type { MachineKey, NetworkKeyFile, NetworkSigner } from '../adapters/peer-transport.ts'
 import { helloToSleeperDue } from '../domain/host-hold.ts'
 import { COMPUTER_INVITE_LIFETIME_MS, computerStatusOf, PEER_CLOCK_SKEW_MS, PEER_HELLO_INTERVAL_MS, peerRetryDelayMs, protocolProblem, signedPayload, withinClockSkew } from '../domain/peers.ts'
+import { acceptance, fullyTrusted, sharesMemoryWith, signingFor } from '../domain/networks.ts'
+import type { ClaimedNetwork, HeldNetwork, Signing } from '../domain/networks.ts'
 import { CommandRefused } from './failure.ts'
-import type { PeerRow, Store } from '../store/store.ts'
+import type { NetworkRow, PeerRow, Store } from '../store/store.ts'
+export type { PeerRow } from '../store/store.ts'
 
 export interface PeersConfig {
   store: Store
   machineId: string
   machineName: string
+  /** The name this server gives its owner in shared networks. */
+  ownerName: () => string
   /** Where other machines reach this one's API; null: nobody can, so it can't invite or join. */
   address: string | null
   key: MachineKey
+  networkKeys: NetworkKeyFile
   release: string
   now: () => number
   commit: <T>(body: () => T) => T
@@ -63,6 +69,10 @@ export interface PeersConfig {
   moveCheckFromPeer: (peer: PeerRow, check: PeerMoveCheck) => PeerMoveCheckResult
   /** A fully trusted peer hands an agent over. Runs its own transaction. */
   moveFromPeer: (peer: PeerRow, move: PeerMove) => PeerMoveResult
+  /** A copy of this machine's agent of that name, for a server pulling it; null: no such agent here. */
+  pullForPeer: (agentName: string) => PeerMove | null
+  /** A private server's project notes, pushed into this server's network. Runs its own transaction. */
+  memoryPushFromPeer: (peer: PeerRow, push: PeerMemoryPush) => void
   /** This host pauses when idle. */
   hostSleeps: boolean
   /** This host is holding itself awake for work now. */
@@ -99,6 +109,22 @@ export class PeerRequestRefused extends Error {
 const INVITE_HASH_KEY = 'computer_invite_hash'
 const INVITE_EXPIRES_KEY = 'computer_invite_expires_at'
 const hashCode = (code: string): Buffer => createHash('sha256').update(code).digest()
+
+/** An address whose traffic is encrypted on the way: HTTPS, a Tailscale address (100.64.0.0/10, or a name under ts.net),
+ * or this machine itself. A network's key travels only to and from one. */
+export function privateTransport(address: string): boolean {
+  let url: URL
+  try {
+    url = new URL(address)
+  } catch {
+    return false
+  }
+  if (url.protocol === 'https:') return true
+  const host = url.hostname.replace(/^\[|\]$/g, '')
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.ts.net')) return true
+  const octets = host.split('.').map(Number)
+  return octets.length === 4 && octets.every((octet) => Number.isInteger(octet)) && octets[0] === 100 && octets[1]! >= 64 && octets[1]! <= 127
+}
 
 /** Why this server and the peer can't work together, from what it last said in a hello; null: they can, or it hasn't said yet. */
 const incompatibilityOf = (peer: PeerRow): string | null => (peer.hello ? protocolProblem(peer.hello) : null)
@@ -142,9 +168,144 @@ export class Peers {
     return this.config.address
   }
 
-  private hello(): PeerHello {
+  /** This machine's hello. In a network, it says who this machine is and which servers live in that network, as this one
+   * knows them. */
+  private hello(networkId: string | null = null, to: string | null = null): PeerHello {
     const { running, total } = this.config.agentCounts()
-    return { protocol: PEER_PROTOCOL, minProtocol: PEER_MIN_PROTOCOL, release: this.config.release, agentsRunning: running, agentCount: total, sleeps: this.config.hostSleeps, heldAwake: this.config.heldAwake(), ownerPushTokenHashes: this.config.ownerPushTokenHashes() }
+    const base: PeerHello = { protocol: PEER_PROTOCOL, minProtocol: PEER_MIN_PROTOCOL, release: this.config.release, agentsRunning: running, agentCount: total, sleeps: this.config.hostSleeps, heldAwake: this.config.heldAwake(), ownerPushTokenHashes: this.config.ownerPushTokenHashes() }
+    if (networkId === null || this.config.address === null) return base
+    const addresses = this.config.store.listPeers()
+      .filter((peer) => peer.networkId === networkId && !peer.visiting && peer.machineId !== to)
+      .map((peer) => ({ machineId: peer.machineId, name: peer.name, address: peer.address }))
+    return { ...base, identity: this.identity(), ownerName: this.config.ownerName(), addresses }
+  }
+
+  // Networks
+
+  /** The networks this server holds keys for, without the keys. */
+  heldNetworks(): HeldNetwork[] {
+    return this.config.store.listNetworks().map((network) => ({ id: network.id, kind: network.kind, role: network.role }))
+  }
+
+  private homeNetwork(): HeldNetwork | null {
+    const home = this.config.store.homeNetwork()
+    return home && { id: home.id, kind: home.kind, role: home.role }
+  }
+
+  /** How this server reaches a peer, if it does: see signingFor. */
+  signingFor(peer: PeerRow): Signing {
+    return signingFor(peer, this.heldNetworks())
+  }
+
+  /** Whether this server treats the peer as fully trusted: before networks, by its trust; in one, always. */
+  trusts(peer: PeerRow): boolean {
+    return fullyTrusted(peer, this.homeNetwork())
+  }
+
+  /** The peer, which this server must be able to contact: refused at once, with the reason, when it never does. */
+  requireReachable(peer: PeerRow): PeerRow {
+    const signing = this.signingFor(peer)
+    if (signing.kind === 'never') throw new CommandRefused('forbidden', signing.reason)
+    return peer
+  }
+
+  private networkSigner(signing: Signing, recipient: string): NetworkSigner | null {
+    if (signing.kind !== 'keyed') return null
+    const network = this.config.store.networkById(signing.networkId)
+    const key = network && this.config.networkKeys.get(network.id)
+    return network && key ? { id: network.id, key, visiting: signing.visiting, recipient } : null
+  }
+
+  /** A one-use invite into a network this server holds a key for, for 30 minutes, replacing any open one into it. */
+  createNetworkInvite(networkId: string): NetworkInvite {
+    const address = this.requireAddress()
+    if (!privateTransport(address)) throw new CommandRefused('invalid_request', `an invite's answer carries the network's key, so it is made only where this server is reached over HTTPS or Tailscale, and ${address} is neither`)
+    const network = this.config.store.networkById(networkId)
+    if (!network) throw new CommandRefused('not_found', 'this server holds no key for that network')
+    const code = randomBytes(16).toString('hex')
+    const expiresAt = this.config.now() + COMPUTER_INVITE_LIFETIME_MS
+    this.config.store.setNetworkInvite(network.id, hashCode(code).toString('hex'), expiresAt)
+    return { networkId: network.id, code, address, expiresAt, command: `ouro networks join ${address} ${code}` }
+  }
+
+  /** The network whose open invite is this code; using it closes it. */
+  private takeNetworkInvite(code: string): NetworkRow | null {
+    const offered = hashCode(code)
+    const now = this.config.now()
+    for (const network of this.config.store.listNetworks()) {
+      if (network.inviteHash === null || network.inviteExpiresAt === null || now > network.inviteExpiresAt) continue
+      const open = Buffer.from(network.inviteHash, 'hex')
+      if (offered.length !== open.length || !timingSafeEqual(offered, open)) continue
+      this.config.store.setNetworkInvite(network.id, null, null)
+      return network
+    }
+    return null
+  }
+
+  /** Another server trades this server's invite for the network's key. One taking it as its home key lives in the network,
+   * so it goes in the address book here. */
+  acceptNetworkJoin(request: PeerNetworkJoinRequest): PeerNetworkJoinResult {
+    const host = this.identity()
+    if (!privateTransport(host.address)) throw new PeerRequestRefused('forbidden', `${this.config.machineName} gives a network's key only over HTTPS or Tailscale`)
+    return this.config.commit(() => {
+      const network = this.takeNetworkInvite(request.code)
+      if (!network) throw new PeerRequestRefused('invite_invalid', 'That invite is not valid: it was used, replaced, or it expired.')
+      if (request.role === 'extra' && network.kind === 'private') throw new PeerRequestRefused('forbidden', 'A private network is joined only as a home.')
+      if (request.role === 'home') this.admitInNetwork(request.joiner, network.id, false, request.ownerName)
+      const key = this.config.networkKeys.get(network.id)
+      if (key === null) throw new PeerRequestRefused('invite_invalid', 'That invite is not valid: this server no longer holds the key.')
+      return { network: { key, name: network.name, kind: network.kind }, host, hostOwnerName: this.config.ownerName(), hostVisiting: network.role === 'extra' }
+    })
+  }
+
+  /** Trades an invite's code at `address` for its network's key. Nothing is kept here until the caller keeps it. */
+  async askToJoinNetwork(address: string, code: string, role: NetworkRole): Promise<PeerNetworkJoinResult> {
+    if (!privateTransport(address)) throw new CommandRefused('invalid_request', `the key would come back in the clear: ${address} is reached neither over HTTPS nor Tailscale`)
+    let answer: unknown
+    try {
+      answer = await peerRequest(address, 'POST', '/network-join', { code, joiner: this.identity(), ownerName: this.config.ownerName(), role } satisfies PeerNetworkJoinRequest, null, this.config.now())
+    } catch (error) {
+      if (error instanceof PeerUnreachable) throw new CommandRefused('peer_unreachable', error.message)
+      if (error instanceof PeerRefused) throw new CommandRefused(error.code === 'invite_invalid' ? 'forbidden' : 'invalid_request', error.message)
+      throw error
+    }
+    return PeerNetworkJoinResult.parse(answer)
+  }
+
+  /** The server that invited this one, once the key is kept here: it goes in the address book unless it only visits. */
+  admitInviter(result: PeerNetworkJoinResult, networkId: string): void {
+    if (result.hostVisiting) return
+    try {
+      this.admitInNetwork(result.host, networkId, false, result.hostOwnerName)
+    } catch (error) {
+      if (error instanceof PeerRequestRefused) throw new CommandRefused('invalid_request', error.message)
+      throw error
+    }
+  }
+
+  /** A server heard from in a network, with its key: kept, or updated, as it says it is now. */
+  private admitInNetwork(peer: PeerIdentity, networkId: string, visiting: boolean, ownerName: string | null): void {
+    if (peer.machineId === this.config.machineId) throw new PeerRequestRefused('invalid_request', 'A computer cannot join itself.')
+    if (peer.name === this.config.machineName) throw new PeerRequestRefused('invalid_request', `This computer is called "${peer.name}" too: rename one of them first.`)
+    const sameName = this.config.store.peerByName(peer.name)
+    if (sameName && sameName.machineId !== peer.machineId) throw new PeerRequestRefused('invalid_request', `Another computer here is called "${peer.name}" already.`)
+    const problem = protocolProblem(peer)
+    if (problem) throw new PeerRequestRefused('incompatible', problem)
+    const known = this.config.store.peerById(peer.machineId)
+    // A machine's key is believed the first time only: after that, nothing rebinds its id to another key.
+    if (known && known.publicKey !== '' && known.publicKey !== peer.publicKey) throw new PeerRequestRefused('unauthenticated', `${peer.name} is known here with another key`)
+    this.config.store.savePeerInNetwork({ machineId: peer.machineId, name: peer.name, address: peer.address, publicKey: peer.publicKey, networkId, visiting, ownerName, joinedAt: known?.joinedAt ?? this.config.now() })
+  }
+
+  /** Servers another one says live in a network this one holds a key for: kept as addresses, until each is heard from
+   * itself. Only ones unknown here; what is known stays as it is. */
+  private learnAddresses(networkId: string, addresses: NonNullable<PeerHello['addresses']>): void {
+    if (!this.config.store.networkById(networkId)) return
+    for (const entry of addresses) {
+      if (entry.machineId === this.config.machineId || entry.name === this.config.machineName) continue
+      if (this.config.store.peerById(entry.machineId) || this.config.store.peerByName(entry.name)) continue
+      this.config.store.savePeerInNetwork({ machineId: entry.machineId, name: entry.name, address: entry.address, publicKey: '', networkId, visiting: false, ownerName: null, joinedAt: this.config.now() })
+    }
   }
 
   entityOf(peer: PeerRow): ComputerEntity {
@@ -160,16 +321,20 @@ export class Peers {
       incompatibility: incompatibilityOf(peer),
       joinedAt: peer.joinedAt,
       address: peer.address,
+      networkId: peer.networkId,
+      visiting: peer.visiting,
     }
   }
 
+  /** Computers this server has heard from: an address not yet heard from isn't shown. */
   list(): ComputerEntity[] {
-    return this.config.store.listPeers().map((peer) => this.entityOf(peer))
+    return this.config.store.listPeers().filter((peer) => peer.publicKey !== '').map((peer) => this.entityOf(peer))
   }
 
   // Inviting and joining
 
   createInvite(): ComputerInvite {
+    if (this.config.store.homeNetwork()) throw new CommandRefused('invalid_request', 'this server is in a network: invite other servers into it instead (create_network_invite)')
     const address = this.requireAddress()
     const code = randomBytes(16).toString('hex')
     const expiresAt = this.config.now() + COMPUTER_INVITE_LIFETIME_MS
@@ -195,6 +360,7 @@ export class Peers {
     const { joiner } = request
     const host = this.identity()
     return this.config.commit(() => {
+      if (this.config.store.homeNetwork()) throw new PeerRequestRefused('forbidden', `${this.config.machineName} is in a network now: it takes in servers through network invites`)
       if (!this.takeInvite(request.code)) throw new PeerRequestRefused('invite_invalid', 'That invite is not valid: it was used, replaced, or it expired.')
       this.admit(joiner)
       return { host }
@@ -204,6 +370,7 @@ export class Peers {
   /** Asks the machine at `address` to take this one in, with an invite it made; answers who it is. Nothing is kept here
    * until `admitHost`. */
   async askToJoin(address: string, code: string): Promise<PeerIdentity> {
+    if (this.config.store.homeNetwork()) throw new CommandRefused('invalid_request', 'this server is in a network: join others with a network invite (join_network)')
     const joiner = this.identity()
     let answer: unknown
     try {
@@ -246,8 +413,6 @@ export class Peers {
     const nonce = request.header(PEER_SIGNATURE_HEADERS.nonce)
     const signature = request.header(PEER_SIGNATURE_HEADERS.signature)
     if (!machineId || !time || !nonce || !signature) throw new PeerRequestRefused('unauthenticated', 'the request is not signed')
-    const peer = this.config.store.peerById(machineId)
-    if (!peer) throw new PeerRequestRefused('unauthenticated', 'this server does not know that computer')
     const now = this.config.now()
     if (!withinClockSkew(Number(time), now)) throw new PeerRequestRefused('unauthenticated', 'the request is too far from this server\'s clock')
     let payload: string
@@ -256,9 +421,52 @@ export class Peers {
     } catch {
       throw new PeerRequestRefused('unauthenticated', 'the request is not signed')
     }
-    if (!signatureValid(peer.publicKey, payload, signature)) throw new PeerRequestRefused('unauthenticated', 'the signature does not match')
+    const home = this.config.store.homeNetwork()
+    const claimed = this.claimedNetwork(request, payload, home)
+    const known = this.config.store.peerById(machineId)
+    // A server not heard from yet, in this server's network, introduces itself with a hello that says who it is.
+    const introduction = known === null || known.publicKey === '' ? this.introductionOf(request, machineId, home, claimed) : null
+    const publicKey = introduction?.publicKey ?? known?.publicKey
+    if (publicKey === undefined) throw new PeerRequestRefused('unauthenticated', 'this server does not know that computer')
+    if (!signatureValid(publicKey, payload, signature)) throw new PeerRequestRefused('unauthenticated', 'the signature does not match')
+    const accepted = acceptance(home && { id: home.id, kind: home.kind, role: home.role }, claimed, known)
+    if (accepted.kind === 'refused') throw new PeerRequestRefused('unauthenticated', `${this.config.machineName} refused it: ${accepted.reason}`)
     if (!this.freshNonce(machineId, nonce, now)) throw new PeerRequestRefused('unauthenticated', 'the request was replayed')
-    return peer
+    const network = accepted.network
+    if (network !== null) {
+      this.config.commit(() => {
+        if (introduction) this.admitInNetwork(introduction, network.id, network.visiting, null)
+        else this.config.store.notePeerNetwork(machineId, network.id, network.visiting)
+      })
+    }
+    return this.config.store.peerById(machineId)!
+  }
+
+  /** The network a request says it was sent in, and whether its network signature checks out with this server's home key. */
+  private claimedNetwork(request: { header: (name: string) => string | undefined }, payload: string, home: NetworkRow | null): ClaimedNetwork | null {
+    const networkId = request.header(PEER_NETWORK_HEADERS.network)
+    const signature = request.header(PEER_NETWORK_HEADERS.signature)
+    // Before networks, this server takes no notice of them.
+    if (!networkId || !signature || home === null) return null
+    const visiting = request.header(PEER_NETWORK_HEADERS.visiting) === '1'
+    const key = networkId === home.id ? this.config.networkKeys.get(home.id) : null
+    return { networkId, visiting, signatureValid: key !== null && networkSignatureValid(key, payload, networkId, visiting, this.config.machineId, signature) }
+  }
+
+  /** Who a server this one doesn't know yet says it is, in a hello signed in this server's network. */
+  private introductionOf(request: { method: string; path: string; body: string }, machineId: string, home: NetworkRow | null, claimed: ClaimedNetwork | null): PeerIdentity {
+    const unknown = new PeerRequestRefused('unauthenticated', 'this server does not know that computer')
+    if (home === null || claimed === null || !claimed.signatureValid) throw unknown
+    if (request.method !== 'POST' || new URL(request.path, 'http://peer.invalid').pathname !== `${PEER_API_PREFIX}/hello`) throw unknown
+    let body: unknown
+    try {
+      body = JSON.parse(request.body)
+    } catch {
+      throw unknown
+    }
+    const hello = PeerHello.safeParse(body)
+    if (!hello.success || !hello.data.identity || hello.data.identity.machineId !== machineId) throw unknown
+    return hello.data.identity
   }
 
   private freshNonce(machineId: string, nonce: string, now: number): boolean {
@@ -277,7 +485,7 @@ export class Peers {
 
   /** The peer, to ask for anything but hello or forget: refused while the two can't work together. */
   private requireWorkingPeer(machineId: string): PeerRow {
-    const peer = this.requirePeer(machineId)
+    const peer = this.requireReachable(this.requirePeer(machineId))
     const problem = incompatibilityOf(peer)
     if (problem) throw new CommandRefused('peer_incompatible', `${peer.name} can't work with this computer: ${problem}`)
     return peer
@@ -290,13 +498,25 @@ export class Peers {
     const hello = PeerHello.safeParse(body)
     if (!hello.success) throw new PeerRequestRefused('invalid_request', 'not a hello')
     this.lastHelloFromAt.set(peer.machineId, this.config.now())
-    this.config.commit(() => this.noteHello(peer.machineId, hello.data))
-    return this.hello()
+    // Signed in this server's network, or, from a link before networks, in no network.
+    const networkId = this.config.store.homeNetwork() !== null ? peer.networkId : null
+    this.config.commit(() => this.noteHello(peer.machineId, hello.data, networkId))
+    return this.hello(networkId, peer.machineId)
   }
 
-  private noteHello(machineId: string, hello: PeerHello): void {
+  /** `networkId`: the network the hello came in, whose addresses it brings. */
+  private noteHello(machineId: string, hello: PeerHello, networkId: string | null): void {
     const before = this.config.store.peerById(machineId)
     if (!before) return
+    if (hello.ownerName !== undefined) this.config.store.notePeerOwnerName(machineId, hello.ownerName)
+    // A server known only from an address book, that this one reached itself: its key is what it says.
+    if (before.publicKey === '' && networkId !== null && hello.identity?.machineId === machineId) {
+      this.config.store.savePeerInNetwork({ machineId, name: before.name, address: before.address, publicKey: hello.identity.publicKey, networkId, visiting: before.visiting, ownerName: hello.ownerName ?? null, joinedAt: before.joinedAt })
+    }
+    // Only a server living in the network vouches for others in it: a visitor's word would make strangers members.
+    if (networkId !== null && !before.visiting && hello.addresses) this.learnAddresses(networkId, hello.addresses)
+    const { identity: _identity, addresses: _addresses, ownerName: _ownerName, ...kept } = hello
+    hello = kept
     this.config.store.notePeerHello(machineId, this.config.now(), hello)
     const changed = JSON.stringify(before.hello) !== JSON.stringify(hello) || this.reportedStatus.get(machineId) !== 'online'
     if (changed) this.config.store.markChanged('computer', machineId)
@@ -313,13 +533,17 @@ export class Peers {
         this.reportedStatus.set(peer.machineId, status)
         this.config.commit(() => this.config.store.markChanged('computer', peer.machineId))
       }
-      this.sendNextQueued(peer, now)
+      const signing = this.signingFor(peer)
+      this.sendNextQueued(peer, now, signing)
+      // A visitor, or a server in no network this one holds, is never contacted.
+      if (signing.kind === 'never') continue
       if (this.helloInFlight.has(peer.machineId) || now - (this.lastHelloSentAt.get(peer.machineId) ?? 0) < PEER_HELLO_INTERVAL_MS) continue
       if (!this.helloDue(peer, now)) continue
       this.lastHelloSentAt.set(peer.machineId, now)
       this.helloInFlight.add(peer.machineId)
-      this.signed(peer, 'POST', '/hello', this.hello())
-        .then((answer) => this.config.commit(() => this.noteHello(peer.machineId, PeerHello.parse(answer))))
+      const networkId = signing.kind === 'keyed' ? signing.networkId : null
+      this.signed(peer, 'POST', '/hello', this.hello(networkId, peer.machineId))
+        .then((answer) => this.config.commit(() => this.noteHello(peer.machineId, PeerHello.parse(answer), networkId)))
         .then(() => this.refreshCopiesFrom(peer.machineId))
         .then(() => this.pullMemoryIfDue(peer.machineId).catch((error: unknown) => this.config.log('peer_memory_not_pulled', { machineId: peer.machineId, error: (error as Error).message })))
         .catch(() => { /* not answering is what its status shows */ })
@@ -352,7 +576,7 @@ export class Peers {
   private async pullMemoryIfDue(machineId: string): Promise<void> {
     const peer = this.config.store.peerById(machineId)
     const now = this.config.now()
-    if (!peer || peer.trust !== 'full' || (peer.hello?.protocol ?? 0) < PEER_MEMORY_PROTOCOL) return
+    if (!peer || !sharesMemoryWith(peer, this.homeNetwork()) || (peer.hello?.protocol ?? 0) < PEER_MEMORY_PROTOCOL) return
     if (now - (this.lastMemoryPullAt.get(machineId) ?? 0) < this.config.memoryPullIntervalMs) return
     this.lastMemoryPullAt.set(machineId, now)
     const request: PeerMemoryRequest = { projectKeys: this.config.memoryProjectKeys() }
@@ -379,7 +603,7 @@ export class Peers {
   }
 
   receiveLogRequest(peer: PeerRow, body: unknown): LogPage {
-    if (peer.trust !== 'full') throw new PeerRequestRefused('forbidden', `${this.config.machineName} shows its agents' logs only to computers it trusts fully`)
+    if (!this.trusts(peer)) throw new PeerRequestRefused('forbidden', `${this.config.machineName} shows its agents' logs only to computers it trusts fully`)
     const request = PeerLogRequest.safeParse(body)
     if (!request.success) throw new PeerRequestRefused('invalid_request', 'not a log request')
     const page = this.config.logForPeer(request.data)
@@ -388,7 +612,7 @@ export class Peers {
   }
 
   receiveMemoryRequest(peer: PeerRow, body: unknown): PeerMemory {
-    if (peer.trust !== 'full') throw new PeerRequestRefused('forbidden', `${this.config.machineName} shares memory only with computers it trusts fully`)
+    if (!sharesMemoryWith(peer, this.homeNetwork())) throw new PeerRequestRefused('forbidden', `${this.config.machineName} shares memory only with the person's own computers in its private network`)
     const request = PeerMemoryRequest.safeParse(body)
     if (!request.success) throw new PeerRequestRefused('invalid_request', 'not a memory request')
     return this.config.memoryForPeer(peer, request.data.projectKeys)
@@ -399,15 +623,77 @@ export class Peers {
     if (!(await this.config.holdForWork())) throw new PeerRequestRefused('host_hold_refused', `${this.config.machineName} couldn't stay awake for it; try again`)
   }
 
+  // Across the firewall: what a private server asks of a shared network it holds an extra key for
+
+  /** The shared server a private one pulls from or pushes memory to: it must visit that server's network from a private
+   * home, and the server must speak networks. */
+  private requireSharedFromPrivate(machineId: string, what: string): PeerRow {
+    const peer = this.requireWorkingPeer(machineId)
+    const home = this.homeNetwork()
+    const signing = this.signingFor(peer)
+    if (home?.kind !== 'private' || signing.kind !== 'keyed' || !signing.visiting) throw new CommandRefused('forbidden', `${what} only from a private server, from a shared network it holds a key for, and ${peer.name} isn't one`)
+    if ((peer.hello?.protocol ?? 0) < PEER_NETWORKS_PROTOCOL) throw new CommandRefused('peer_incompatible', `${peer.name} needs an update first`)
+    return peer
+  }
+
+  /** A copy of an agent in a shared network, asked for at once. */
+  async pull(remoteAgentId: string): Promise<{ peer: PeerRow; copy: PeerMove }> {
+    const remote = this.remoteAgentById(remoteAgentId)
+    if (!remote) throw new CommandRefused('not_found', 'no such agent on another computer')
+    const peer = this.requireSharedFromPrivate(remote.computerId, 'agents are pulled')
+    let answer: unknown
+    try {
+      answer = await this.signed(peer, 'POST', '/pull', { agentName: remote.name } satisfies PeerPullRequest, MOVE_TIMEOUT_MS)
+    } catch (error) {
+      if (error instanceof PeerUnreachable) throw new CommandRefused('peer_unreachable', `${peer.name} can't be reached: ${error.message}`)
+      if (error instanceof PeerRefused) throw new CommandRefused(error.code === 'not_found' ? 'not_found' : 'forbidden', `${peer.name} refused: ${error.message}`)
+      throw error
+    }
+    return { peer, copy: PeerMove.parse(answer) }
+  }
+
+  /** Only a shared server gives copies, and only to a server in its network: never a private one, nor before networks. */
+  receivePull(peer: PeerRow, body: unknown): PeerMove {
+    const home = this.homeNetwork()
+    if (home?.kind !== 'shared' || peer.networkId !== home.id) throw new PeerRequestRefused('forbidden', `${this.config.machineName} gives copies of its agents only in a shared network`)
+    const request = PeerPullRequest.safeParse(body)
+    if (!request.success) throw new PeerRequestRefused('invalid_request', 'not a pull')
+    const copy = this.config.pullForPeer(request.data.agentName)
+    if (!copy) throw new PeerRequestRefused('not_found', `no agent named ${request.data.agentName} here`)
+    return copy
+  }
+
+  /** A project's shared notes, sent into a shared network at once. */
+  async pushMemory(machineId: string, push: PeerMemoryPush): Promise<void> {
+    const peer = this.requireSharedFromPrivate(machineId, 'memory is pushed')
+    try {
+      await this.signed(peer, 'POST', '/memory-push', push)
+    } catch (error) {
+      if (error instanceof PeerUnreachable) throw new CommandRefused('peer_unreachable', `${peer.name} can't be reached: ${error.message}`)
+      if (error instanceof PeerRefused) throw new CommandRefused('forbidden', `${peer.name} refused: ${error.message}`)
+      throw error
+    }
+  }
+
+  /** Memory comes into a shared network only when pushed; a private server takes none this way. */
+  receiveMemoryPush(peer: PeerRow, body: unknown): Record<string, never> {
+    if (this.homeNetwork()?.kind !== 'shared') throw new PeerRequestRefused('forbidden', `${this.config.machineName} takes pushed memory only in a shared network`)
+    const push = PeerMemoryPush.safeParse(body)
+    if (!push.success) throw new PeerRequestRefused('invalid_request', 'not a memory push')
+    this.config.memoryPushFromPeer(peer, push.data)
+    return {}
+  }
+
   // Its agents, both ways
 
   receiveAgentsRequest(peer: PeerRow): PeerAgentList {
-    return { agents: this.config.agentCards(peer.trust), claudePlan: peer.trust === 'full' ? this.config.claudePlan() : null }
+    const trusted = this.trusts(peer)
+    return { agents: this.config.agentCards(trusted ? 'full' : 'limited'), claudePlan: trusted && sharesMemoryWith(peer, this.homeNetwork()) ? this.config.claudePlan() : null }
   }
 
   /** Only a computer this one trusts fully is believed about the plan. */
   private refreshClaudePlan(peer: PeerRow, told: PeerClaudePlan | null): void {
-    const counted = peer.trust === 'full' ? told : null
+    const counted = sharesMemoryWith(peer, this.homeNetwork()) ? told : null
     const before = this.claudePlans.get(peer.machineId) ?? null
     if (JSON.stringify(before) === JSON.stringify(counted)) return
     if (counted === null) this.claudePlans.delete(peer.machineId)
@@ -485,7 +771,7 @@ export class Peers {
   }
 
   async receiveCreateAgent(peer: PeerRow, body: unknown): Promise<PeerCreateAgentResult> {
-    if (peer.trust !== 'full') throw new PeerRequestRefused('forbidden', `${this.config.machineName} trusts this computer only to message its agents`)
+    if (!this.trusts(peer)) throw new PeerRequestRefused('forbidden', `${this.config.machineName} trusts this computer only to message its agents`)
     const request = PeerCreateAgent.safeParse(body)
     if (!request.success) throw new PeerRequestRefused('invalid_request', 'not a create')
     await this.requireHoldForWork()
@@ -518,7 +804,7 @@ export class Peers {
   }
 
   receiveControl(peer: PeerRow, body: unknown): PeerControlResult {
-    if (peer.trust !== 'full') throw new PeerRequestRefused('forbidden', `${this.config.machineName} trusts this computer only to message its agents`)
+    if (!this.trusts(peer)) throw new PeerRequestRefused('forbidden', `${this.config.machineName} trusts this computer only to message its agents`)
     const control = PeerControl.safeParse(body)
     if (!control.success) throw new PeerRequestRefused('invalid_request', 'not a control')
     return this.config.controlFromPeer(peer, control.data)
@@ -529,7 +815,7 @@ export class Peers {
   /** Whether that computer would take an agent of this name now: refused here at once if it can't be asked. */
   async checkMove(machineId: string, name: string): Promise<void> {
     const peer = this.requireWorkingPeer(machineId)
-    if (peer.trust !== 'full') throw new CommandRefused('forbidden', `agents move only to computers this one trusts fully, and it trusts ${peer.name} only to message`)
+    if (!this.trusts(peer)) throw new CommandRefused('forbidden', `agents move only to computers this one trusts fully, and it trusts ${peer.name} only to message`)
     let answer: unknown
     try {
       answer = await this.signed(peer, 'POST', '/move-check', { name } satisfies PeerMoveCheck)
@@ -545,7 +831,7 @@ export class Peers {
   /** Hands an agent over, answering whether the other computer took it, certainly didn't, or may have. */
   async handOver(peer: PeerRow, move: PeerMove): Promise<HandoverOutcome> {
     try {
-      const result = PeerMoveResult.parse(await peerRequest(peer.address, 'POST', '/move', move, { key: this.config.key, machineId: this.config.machineId }, this.config.now(), MOVE_TIMEOUT_MS))
+      const result = PeerMoveResult.parse(await this.signed(peer, 'POST', '/move', move, MOVE_TIMEOUT_MS))
       return result.outcome === 'taken' ? { kind: 'taken', address: result.address } : { kind: 'not_taken', why: `${peer.name} refused: ${result.reason}` }
     } catch (error) {
       if (error instanceof PeerUnreachable) return error.mayHaveArrived ? { kind: 'unknown', why: error.message } : { kind: 'not_taken', why: `${peer.name} can't be reached: ${error.message}` }
@@ -556,14 +842,14 @@ export class Peers {
   }
 
   receiveMoveCheck(peer: PeerRow, body: unknown): PeerMoveCheckResult {
-    if (peer.trust !== 'full') throw new PeerRequestRefused('forbidden', `${this.config.machineName} trusts this computer only to message its agents`)
+    if (!this.trusts(peer)) throw new PeerRequestRefused('forbidden', `${this.config.machineName} trusts this computer only to message its agents`)
     const check = PeerMoveCheck.safeParse(body)
     if (!check.success) throw new PeerRequestRefused('invalid_request', 'not a move check')
     return this.config.moveCheckFromPeer(peer, check.data)
   }
 
   async receiveMove(peer: PeerRow, body: unknown): Promise<PeerMoveResult> {
-    if (peer.trust !== 'full') throw new PeerRequestRefused('forbidden', `${this.config.machineName} trusts this computer only to message its agents`)
+    if (!this.trusts(peer)) throw new PeerRequestRefused('forbidden', `${this.config.machineName} trusts this computer only to message its agents`)
     const move = PeerMove.safeParse(body)
     if (!move.success) throw new PeerRequestRefused('invalid_request', 'not a move')
     await this.requireHoldForWork()
@@ -582,11 +868,16 @@ export class Peers {
   // Messages
 
   /** The oldest request waiting for a machine, once it is due; one at a time, so they arrive in order. */
-  private sendNextQueued(peer: PeerRow, now: number): void {
+  private sendNextQueued(peer: PeerRow, now: number, signing: Signing): void {
     // Waiting messages stay queued, in order, until one of the two is updated.
     if (this.sendInFlight.has(peer.machineId) || incompatibilityOf(peer) !== null) return
     const head = this.config.store.headOfPeerOutbox(peer.machineId)
     if (!head || head.nextAttemptAt > now) return
+    // Nothing goes to a server this one never contacts: what was queued before is undeliverable, one by one.
+    if (signing.kind === 'never') {
+      this.config.commit(() => this.config.store.settlePeerOutbox(head.seq, { state: 'undeliverable', at: now, reason: signing.reason }))
+      return
+    }
     this.sendInFlight.add(peer.machineId)
     this.signed(peer, 'POST', head.request.route, head.request.body)
       .then((answer) => {
@@ -639,8 +930,12 @@ export class Peers {
     return this.config.commit(() => this.config.groupPostFromPeer(peer, post.data))
   }
 
-  private signed(peer: PeerRow, method: string, route: string, body: unknown, timeoutMs?: number): Promise<unknown> {
-    return peerRequest(peer.address, method, route, body, { key: this.config.key, machineId: this.config.machineId }, this.config.now(), timeoutMs)
+  /** A request to a peer, signed by this machine and in the peer's network. Refused here, at once, if this server never
+   * contacts it. */
+  private async signed(peer: PeerRow, method: string, route: string, body: unknown, timeoutMs?: number): Promise<unknown> {
+    const signing = this.signingFor(peer)
+    if (signing.kind === 'never') throw new PeerRefused('forbidden', signing.reason)
+    return peerRequest(peer.address, method, route, body, { key: this.config.key, machineId: this.config.machineId, network: this.networkSigner(signing, peer.machineId) }, this.config.now(), timeoutMs)
   }
 
   // Trust and removal
@@ -652,6 +947,7 @@ export class Peers {
   }
 
   setTrust(machineId: string, trust: ComputerTrust): ComputerEntity {
+    if (this.config.store.homeNetwork()) throw new CommandRefused('invalid_request', 'inside a network every server is trusted fully: trust is set by which keys a server holds')
     this.requirePeer(machineId)
     this.config.store.setPeerTrust(machineId, trust)
     return this.entityOf(this.requirePeer(machineId))

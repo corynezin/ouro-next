@@ -26,6 +26,14 @@ export type Routes = {
   AddToChat: { chatId: string }
   New: undefined
   Servers: undefined
+  /** Servers → New server, a step at a time: where it runs, then its name or pairing link, then its network. */
+  NewServer: undefined
+  /** `where`: a provider id, 'hosted', or 'existing' for a server the person already runs. */
+  NewServerDetails: { where: string }
+  /** `label` for a server to make; `link`, the pairing link, for one already run. */
+  NewServerNetwork: { where: string; label: string | null; link: string | null }
+  /** Servers → Network… → Start a network: its name, private or shared. */
+  NewNetwork: undefined
   /** Servers → Link a computer with a command. */
   Computers: undefined
   Tailscale: undefined

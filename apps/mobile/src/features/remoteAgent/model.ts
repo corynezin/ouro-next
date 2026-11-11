@@ -1,6 +1,6 @@
 // An agent on another of the person's computers, as the list and its chat show it. Pure: screens only draw this.
 import { MASTER_AGENT_NAME } from '@ouro/contract'
-import type { ComputerEntity, RemoteAgentEntity, RemoteAskEntity } from '@ouro/contract'
+import type { ComputerEntity, NetworkEntity, RemoteAgentEntity, RemoteAskEntity } from '@ouro/contract'
 import type { IdleFold } from '../../core/accounts/preferences.ts'
 import type { NewSend } from '../../core/session/outbox.ts'
 import { ago, oneLine, timerText } from '../../design/format.ts'
@@ -112,6 +112,13 @@ export function remoteActionsOf(remote: RemoteAgentEntity, computer: ComputerEnt
   return actions
 }
 
+/** A copy can be pulled from an agent in a shared network that this server, living in a private one, holds a key for. */
+export function canPull(computer: ComputerEntity, networks: readonly NetworkEntity[]): boolean {
+  const home = networks.find((network) => network.role === 'home')
+  if (home?.kind !== 'private' || computer.visiting) return false
+  return networks.some((network) => network.role === 'extra' && network.id === computer.networkId)
+}
+
 export interface RemoteChatModel {
   title: string
   subtitle: string
@@ -154,4 +161,7 @@ export const REMOTE_COPY = {
   limited: 'That computer trusts this one only to send messages.',
   archiveTitle: (name: string) => `Archive ${name}?`,
   archiveMessage: 'It stops and leaves the list on its computer too; nothing is deleted.',
+  pull: 'Pull a copy here',
+  pullTitle: (name: string) => `Pull a copy of ${name}?`,
+  pullMessage: 'A copy comes to this private server, paused until you start it. It remembers what it worked on there; its chats there stay there. The original stays where it is.',
 } as const

@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { Address } from './address.ts'
 import { AgentEntity, AskLevel, AskSnooze, ModelId } from './agent.ts'
 import { MessageEntity } from './message.ts'
-import { ComputerEntity, RemoteAgentEntity, RemoteAskEntity } from './computers.ts'
+import { ComputerEntity, NetworkEntity, RemoteAgentEntity, RemoteAskEntity } from './computers.ts'
 import { IntegrationEntity } from './integrations.ts'
 import { NotificationSettingsEntity } from './notifications.ts'
 import { BaseStatus, SourceBackup } from './bases.ts'
@@ -213,6 +213,10 @@ export const ServerEntity = z.object({
    * ChatGPT's from Codex, after its turns and on `refresh_plan_usage`.
    */
   planUsage: z.object({ claude: PlanUsage.nullable(), chatgpt: PlanUsage.nullable() }),
+  /** The name it gives its owner in shared networks. Absent from servers before networks. */
+  ownerName: z.string().optional(),
+  /** The networks it holds keys for, home first; empty: none yet, and it links with computers as before networks. */
+  networks: z.array(NetworkEntity).optional(),
 })
 export type ServerEntity = z.infer<typeof ServerEntity>
 

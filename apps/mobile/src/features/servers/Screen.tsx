@@ -1,26 +1,28 @@
-// Every server in one list: choose, add, rename or remove one, with unread on the others, and how each is linked to the
-// open one as one of its computers: online, its agents, its trust, or Link. Then the computers the open server is linked
-// to that this phone isn't paired with. Removing a server forgets it on this phone, and can unlink it too. With a hosted
-// account, also the account's servers not paired here yet. For the open server's owner, New server makes one on a cloud
-// account the open server is connected to (AWS, Sprites), or on the hosted account, and Destroy deletes the machine it
-// made for a server. Renders servers/model.ts.
+// Every server in one list, grouped by the network it lives in: tap one to open it; its … menu renames, removes, adds it
+// to a network, links it or sets its trust (before networks), or destroys the machine the open server made for it. Each
+// network offers Invite. Then the servers being set up, and two buttons: New server (NewServerScreen.tsx) and Network…,
+// to start a network or join one with an invite. Names and invites are typed in native prompts, so the keyboard never
+// covers them. Renders servers/model.ts.
 import { useCallback, useLayoutEffect, useState } from 'react'
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
-import type { MachineList } from '@ouro/contract'
+import type { MachineList, NetworkEntity } from '@ouro/contract'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
 import type { HostedServersView } from '../../core/hub/hostedServers.ts'
 import { C } from '../../design/colors.ts'
 import { HeaderButton } from '../../design/form.tsx'
-import { actionSheet, confirm } from '../../design/menus.tsx'
+import { actionSheet, alertFailure, confirm, prompt } from '../../design/menus.tsx'
 import { Symbol } from '../../design/Symbol.tsx'
 import { accent } from '../../design/theme.ts'
 import { failureText } from '../../core/session/serverApi.ts'
 import { useCore, useHostedServers, useOtherServersUnread, useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
 import type { ScreenProps } from '../../navigation/routes.ts'
 import { HostedServerSetupView, MachineSetupView } from '../onboarding/SetupScreen.tsx'
-import { checkingNote, createFailureText, hostedRows, machineAsHosted, machineOfServer, machineRows, NEW_SERVER_COPY, newServerChoices, NEW_SERVER_LABEL_MAX, newServerLabelOf, renamedLabel, SERVERS_COPY, serverRows, unpairedComputerRows } from './model.ts'
-import type { HostedRow, MachineRow, NewServerChoice, ServerRow } from './model.ts'
+import {
+  checkingNote, hostedRows, inviteMessage, joinChoices, machineAsHosted, machineOfServer, machineRows, NETWORKS_COPY, networkSections,
+  NEW_SERVER_COPY, parseInvite, renamedLabel, SERVERS_COPY, serverRows, unpairedComputerRows,
+} from './model.ts'
+import type { HostedRow, MachineRow, ServerRow, UnpairedComputerRow } from './model.ts'
 
 export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
   const core = useCore()
@@ -29,27 +31,25 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
   const activeId = session.serverId
   const computers = session.store.computers
   const isOwner = session.store.viewer?.isOwner ?? false
-  const [linking, setLinking] = useState<string | null>(null)
   const [servers, setServers] = useState<SavedServer[]>([])
-  const [failure, setFailure] = useState<string | null>(null)
-  const [renaming, setRenaming] = useState<{ id: string; text: string } | null>(null)
+  const [storageFailed, setStorageFailed] = useState(false)
+  /** Something that goes to a server is running: a spinner on Network…, and nothing else starts. */
+  const [busy, setBusy] = useState<string | null>(null)
   const hostedServers = useHostedServers()
   const account = core.hostedAccount
   const [hosted, setHosted] = useState<HostedServersView>({ available: false, servers: [] })
   /** Where the open server can make servers, and those it made that aren't paired here; null when it can't say. */
   const [machines, setMachines] = useState<MachineList | null>(null)
-  /** The New server menu, while it's open. */
-  const [choosing, setChoosing] = useState(false)
-  /** The New server form, while it's open: on the hosted account, or on one of the open server's providers. */
-  const [naming, setNaming] = useState<{ text: string; creating: boolean; error: string | null; provider: { id: string; name: string } | null } | null>(null)
   const [settingUp, setSettingUp] = useState<{ id: string; label: string; machine: boolean } | null>(null)
+  const networks = session.store.server?.networks ?? []
+  const home = networks.find((network) => network.role === 'home') ?? null
 
   const reload = useCallback(async () => {
     try {
       setServers(await core.servers.list())
-      setFailure(null)
+      setStorageFailed(false)
     } catch {
-      setFailure(SERVERS_COPY.storageError)
+      setStorageFailed(true)
     }
   }, [core])
   const reloadHosted = useCallback(() => {
@@ -64,121 +64,130 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
     return () => { stopped = true }
   }, [isOwner, session])
   const unread = useOtherServersUnread()
+  /** What each saved server says about networks: the open one as it is now, the others from their last check. */
+  const places = new Map(unread.places)
+  if (activeId !== null) places.set(activeId, { networks, computers: [...computers.values()] })
+  /** Private networks started that no server is in yet. */
+  const [pending, setPending] = useState<string[]>([])
   useFocusEffect(useCallback(() => {
     void reload()
+    void core.pendingNetworks.list().then(setPending)
     void unread.checkIfDue()
     const stopMachines = reloadMachines()
     const stopHosted = reloadHosted()
     return () => { stopMachines(); stopHosted() }
-  }, [reload, unread, reloadHosted, reloadMachines]))
+  }, [reload, unread, reloadHosted, reloadMachines, core]))
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: 'Servers', headerRight: () => <HeaderButton title="Done" bold onPress={() => navigation.goBack()} /> })
   }, [navigation])
 
+  /** Runs something that goes to a server, one at a time; its failure, in words or null, is shown as an alert. */
+  const run = async (what: string, body: () => Promise<string | null>) => {
+    if (busy !== null) return
+    setBusy(what)
+    const why = await body().catch(() => SERVERS_COPY.storageError)
+    setBusy(null)
+    if (why !== null) alertFailure(why)
+  }
+  const savedOf = (id: string | null) => servers.find((server) => server.id === id)
+
   const switchTo = async (row: ServerRow) => {
-    const server = servers.find((candidate) => candidate.id === row.id)
+    const server = savedOf(row.id)
     if (!server || row.isActive) return
     try {
       // Switching replaces the whole stack, this sheet with it.
-      if (!(await core.switchTo(server))) setFailure(SERVERS_COPY.noCredentials)
+      if (!(await core.switchTo(server))) alertFailure(SERVERS_COPY.noCredentials)
     } catch {
-      setFailure(SERVERS_COPY.storageError)
+      alertFailure(SERVERS_COPY.storageError)
     }
   }
 
-  const forget = (row: ServerRow) => { core.removeServer(row.id).then(reload, () => setFailure(SERVERS_COPY.storageError)) }
-  const unlinkComputer = async (computerId: string) => {
+  const rename = (row: ServerRow) => prompt('Rename', undefined, 'Save', (typed) => {
+    const label = renamedLabel(typed, row.label)
+    if (label === null) return
+    core.servers.rename(row.id, label).then(reload, () => alertFailure(SERVERS_COPY.storageError))
+  }, row.label)
+  const forget = (row: ServerRow) => { core.removeServer(row.id).then(reload, () => alertFailure(SERVERS_COPY.storageError)) }
+  const unlinkComputer = async (computerId: string): Promise<string | null> => {
     const removed = await session.command('remove_computer', { computerId })
-    if (!removed.ok) setFailure(removed.failure.kind === 'refused' ? failureText(removed.failure) : SERVERS_COPY.unlinkFailed)
-    return removed.ok
+    return removed.ok ? null : removed.failure.kind === 'refused' ? failureText(removed.failure) : SERVERS_COPY.unlinkFailed
   }
   const remove = (row: ServerRow) => {
     if (row.link?.kind !== 'linked' || !isOwner) return confirm(SERVERS_COPY.removeTitle(row.label), SERVERS_COPY.removeMessage, 'Remove', () => forget(row))
     const computerId = row.link.computerId
     actionSheet(SERVERS_COPY.removeTitle(row.label), [
       { title: SERVERS_COPY.removeFromPhone, onPress: () => forget(row) },
-      { title: SERVERS_COPY.removeAndUnlink, destructive: true, onPress: () => { void unlinkComputer(computerId).then((ok) => { if (ok) forget(row) }) } },
+      { title: SERVERS_COPY.removeAndUnlink, destructive: true, onPress: () => { void run('unlink', async () => (await unlinkComputer(computerId)) ?? (forget(row), null)) } },
     ])
   }
   const unlink = (computerId: string, name: string) => confirm(SERVERS_COPY.unlinkTitle(name), SERVERS_COPY.unlinkMessage(computers.get(computerId)?.agentsRunning ?? null), SERVERS_COPY.unlink, () => {
-    void unlinkComputer(computerId)
+    void run('unlink', () => unlinkComputer(computerId))
   })
-  const setTrust = async (computerId: string, full: boolean) => {
+  const setTrust = (computerId: string, full: boolean) => run('trust', async () => {
     const set = await session.command('set_computer_trust', { computerId, trust: full ? 'full' : 'limited' })
-    if (!set.ok) setFailure(set.failure.kind === 'refused' ? failureText(set.failure) : SERVERS_COPY.trustFailed)
-  }
+    return set.ok ? null : set.failure.kind === 'refused' ? failureText(set.failure) : SERVERS_COPY.trustFailed
+  })
   /** The other server joins the open one, so it shows linked here as soon as sync says so. */
-  const link = async (row: ServerRow) => {
-    const other = servers.find((server) => server.id === row.id)
-    const open = servers.find((server) => server.id === activeId)
-    if (!other || !open) return
-    setLinking(row.id)
-    const why = await core.linkServers(other, open).catch(() => SERVERS_COPY.storageError)
-    setLinking(null)
-    setFailure(why === null ? null : SERVERS_COPY.linkFailed(row.label, why))
-  }
+  const link = (row: ServerRow) => run('link', async () => {
+    const other = savedOf(row.id)
+    const open = savedOf(activeId)
+    if (!other || !open) return null
+    const why = await core.linkServers(other, open)
+    return why === null ? null : SERVERS_COPY.linkFailed(row.label, why)
+  })
 
-  const commitRename = async () => {
-    if (!renaming) return
-    const row = servers.find((server) => server.id === renaming.id)
-    const label = row ? renamedLabel(renaming.text, row.label) : null
-    setRenaming(null)
-    if (label === null) return
-    try {
-      await core.servers.rename(renaming.id, label)
-      await reload()
-    } catch {
-      setFailure(SERVERS_COPY.storageError)
-    }
-  }
-
-  const createServer = async () => {
-    if (!naming) return
-    const typed = newServerLabelOf(naming.text)
-    if (typed === null) return
-    if ('error' in typed) return setNaming({ ...naming, error: typed.error })
-    setNaming({ ...naming, creating: true, error: null })
-    if (naming.provider !== null) {
-      const made = await session.api.createMachine({ provider: naming.provider.id, label: typed.label })
-      if (!made.ok) return setNaming({ ...naming, creating: false, error: `${NEW_SERVER_COPY.failed} ${failureText(made.failure)}` })
-      setNaming(null)
-      return setSettingUp({ id: made.value.id, label: made.value.label, machine: true })
-    }
-    if (!account) return
-    const created = await hostedServers.api.createServer(account.token, { label: typed.label })
-    if (!created.ok) return setNaming({ ...naming, creating: false, error: createFailureText(created.failure) })
-    setNaming(null)
-    setSettingUp({ id: created.value.id, label: created.value.label, machine: false })
-  }
-
-  const choose = (choice: NewServerChoice) => {
-    setChoosing(false)
-    switch (choice.kind) {
-      case 'hosted': return setNaming({ text: '', creating: false, error: null, provider: null })
-      case 'machine': return setNaming({ text: '', creating: false, error: null, provider: { id: choice.provider, name: choice.title } })
-      case 'set_up': if (choice.route) navigation.navigate(choice.route)
-    }
+  // Networks: only the owner, from this phone, changes them.
+  const join = () => prompt(NETWORKS_COPY.joinTitle, NETWORKS_COPY.joinMessage, 'Join', (typed) => {
+    const invite = parseInvite(typed)
+    if (!invite) return alertFailure(NETWORKS_COPY.joinUnreadable)
+    void run('network', async () => {
+      const joined = await session.command('join_network', { ...invite, role: home ? 'extra' : 'home' })
+      return joined.ok ? null : NETWORKS_COPY.failed(failureText(joined.failure))
+    })
+  })
+  /** Made by the server holding the network's key: the open one when it does, else another of the person's. */
+  const invite = (via: { serverId: string; network: NetworkEntity }) => run('invite', async () => {
+    const holder = savedOf(via.serverId)
+    if (!holder) return NETWORKS_COPY.failed('that server is no longer on this phone')
+    const made = await core.networkInviteOn(holder, via.network.id)
+    if (!made.ok) return NETWORKS_COPY.failed(made.why)
+    await Share.share({ message: inviteMessage(via.network, made.value) }).catch(() => {})
+    return null
+  })
+  const addToNetwork = (row: ServerRow) => {
+    const joiner = savedOf(row.id)
+    const open = savedOf(activeId)
+    if (!joiner || !open) return
+    actionSheet(NETWORKS_COPY.addTo, joinChoices(networks).map((choice) => ({
+      title: choice.title,
+      onPress: () => {
+        void run('network', async () => {
+          const why = await core.addToNetwork(joiner, open, choice.networkId, choice.role)
+          return why === null ? null : NETWORKS_COPY.joinFailed(row.label, why)
+        })
+      },
+    })))
   }
 
   const removeMachine = (row: MachineRow) => confirm(NEW_SERVER_COPY.removeTitle(row.label), NEW_SERVER_COPY.removeMessage, 'Remove', () => {
-    void session.api.deleteMachine(row.id).then((result) => {
-      setFailure(result.ok ? null : NEW_SERVER_COPY.removeFailed(failureText(result.failure)))
+    void run('remove', async () => {
+      const result = await session.api.deleteMachine(row.id)
       reloadMachines()
+      return result.ok ? null : NEW_SERVER_COPY.removeFailed(failureText(result.failure))
     })
   })
   /** Deletes the machine the open server made for this server, then unlinks it (best effort) and forgets it here. */
   const destroyMachine = (row: ServerRow, machineId: string) => confirm(NEW_SERVER_COPY.destroyTitle(row.label), NEW_SERVER_COPY.destroyMessage, NEW_SERVER_COPY.destroyConfirm, () => {
-    void (async () => {
+    void run('destroy', async () => {
       const result = await session.api.deleteMachine(machineId)
       reloadMachines()
-      if (!result.ok) return setFailure(NEW_SERVER_COPY.destroyFailed(failureText(result.failure)))
-      setFailure(null)
-      if (row.link?.kind === 'linked') await unlinkComputer(row.link.computerId).catch(() => false)
+      if (!result.ok) return NEW_SERVER_COPY.destroyFailed(failureText(result.failure))
+      if (row.link?.kind === 'linked') await unlinkComputer(row.link.computerId).catch(() => null)
       forget(row)
-    })()
+      return null
+    })
   })
-
   const leaveSetup = () => {
     setSettingUp(null)
     void reload()
@@ -194,189 +203,167 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
 
   const rows = serverRows(servers, activeId, unread, computers.values())
   const unpairedComputers = unpairedComputerRows(computers.values(), servers)
-  const someOffline = [...computers.values()].some((computer) => computer.status === 'offline')
+  const sections = networkSections(rows, unpairedComputers, places, pending)
   const note = checkingNote(rows, unread.checking)
-  const unpaired: HostedRow[] = account ? hostedRows(hosted.servers, servers) : []
-  const canCreate = naming !== null && !naming.creating && newServerLabelOf(naming.text) !== null
-  /** The machine the open server made for this server, which its owner can destroy. */
-  const destroyable = (row: ServerRow) => (isOwner && row.canRemove && machines ? machineOfServer(row.url, machines.machines) : null)
+  const unpairedHosted: HostedRow[] = account ? hostedRows(hosted.servers, servers) : []
   const madeHere: MachineRow[] = machines ? machineRows(machines.machines, machines.providers, servers) : []
-  const hostedAvailable = hosted.available && account !== null
-  const choices = newServerChoices(machines?.providers ?? [], hostedAvailable)
+
+  const rowMenu = (row: ServerRow, outsideNetworks: boolean) => {
+    const linked = row.link?.kind === 'linked' ? row.link : null
+    const machine = isOwner && row.canRemove && machines ? machineOfServer(row.url, machines.machines) : null
+    actionSheet(row.label, [
+      ...(!row.isActive ? [{ title: 'Open', onPress: () => { void switchTo(row) } }] : []),
+      { title: 'Rename', onPress: () => rename(row) },
+      ...(isOwner && networks.length > 0 && outsideNetworks && !row.isActive ? [{ title: `${NETWORKS_COPY.addTo}…`, onPress: () => addToNetwork(row) }] : []),
+      ...(isOwner && networks.length === 0 && row.link?.kind === 'not_linked' ? [{ title: SERVERS_COPY.link, onPress: () => { void link(row) } }] : []),
+      ...(isOwner && networks.length === 0 && linked ? [{ title: linked.fullTrust ? 'Trust only to message' : 'Trust fully', onPress: () => { void setTrust(linked.computerId, !linked.fullTrust) } }] : []),
+      ...(row.canRemove ? [{ title: 'Remove…', destructive: true, onPress: () => remove(row) }] : []),
+      ...(machine ? [{ title: NEW_SERVER_COPY.destroy, destructive: true, onPress: () => destroyMachine(row, machine.id) }] : []),
+    ])
+  }
+  const unpairedMenu = (row: UnpairedComputerRow) => actionSheet(row.name, [
+    ...(networks.length === 0 ? [{ title: row.fullTrust ? 'Trust only to message' : 'Trust fully', onPress: () => { void setTrust(row.computerId, !row.fullTrust) } }] : []),
+    { title: SERVERS_COPY.unlink, destructive: true, onPress: () => unlink(row.computerId, row.name) },
+  ])
+  /** Networks: start one (its own page), or join one from an invite on the open server. New servers pick theirs on the
+   * New server steps. */
+  const networkMenu = () => actionSheet(undefined, [
+    { title: NETWORKS_COPY.start, onPress: () => navigation.navigate('NewNetwork') },
+    { title: NETWORKS_COPY.join, onPress: join },
+    ...(networks.length === 0 ? [{ title: SERVERS_COPY.linkByCommand, onPress: () => navigation.navigate('Computers') }] : []),
+  ])
+
+  const statusLine = (row: ServerRow): string | null => {
+    if (row.link?.kind !== 'linked') return row.isActive ? null : networks.length === 0 && isOwner ? SERVERS_COPY.notLinked : null
+    return `${row.link.stateText}${computers.get(row.link.computerId)?.visiting ? ` · ${NETWORKS_COPY.visiting}` : ''}`
+  }
 
   return (
-    <ScrollView style={s.wrap} keyboardShouldPersistTaps="handled">
-      {failure !== null && <Text style={s.error}>{failure}</Text>}
-      {rows.map((row) => (
-        <View key={row.id}>
-          <Pressable style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.background }]} onPress={() => { void switchTo(row) }}>
-            <View style={{ flex: 1 }}>
-              {renaming?.id === row.id ? (
-                <TextInput style={s.renameInput} value={renaming.text} onChangeText={(text) => setRenaming({ id: row.id, text })}
-                  autoFocus onSubmitEditing={() => { void commitRename() }} onBlur={() => { void commitRename() }} returnKeyType="done" />
-              ) : (
-                <View style={s.line}>
-                  <Text style={s.name} numberOfLines={1}>{row.label}</Text>
-                  {row.isActive && <Text style={s.active}>active</Text>}
-                </View>
+    <ScrollView style={s.wrap} contentContainerStyle={{ paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
+      {storageFailed && <Text style={s.error}>{SERVERS_COPY.storageError}</Text>}
+      {sections.map((section) => (
+        <View key={section.key}>
+          {section.title !== null && (
+            <View style={s.sectionHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.sectionTitle}>{section.title}</Text>
+                {section.detail !== null && <Text style={s.sectionDetail}>{section.detail}</Text>}
+              </View>
+              {section.inviteVia !== null && isOwner && (
+                <Pressable onPress={() => { void invite(section.inviteVia!) }} disabled={busy !== null} hitSlop={8} style={s.invite}>
+                  <Symbol name="person.badge.plus" size={14} color="blue" />
+                  <Text style={s.inviteText}>{NETWORKS_COPY.invite}</Text>
+                </Pressable>
               )}
-              <Text style={s.url} numberOfLines={1}>{row.url}</Text>
-              {row.link?.kind === 'linked' && <Text style={s.person}>{row.link.stateText}</Text>}
-              {row.link?.kind === 'linked' && row.link.incompatibility !== null && <Text style={s.warning}>{row.link.incompatibility}</Text>}
-              {row.link?.kind === 'not_linked' && isOwner && <Text style={s.person}>{SERVERS_COPY.notLinked}</Text>}
-              {row.personText !== null && <Text style={s.person}>{row.personText}</Text>}
-            </View>
-            {row.unreadBadge !== null ? (
-              <View style={s.badge}><Text style={s.badgeText}>{row.unreadBadge}</Text></View>
-            ) : row.checking ? <ActivityIndicator size="small" /> : null}
-            <Symbol name="chevron.right" size={12} color="secondary" />
-          </Pressable>
-          <View style={s.actions}>
-            <Pressable onPress={() => setRenaming({ id: row.id, text: row.label })} style={s.actionButton}><Text style={s.actionText}>Rename</Text></Pressable>
-            {row.link?.kind === 'linked' && isOwner && <TrustButton full={row.link.fullTrust} onPress={((linked) => () => { void setTrust(linked.computerId, !linked.fullTrust) })(row.link)} />}
-            {row.link?.kind === 'not_linked' && isOwner && (linking === row.id
-              ? <Text style={[s.actionText, s.actionButton, { color: C.secondary }]}>{SERVERS_COPY.linking}</Text>
-              : <Pressable onPress={() => { void link(row) }} style={s.actionButton} disabled={linking !== null}><Text style={s.actionText}>{SERVERS_COPY.link}</Text></Pressable>)}
-            {row.canRemove && <Pressable onPress={() => remove(row)} style={s.actionButton}><Text style={[s.actionText, { color: C.red }]}>Remove</Text></Pressable>}
-            {destroyable(row) && <Pressable onPress={() => destroyMachine(row, destroyable(row)!.id)} style={s.actionButton}><Text style={[s.actionText, { color: C.red }]}>{NEW_SERVER_COPY.destroy}</Text></Pressable>}
-          </View>
-        </View>
-      ))}
-      {unpairedComputers.map((row) => (
-        <View key={row.computerId}>
-          <View style={s.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.name} numberOfLines={1}>{row.name}</Text>
-              <Text style={s.url} numberOfLines={1}>{SERVERS_COPY.notOnPhone}</Text>
-              <Text style={s.person}>{row.stateText}</Text>
-              {row.incompatibility !== null && <Text style={s.warning}>{row.incompatibility}</Text>}
-            </View>
-          </View>
-          {isOwner && (
-            <View style={s.actions}>
-              <TrustButton full={row.fullTrust} onPress={() => { void setTrust(row.computerId, !row.fullTrust) }} />
-              <Pressable onPress={() => unlink(row.computerId, row.name)} style={s.actionButton}><Text style={[s.actionText, { color: C.red }]}>{SERVERS_COPY.unlink}</Text></Pressable>
             </View>
           )}
+          {section.rows.map((row) => {
+            const status = statusLine(row)
+            return (
+              <Pressable key={row.id} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.background }]}
+                onPress={() => { if (row.isActive) rowMenu(row, section.key === 'outside'); else void switchTo(row) }}
+                onLongPress={() => rowMenu(row, section.key === 'outside')}>
+                <View style={{ flex: 1 }}>
+                  <View style={s.line}>
+                    <Text style={s.name} numberOfLines={1}>{row.label}</Text>
+                    {row.isActive && <Text style={s.active}>open</Text>}
+                  </View>
+                  {status !== null && <Text style={s.status} numberOfLines={1}>{status}</Text>}
+                  {row.link?.kind === 'linked' && row.link.incompatibility !== null && <Text style={s.warning}>{row.link.incompatibility}</Text>}
+                  {row.personText !== null && <Text style={s.status}>{row.personText}</Text>}
+                </View>
+                {row.unreadBadge !== null ? (
+                  <View style={s.badge}><Text style={s.badgeText}>{row.unreadBadge}</Text></View>
+                ) : row.checking ? <ActivityIndicator size="small" /> : null}
+                <Pressable onPress={() => rowMenu(row, section.key === 'outside')} hitSlop={10} style={s.more}>
+                  <Symbol name="ellipsis.circle" size={20} color="blue" />
+                </Pressable>
+              </Pressable>
+            )
+          })}
+          {section.unpaired.map((row) => (
+            <View key={row.computerId} style={s.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.name} numberOfLines={1}>{row.name}</Text>
+                <Text style={s.status} numberOfLines={1}>{SERVERS_COPY.notOnPhone} · {row.stateText}{computers.get(row.computerId)?.visiting ? ` · ${NETWORKS_COPY.visiting}` : ''}</Text>
+                {row.incompatibility !== null && <Text style={s.warning}>{row.incompatibility}</Text>}
+              </View>
+              {isOwner && (
+                <Pressable onPress={() => unpairedMenu(row)} hitSlop={10} style={s.more}>
+                  <Symbol name="ellipsis.circle" size={20} color="blue" />
+                </Pressable>
+              )}
+            </View>
+          ))}
+          {section.emptyNote !== null && <Text style={s.empty}>{section.emptyNote}</Text>}
         </View>
       ))}
-      {note !== null && <Text style={s.note}>{note}</Text>}
-      {computers.size > 0 && <Text style={s.footer}>{SERVERS_COPY.footer}</Text>}
-      {someOffline && <Text style={s.footer}>{SERVERS_COPY.offlineNote}</Text>}
-      {unpaired.map((row) => (
+
+      {unpairedHosted.length + madeHere.length > 0 && (
+        <View style={s.sectionHeader}><Text style={s.sectionTitle}>Being set up</Text></View>
+      )}
+      {unpairedHosted.map((row) => (
         <Pressable key={row.id} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.background }]} onPress={() => setSettingUp({ ...row, machine: false })}>
           <View style={{ flex: 1 }}>
             <Text style={s.name} numberOfLines={1}>{row.label}</Text>
-            <Text style={s.url} numberOfLines={1}>{row.detail}</Text>
+            <Text style={s.status} numberOfLines={1}>{row.detail}</Text>
           </View>
           <Symbol name="chevron.right" size={12} color="secondary" />
         </Pressable>
       ))}
       {madeHere.map((row) => (
-        <View key={row.id}>
-          <Pressable style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.background }]} onPress={() => setSettingUp({ id: row.id, label: row.label, machine: true })}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.name} numberOfLines={1}>{row.label}</Text>
-              <Text style={s.url} numberOfLines={2}>{row.detail}</Text>
-            </View>
-            <Symbol name="chevron.right" size={12} color="secondary" />
-          </Pressable>
+        <Pressable key={row.id} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.background }]}
+          onPress={() => setSettingUp({ id: row.id, label: row.label, machine: true })}
+          onLongPress={row.canRemove ? () => removeMachine(row) : undefined}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.name} numberOfLines={1}>{row.label}</Text>
+            <Text style={s.status} numberOfLines={2}>{row.detail}</Text>
+          </View>
           {row.canRemove && (
-            <View style={s.actions}>
-              <Pressable onPress={() => removeMachine(row)} style={s.actionButton}><Text style={[s.actionText, { color: C.red }]}>Remove</Text></Pressable>
-            </View>
-          )}
-        </View>
-      ))}
-      <View style={{ height: 24 }} />
-      {choosing && naming === null ? (
-        <View style={s.newForm}>
-          <Text style={s.newLabel}>{NEW_SERVER_COPY.chooseTitle}</Text>
-          {choices.map((choice) => (
-            <Pressable key={choice.kind === 'hosted' ? 'hosted' : choice.provider} onPress={() => choose(choice)}
-              disabled={choice.kind === 'set_up' && choice.route === null}
-              style={({ pressed }) => [s.choice, { backgroundColor: pressed ? C.pressed : C.background }]}>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.choiceTitle, choice.kind === 'set_up' ? { color: accent } : null]}>{choice.title}</Text>
-                {choice.kind !== 'hosted' && <Text style={s.url}>{choice.detail}</Text>}
-              </View>
-              {(choice.kind !== 'set_up' || choice.route !== null) && <Symbol name="chevron.right" size={12} color="secondary" />}
+            <Pressable onPress={() => removeMachine(row)} hitSlop={10} style={s.more}>
+              <Symbol name="trash" size={16} color="red" />
             </Pressable>
-          ))}
-          <Pressable style={{ alignItems: 'center', padding: 8 }} onPress={() => setChoosing(false)}>
-            <Text style={{ color: accent, fontSize: 15 }}>Cancel</Text>
-          </Pressable>
-        </View>
-      ) : null}
-      {naming !== null ? (
-        <View style={s.newForm}>
-          <Text style={s.newLabel}>{naming.provider ? NEW_SERVER_COPY.titleOn(naming.provider.name) : NEW_SERVER_COPY.title}</Text>
-          <TextInput style={s.newInput} placeholder={NEW_SERVER_COPY.placeholder} value={naming.text} onChangeText={(text) => setNaming({ ...naming, text })}
-            autoFocus autoCapitalize="none" autoCorrect={false} returnKeyType="done" onSubmitEditing={() => { void createServer() }}
-            placeholderTextColor={C.tertiary} maxLength={NEW_SERVER_LABEL_MAX} />
-          <Pressable style={[s.newButton, { backgroundColor: accent, opacity: canCreate ? 1 : 0.4 }]} onPress={() => { void createServer() }} disabled={!canCreate}>
-            {naming.creating ? <ActivityIndicator color="white" /> : <Text style={s.addText}>Create</Text>}
-          </Pressable>
-          {naming.error !== null && <Text style={s.createError}>{naming.error}</Text>}
-          <Pressable style={{ alignItems: 'center', padding: 8 }} onPress={() => setNaming(null)}>
-            <Text style={{ color: accent, fontSize: 15 }}>Cancel</Text>
-          </Pressable>
-          <Text style={s.hint}>{naming.provider ? NEW_SERVER_COPY.hintFor(naming.provider.id) : NEW_SERVER_COPY.hint}</Text>
-        </View>
-      ) : !choosing && choices.length > 0 ? (
-        <Pressable style={[s.addButton, { backgroundColor: accent, marginBottom: 12 }]}
-          onPress={() => (choices.length === 1 && choices[0]!.kind === 'hosted' ? choose(choices[0]!) : setChoosing(true))}>
+          )}
+          <Symbol name="chevron.right" size={12} color="secondary" />
+        </Pressable>
+      ))}
+
+      {note !== null && <Text style={s.note}>{note}</Text>}
+      <View style={s.addRow}>
+        <Pressable style={[s.addButton, { backgroundColor: accent, opacity: busy !== null ? 0.6 : 1 }]} onPress={() => navigation.navigate('NewServer')} disabled={busy !== null}>
           <Text style={s.addText}>{NEW_SERVER_COPY.button}</Text>
         </Pressable>
-      ) : null}
-      <Pressable style={[s.addButton, { backgroundColor: accent }]} onPress={() => navigation.navigate('Pair')}>
-        <Text style={s.addText}>Add a server</Text>
-      </Pressable>
-      {isOwner && (
-        <Pressable style={{ alignItems: 'center', padding: 14 }} onPress={() => navigation.navigate('Computers')}>
-          <Text style={{ color: accent, fontSize: 15 }}>{SERVERS_COPY.linkByCommand}</Text>
-        </Pressable>
-      )}
+        {isOwner && (
+          <Pressable style={[s.addButton, s.networkButton, { opacity: busy !== null ? 0.6 : 1 }]} onPress={networkMenu} disabled={busy !== null}>
+            {busy !== null ? <ActivityIndicator /> : <Text style={[s.addText, { color: accent }]}>{NETWORKS_COPY.button}</Text>}
+          </Pressable>
+        )}
+      </View>
     </ScrollView>
-  )
-}
-
-/** Full or limited trust: a tap switches it. */
-function TrustButton({ full, onPress }: { full: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={[s.actionButton, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
-      <Symbol name={full ? 'checkmark.shield' : 'shield'} size={12} color="blue" />
-      <Text style={s.actionText}>{full ? SERVERS_COPY.fullTrust : SERVERS_COPY.limitedTrust}</Text>
-    </Pressable>
   )
 }
 
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: C.background },
   error: { color: C.red, padding: 16 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 22, paddingBottom: 6 },
+  sectionTitle: { fontSize: 13, fontWeight: '700', color: C.secondary, textTransform: 'uppercase', letterSpacing: 0.4 },
+  sectionDetail: { fontSize: 12, color: C.tertiary, marginTop: 2 },
+  invite: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  inviteText: { fontSize: 14, color: C.blue, fontWeight: '600' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.separator },
   line: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   name: { fontSize: 17, fontWeight: '600', color: C.label, flexShrink: 1 },
   active: { fontSize: 11, fontWeight: '700', color: 'white', backgroundColor: C.blue, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, overflow: 'hidden' },
-  url: { fontSize: 13, color: C.secondary, marginTop: 2 },
-  person: { fontSize: 12, color: C.tertiary, marginTop: 2 },
+  status: { fontSize: 13, color: C.secondary, marginTop: 2 },
   warning: { fontSize: 12, color: C.orange, marginTop: 2 },
-  footer: { color: C.secondary, fontSize: 12, marginHorizontal: 16, marginTop: 12 },
+  more: { paddingLeft: 4 },
+  empty: { fontSize: 13, color: C.tertiary, paddingHorizontal: 16, paddingVertical: 12 },
   badge: { backgroundColor: C.blue, borderRadius: 11, minWidth: 22, height: 22, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7 },
   badgeText: { color: 'white', fontWeight: '700', fontSize: 12 },
   note: { color: C.secondary, fontSize: 12, textAlign: 'center', marginTop: 12 },
-  addButton: { marginHorizontal: 16, borderRadius: 12, padding: 14, alignItems: 'center' },
+  addRow: { flexDirection: 'row', gap: 12, marginHorizontal: 16, marginTop: 24 },
+  addButton: { flex: 1, borderRadius: 12, padding: 14, alignItems: 'center' },
+  networkButton: { backgroundColor: C.fill },
   addText: { color: 'white', fontWeight: '600', fontSize: 16 },
-  actions: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingBottom: 8 },
-  actionButton: { paddingVertical: 4 },
-  actionText: { fontSize: 13, color: C.blue },
-  newForm: { marginHorizontal: 16, marginBottom: 12 },
-  newLabel: { fontSize: 13, color: C.secondary, marginBottom: 6 },
-  newInput: { borderWidth: StyleSheet.hairlineWidth, borderColor: C.opaqueSeparator, borderRadius: 10, padding: 12, fontSize: 16, color: C.label, backgroundColor: C.background },
-  newButton: { borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 12 },
-  choice: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.separator },
-  choiceTitle: { fontSize: 16, fontWeight: '600', color: C.label },
-  hint: { fontSize: 12, color: C.tertiary, textAlign: 'center', marginTop: 8 },
-  createError: { color: C.red, fontSize: 13, marginTop: 6, textAlign: 'center' },
-  renameInput: { fontSize: 17, fontWeight: '600', color: C.label, borderBottomWidth: 1, borderBottomColor: C.blue, paddingVertical: 2 },
 })

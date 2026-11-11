@@ -18,7 +18,7 @@ import { AsksPanel } from '../chat/AsksPanel.tsx'
 import { asksPanel, ChoiceTapGuard, chatItems, choicesForMessage, composerPlaceholder, outboxBubble } from '../chat/model.ts'
 import { directChatWith, openCopyOf } from '../shared/agentFacts.ts'
 import { openSnoozeSheet } from '../shared/snoozeSheet.ts'
-import { REMOTE_COPY, remoteActionsOf, remoteAsksOf, remoteChatModel, remoteSend } from './model.ts'
+import { canPull, REMOTE_COPY, remoteActionsOf, remoteAsksOf, remoteChatModel, remoteSend } from './model.ts'
 
 const ACTION_TITLE = { interrupt: 'Interrupt', stop: 'Stop', archive: 'Archive' } as const
 
@@ -60,7 +60,16 @@ export function RemoteChatScreen({ navigation, route }: ScreenProps<'RemoteChat'
   }
 
   const canReadLog = header?.canReadLog ?? false
-  const menuKey = `${actions.map((action) => action.kind).join(',')}|${canReadLog}`
+  const pullable = computer !== undefined && (store.viewer?.isOwner ?? false) && canPull(computer, store.server?.networks ?? [])
+  const pull = async () => {
+    if (!remote) return
+    setNote(null)
+    const done = await session.command('pull_agent', { remoteAgentId, name: null })
+    if (!done.ok) return setNote(failureText(done.failure))
+    // The copy's chat takes this one's place: both have the same name, and the copy is what was asked for.
+    navigation.replace('Chat', { agentRef: done.value.agent.id })
+  }
+  const menuKey = `${actions.map((action) => action.kind).join(',')}|${canReadLog}|${pullable}`
   useLayoutEffect(() => {
     navigation.setOptions({
       title: header?.title ?? '',
@@ -70,8 +79,9 @@ export function RemoteChatScreen({ navigation, route }: ScreenProps<'RemoteChat'
           <Text style={{ fontSize: 11, color: C.secondary }} numberOfLines={1}>{header.subtitle}</Text>
         </View>
       ),
-      unstable_headerRightItems: () => actions.length || canReadLog ? [barMenu('ellipsis.circle', 'More', [
+      unstable_headerRightItems: () => actions.length || canReadLog || pullable ? [barMenu('ellipsis.circle', 'More', [
         ...(canReadLog ? [{ title: 'Log', onPress: () => navigation.navigate('RemoteLog', { remoteAgentId }) }] : []),
+        ...(pullable && remote ? [{ title: REMOTE_COPY.pull, onPress: () => confirm(REMOTE_COPY.pullTitle(remote.name), REMOTE_COPY.pullMessage, 'Pull', () => { void pull() }, { destructive: false }) }] : []),
         ...actions.map((action) => ({
           title: ACTION_TITLE[action.kind],
           destructive: action.kind === 'stop',

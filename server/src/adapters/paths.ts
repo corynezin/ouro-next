@@ -20,6 +20,8 @@ export interface DataPaths {
   openrouterApiKey: string
   /** This machine's Ed25519 key, mode 600: peers know it by its public half. */
   machineKey: string
+  /** The network keys this server holds, by network id; mode 600, as the machine key. */
+  networkKeys: string
 }
 
 export function runnerSocketDirOf(dataDir: string): string {
@@ -41,6 +43,7 @@ export function dataPaths(dataDir: string): DataPaths {
     runnerLog: (agentId) => join(dataDir, 'agents', agentId, 'runner.log'),
     anthropicApiKey: join(dataDir, 'secrets', 'anthropic-api-key'),
     machineKey: join(dataDir, 'identity', 'machine-key.pem'),
+    networkKeys: join(dataDir, 'identity', 'network-keys.json'),
     openrouterApiKey: join(dataDir, 'secrets', 'openrouter-api-key'),
   }
 }

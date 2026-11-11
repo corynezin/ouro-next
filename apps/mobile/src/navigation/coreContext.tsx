@@ -37,12 +37,12 @@ export function useHub() {
 
 const OtherServersUnreadContext = createContext<OtherServersUnread | null>(null)
 export const OtherServersUnreadProvider = OtherServersUnreadContext.Provider
-/** Renders again when a check starts or ends. */
+/** Renders again when a check starts or ends, and as each server's answer comes in. */
 export function useOtherServersUnread() {
   const unread = useContext(OtherServersUnreadContext)
   if (!unread) throw new Error('useOtherServersUnread outside OtherServersUnreadProvider')
   const subscribe = useCallback((listener: () => void) => unread.subscribe(listener), [unread])
-  useSyncExternalStore(subscribe, () => unread.checking)
+  useSyncExternalStore(subscribe, () => unread.version)
   return unread
 }
 

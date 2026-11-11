@@ -81,9 +81,19 @@ export function actionSheet(title: string | undefined, options: { title: string;
     (i) => { options[i]?.onPress() })
 }
 
-/** "Archive x?" with a destructive button. */
-export function confirm(title: string, message: string, action: string, onConfirm: () => void) {
-  Alert.alert(title, message, [{ text: 'Cancel', style: 'cancel' }, { text: action, style: 'destructive', onPress: onConfirm }])
+/** A native text prompt: the field sits in the alert, so the keyboard never covers it. Called with what was typed. */
+export function prompt(title: string, message: string | undefined, action: string, onSubmit: (text: string) => void, defaultValue = '') {
+  Alert.prompt(title, message, [{ text: 'Cancel', style: 'cancel' }, { text: action, onPress: (text?: string) => onSubmit(text ?? '') }], 'plain-text', defaultValue)
+}
+
+/** A failure the person should see wherever they've scrolled to. */
+export function alertFailure(message: string) {
+  Alert.alert("Couldn't do that", message)
+}
+
+/** "Archive x?" with a destructive button; `destructive: false` for an action that loses nothing, which then isn't red. */
+export function confirm(title: string, message: string, action: string, onConfirm: () => void, { destructive = true }: { destructive?: boolean } = {}) {
+  Alert.alert(title, message, [{ text: 'Cancel', style: 'cancel' }, { text: action, style: destructive ? 'destructive' : 'default', onPress: onConfirm }])
 }
 
 // ---- native bar-button menus (UIMenu on a UIBarButtonItem), for unstable_headerLeftItems / unstable_headerRightItems ----

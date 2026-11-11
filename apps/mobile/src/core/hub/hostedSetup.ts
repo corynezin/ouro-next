@@ -9,7 +9,7 @@ function hostedSetup(core: AppCore, read: () => Promise<HubResult<HostedServer |
   return new SetupFlow({
     clock: core.deps.clock,
     read,
-    pair: async (address, code, server) => { await core.pairAndActivate(address, code, fromHub ? { label: server.label, hostedServerId: server.id } : { label: server.label }) },
+    pair: async (address, code, server) => { await core.pairAndActivate(address, code, fromHub ? { label: server.label, hostedServerId: server.id, setupId: server.id } : { label: server.label, setupId: server.id }) },
     onChange,
   })
 }
@@ -29,7 +29,7 @@ export function hostedServerSetup(core: AppCore, hub: HubApi, account: HostedAcc
 
 /**
  * A server the open server makes on a cloud account (Servers → New server → AWS or Sprite), read from the open server as
- * a hosted one is from the hub. Paired, this phone links it with its other servers as any server added is.
+ * a hosted one is from the hub. Paired, this phone puts it in the network picked for it (see networkPlans.ts).
  */
 export function machineServerSetup(core: AppCore, read: () => Promise<HubResult<HostedServer>>, onChange: () => void): SetupFlow {
   return hostedSetup(core, read, onChange, false)

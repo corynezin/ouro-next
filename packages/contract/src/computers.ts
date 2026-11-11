@@ -29,8 +29,41 @@ export const ComputerEntity = z.object({
   joinedAt: z.number().int(),
   /** Where its peer API is reached, which is also the URL a phone pairs with; absent from servers before it was sent. */
   address: z.string().nullable().optional(),
+  /** The network it lives in, by id, among this server's networks; null: none of them (a link from before networks, or
+   * one this server holds no key for). Absent from servers before networks. */
+  networkId: z.string().nullable().optional(),
+  /** It lives in another network and visits this server's with an extra key: this server answers it and never contacts
+   * it. Absent from servers before networks. */
+  visiting: z.boolean().optional(),
 })
 export type ComputerEntity = z.infer<typeof ComputerEntity>
+
+/**
+ * A network: a secret key. A server holding the key may take part; no list of members is kept anywhere. Each server has
+ * at most one home key, the network it lives in: it accepts a request only when signed with it. Other keys are extra: used
+ * only to sign requests into those networks, never to accept anything. A private network is the person's own servers, where
+ * the owner is the same `human` everywhere; in a shared network, people arriving from other servers are `human@name`. The
+ * key itself is never shown.
+ */
+export const NetworkKind = z.enum(['private', 'shared'])
+export type NetworkKind = z.infer<typeof NetworkKind>
+export const NetworkRole = z.enum(['home', 'extra'])
+export type NetworkRole = z.infer<typeof NetworkRole>
+export const NetworkEntity = z.object({
+  /** Derived from the key; the same on every server holding it. */
+  id: z.string(),
+  name: z.string(),
+  kind: NetworkKind,
+  role: NetworkRole,
+  addedAt: z.number().int(),
+})
+export type NetworkEntity = z.infer<typeof NetworkEntity>
+
+export const NETWORK_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$/
+
+/** A one-use invite into a network, for 30 minutes: the invited server trades `code` at `address` for the key. */
+export const NetworkInvite = z.object({ networkId: z.string(), code: z.string(), address: z.string(), expiresAt: z.number().int(), command: z.string() })
+export type NetworkInvite = z.infer<typeof NetworkInvite>
 
 /** One open invite at a time: making one replaces the last. `command` is the line to run on the other computer. */
 export const ComputerInvite = z.object({ code: z.string(), expiresAt: z.number().int(), command: z.string() })
@@ -43,7 +76,7 @@ export const PEER_API_PREFIX = '/peer/v1'
 /** The wire protocol this release speaks, and the oldest it still speaks. Two machines work together when each one's
  * protocol is within the other's range. `hello` and `forget` keep their shapes forever, so any two versions can see each
  * other and part; every other request passes only between machines that work together. */
-export const PEER_PROTOCOL = 6
+export const PEER_PROTOCOL = 7
 export const PEER_MIN_PROTOCOL = 1
 /** The first protocol with POST /owner-messages: a machine sends it only to peers that speak it. */
 export const PEER_OWNER_MESSAGES_PROTOCOL = 2
@@ -56,6 +89,9 @@ export const PEER_MEMORY_PROTOCOL = 4
 export const PEER_ASK_SNOOZE_PROTOCOL = 5
 /** The first protocol with POST /log: a machine asks it only of peers that speak it. */
 export const PEER_LOG_PROTOCOL = 6
+/** The first protocol with networks: the network signature headers, a hello's `identity`, `visiting` and `ownerName`,
+ * POST /network-join, POST /pull and POST /memory-push. */
+export const PEER_NETWORKS_PROTOCOL = 7
 
 /** A machine as it introduces itself. `address`: where its peer API is reached. */
 export const PeerIdentity = z.object({
@@ -75,6 +111,19 @@ export type PeerJoinRequest = z.infer<typeof PeerJoinRequest>
 export const PeerJoinResult = z.object({ host: PeerIdentity })
 export type PeerJoinResult = z.infer<typeof PeerJoinResult>
 
+/** POST /network-join, unsigned like /join: the invite's code is its credential. Trades it for the network's key. `role`:
+ * how the joiner will hold it; a joiner taking it as its home key is put in the inviter's address book. */
+export const PeerNetworkJoinRequest = z.object({ code: z.string(), joiner: PeerIdentity, ownerName: z.string(), role: z.enum(['home', 'extra']) })
+export type PeerNetworkJoinRequest = z.infer<typeof PeerNetworkJoinRequest>
+/** `hostVisiting`: the inviter holds the key as an extra key, so it lives elsewhere and is never contacted in this network. */
+export const PeerNetworkJoinResult = z.object({
+  network: z.object({ key: z.string(), name: z.string(), kind: z.enum(['private', 'shared']) }),
+  host: PeerIdentity,
+  hostOwnerName: z.string(),
+  hostVisiting: z.boolean(),
+})
+export type PeerNetworkJoinResult = z.infer<typeof PeerNetworkJoinResult>
+
 /** POST /hello, signed, both ways every couple of seconds: proof of life, and what each says about itself. */
 export const PeerHello = z.object({
   protocol: z.number().int(),
@@ -89,6 +138,14 @@ export const PeerHello = z.object({
   /** The phones of the owner it pushes, as PUSH_TOKEN_HASHES names them: a computer holding a copy of its asks reminds only
    * the others. Machines older than this field say nothing: none. */
   ownerPushTokenHashes: z.array(z.string()).default([]),
+  /** Who says it, so a server in the same network that doesn't know it yet can take it in (on a hello signed with the
+   * network's key). Older machines don't say. */
+  identity: PeerIdentity.optional(),
+  /** The sending server's owner's name: a person arriving from it in a shared network is `human@<ownerName>`. */
+  ownerName: z.string().optional(),
+  /** Servers living in the network the hello is signed in, as the sender knows them: an address book, filled in by every
+   * hello. Grants nothing. */
+  addresses: z.array(z.object({ machineId: z.string(), name: z.string(), address: z.string() })).max(500).optional(),
 })
 export type PeerHello = z.infer<typeof PeerHello>
 
@@ -370,12 +427,31 @@ export const PeerCreateAgentResult = z.discriminatedUnion('outcome', [
 ])
 export type PeerCreateAgentResult = z.infer<typeof PeerCreateAgentResult>
 
+/** POST /pull, signed, from a server holding this one's network key, private or visiting: a copy of the agent of that name,
+ * as a move would carry it, without its waiting messages or memory. The agent stays where it is and doesn't know. */
+export const PeerPullRequest = z.object({ agentName: z.string() })
+export type PeerPullRequest = z.infer<typeof PeerPullRequest>
+
+/** POST /memory-push, signed, from a private server into a shared network it holds a key for: a project's shared notes,
+ * added where the receiver lacks them. Never notes about the person. */
+export const PeerMemoryPush = z.object({ projectKey: z.string(), notes: z.array(PeerNote).max(1000) })
+export type PeerMemoryPush = z.infer<typeof PeerMemoryPush>
+
 /** The signature headers on every peer request but /join. */
 export const PEER_SIGNATURE_HEADERS = {
   machine: 'x-ouro-machine',
   time: 'x-ouro-time',
   nonce: 'x-ouro-nonce',
   signature: 'x-ouro-signature',
+} as const
+
+/** On every request between servers with networks: the network it is sent in, an HMAC-SHA256 with that network's key of
+ * the signed payload and these two headers, and whether the sender only visits that network (holds its key as an extra
+ * key). Machines before networks ignore them. */
+export const PEER_NETWORK_HEADERS = {
+  network: 'x-ouro-network',
+  visiting: 'x-ouro-network-visiting',
+  signature: 'x-ouro-network-signature',
 } as const
 
 export const PeerErrorCode = z.enum(['unauthenticated', 'invite_invalid', 'invalid_request', 'forbidden', 'not_found', 'incompatible', 'host_hold_refused', 'internal'])

@@ -1,6 +1,6 @@
 // The app as a whole, under the UI: saved setup, and the single `activeSession` reference. Nothing else in the app has a
 // notion of "the current server". Outboxes live here, one per server, because a send outlives its session.
-import type { CommandInput, CommandName } from '@ouro/contract'
+import type { CommandInput, CommandName, NetworkInvite } from '@ouro/contract'
 import { HostedAccountStore } from './accounts/hostedAccount.ts'
 import type { HostedAccount } from './accounts/hostedAccount.ts'
 import { pairWithServer } from './accounts/pairing.ts'
@@ -13,6 +13,8 @@ import { ServerOutbox } from './session/outbox.ts'
 import type { NewSend } from './session/outbox.ts'
 import { failureText, ServerApi } from './session/serverApi.ts'
 import { ServerSession } from './session/serverSession.ts'
+import { NetworkPlans, PendingNetworks } from './servers/networkPlans.ts'
+import type { NetworkPlan } from './servers/networkPlans.ts'
 
 export interface AppCoreDeps {
   network: Network
@@ -34,11 +36,18 @@ export const RECOVERY_FAILED_MESSAGE = 'Recovery could not finish. Stored creden
 
 interface RunningOutbox { outbox: ServerOutbox; api: ServerApi; lifetime: AbortController; loaded: Promise<void> }
 
+/** Paired, but the network picked for the server couldn't take it: words fit to show as they are. */
+export class NetworkPlacementFailed extends Error {
+  override name = 'NetworkPlacementFailed'
+}
+
 export class AppCore {
   readonly deps: AppCoreDeps
   readonly servers: SavedServers
   readonly preferences: PreferencesStore
   readonly hostedAccounts: HostedAccountStore
+  readonly networkPlans: NetworkPlans
+  readonly pendingNetworks: PendingNetworks
   private session: ServerSession | null = null
   private account: HostedAccount | null = null
   private startupState: StartupState = { stage: 'loading' }
@@ -52,6 +61,8 @@ export class AppCore {
     this.servers = new SavedServers(deps.secureStorage, deps.ids)
     this.preferences = new PreferencesStore(deps.secureStorage, deps.ids)
     this.hostedAccounts = new HostedAccountStore(deps.secureStorage)
+    this.networkPlans = new NetworkPlans(deps.durableStore)
+    this.pendingNetworks = new PendingNetworks(deps.durableStore)
   }
 
   get activeSession() { return this.session }
@@ -162,16 +173,40 @@ export class AppCore {
     return joined.ok ? null : failureText(joined.failure)
   }
 
+  /** A one-use invite into a network `holder` holds a key for, made there: whichever server is open. */
+  async networkInviteOn(holder: SavedServer, networkId: string): Promise<{ ok: true; value: NetworkInvite } | { ok: false; why: string }> {
+    const usable = await this.servers.withToken(holder)
+    if (!usable) return { ok: false, why: NO_TOKEN_MESSAGE }
+    const made = await this.outboxFor(usable).api.command('create_network_invite', { networkId }, this.deps.ids.newId())
+    return made.ok ? { ok: true, value: made.value } : { ok: false, why: failureText(made.failure) }
+  }
+
+  /** `joiner` takes a network `host` holds a key for, as `role`: an invite made on the host, traded on the joiner. Answers
+   * why not, or null. */
+  async addToNetwork(joiner: SavedServer, host: SavedServer, networkId: string, role: 'home' | 'extra'): Promise<string | null> {
+    const [joining, hosting] = await Promise.all([this.servers.withToken(joiner), this.servers.withToken(host)])
+    if (!joining || !hosting) return NO_TOKEN_MESSAGE
+    const invite = await this.outboxFor(hosting).api.command('create_network_invite', { networkId }, this.deps.ids.newId())
+    if (!invite.ok) return failureText(invite.failure)
+    const joined = await this.outboxFor(joining).api.command('join_network', { address: invite.value.address, code: invite.value.code, role }, this.deps.ids.newId())
+    return joined.ok ? null : failureText(joined.failure)
+  }
+
   /** A server just added links itself with every other saved server it isn't linked with yet. Quietly best-effort: a server
-   * the person doesn't own, or can't be reached, stays unlinked and shows Link in Servers. */
+   * the person doesn't own, or can't be reached, stays unlinked and shows Link in Servers. Never once the person uses
+   * networks, on any saved server: a link is full trust outside them, so a server that goes on to join a shared network
+   * would keep a way into the private one. Then the person picks each server's network in Servers. */
   private async linkWithOtherServers(added: SavedServer) {
     const others = (await this.servers.list()).filter((server) => server.id !== added.id)
     if (!others.length) return
     const snapshot = await this.snapshotOf(added)
-    if (!snapshot?.ok) return
+    if (!snapshot?.ok || (snapshot.value.server.networks ?? []).length > 0) return
+    const theirs = await Promise.all(others.map(async (other) => ({ other, snapshot: await this.snapshotOf(other).catch(() => null) })))
+    if (theirs.some(({ snapshot }) => snapshot?.ok && (snapshot.value.server.networks ?? []).length > 0)) return
     const linked = snapshot.value.computers.flatMap((computer) => computer.address ? [computer.address.replace(/\/+$/, '')] : [])
-    for (const other of others) {
-      if (!linked.includes(other.url.replace(/\/+$/, ''))) await this.linkServers(added, other).catch(() => null)
+    for (const { other, snapshot: their } of theirs) {
+      if (!their?.ok || linked.includes(other.url.replace(/\/+$/, ''))) continue
+      await this.linkServers(added, other).catch(() => null)
     }
   }
 
@@ -200,7 +235,9 @@ export class AppCore {
   }
 
   /** Throws a readable error if the pairing or saving fails. */
-  async pairAndActivate(url: string, code: string, details: { label?: string; hostedServerId?: string } = {}): Promise<SavedServer> {
+  /** `setupId`: a server made from Servers, whose network was picked when it was named (see networkPlans.ts): once paired,
+   * it goes into that network instead of being linked with the others. */
+  async pairAndActivate(url: string, code: string, details: { label?: string; hostedServerId?: string; setupId?: string } = {}): Promise<SavedServer> {
     // Before the code is spent: a pairing code works once, and a damaged list would refuse to keep what it gave.
     if (this.servers.needsRecovery) throw new ServerListDamaged(SERVER_LIST_DAMAGED_PAIRING)
     const result = await pairWithServer(this.deps.network, url, code)
@@ -214,8 +251,27 @@ export class AppCore {
     // The first server paired gives this phone its updates, until the person picks another.
     if (this.preferences.current.updateHomeServerId === null) this.preferences.set('updateHomeServerId', server.id)
     await this.activate({ server, token: deviceToken })
-    void this.linkWithOtherServers(server).catch(() => {})
+    const plan = details.setupId ? await this.networkPlans.get(details.setupId) : null
+    if (plan === null) {
+      void this.linkWithOtherServers(server).catch(() => {})
+      return server
+    }
+    const why = await this.placeInNetwork(server, plan)
+    if (why !== null) throw new NetworkPlacementFailed(why)
+    await this.networkPlans.clear(details.setupId!)
+    if (plan.kind === 'new_private') await this.pendingNetworks.remove(plan.name)
     return server
+  }
+
+  /** Puts a server just paired into the network picked for it. Words for the failure, or null. */
+  private async placeInNetwork(server: SavedServer, plan: NetworkPlan): Promise<string | null> {
+    if (plan.kind === 'new_private') {
+      const why = await this.commandErrorOn(server, 'create_network', { name: plan.name, kind: 'private', role: 'home' })
+      return why === null ? null : `${server.label} is connected, but making the network ${plan.name} on it failed: ${why}. Set it up from Servers.`
+    }
+    const host = (await this.servers.list()).find((saved) => saved.id === plan.hostServerId)
+    const why = host ? await this.addToNetwork(server, host, plan.networkId, 'home') : 'the server that holds its key is no longer on this phone'
+    return why === null ? null : `${server.label} is connected, but it couldn't join ${plan.networkName}: ${why}. Add it from Servers with its … menu.`
   }
 
   /** The saved server updates come from. Switching servers never changes it. */

@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { Address } from './address.ts'
 import { AgentEntity, AskLevel, AskSnooze, BranchMerge, ModelId, PromptCacheLifetime } from './agent.ts'
 import { BaseOffer } from './bases.ts'
-import { ComputerEntity, ComputerInvite, ComputerTrust, RemoteAgentAction, RemoteAgentEntity, RemoteAskEntity } from './computers.ts'
+import { ComputerEntity, ComputerInvite, ComputerTrust, NETWORK_NAME_PATTERN, NetworkEntity, NetworkInvite, NetworkKind, NetworkRole, RemoteAgentAction, RemoteAgentEntity, RemoteAskEntity } from './computers.ts'
 import { AskEntity, ChatEntity, ChatTitle, DeviceEntity, ServerEntity, GoalEntity, GoalKind, ReadStateEntity } from './entities.ts'
 import { DeliveryWake, MessageEntity } from './message.ts'
 import { NotificationSettings, NotificationSettingsEntity, PushTokenRegistration } from './notifications.ts'
@@ -174,6 +174,28 @@ export const commands = {
   /** Stop, interrupt, archive or change the model of an agent on another computer. Done there at once, or
    * refused with `peer_unreachable` (safe to retry with the same key); needs that computer's full trust. */
   control_remote_agent: defineCommand(['person', 'agent'], z.object({ remoteAgentId: z.string(), action: RemoteAgentAction }), z.object({ remoteAgent: RemoteAgentEntity })),
+  /** The owner only, from a phone: a new network with a fresh key, held here as the home key or an extra key. A new home
+   * key replaces the old one, whose servers this one then neither accepts nor contacts. A server's first private home key
+   * takes in the computers it already trusted fully, until they have keys of their own: `leftOut` names the others. */
+  create_network: defineCommand(['person'], z.object({ name: z.string().regex(NETWORK_NAME_PATTERN), kind: NetworkKind, role: NetworkRole }), z.object({ network: NetworkEntity, leftOut: z.array(z.string()) })),
+  /** The owner only. A one-use invite into a network this server holds a key for, for 30 minutes; it replaces any open
+   * invite into that network. */
+  create_network_invite: defineCommand(['person'], z.object({ networkId: z.string() }), NetworkInvite),
+  /** The owner only: trades an invite's code at `address` for its network's key, held here as `role`. */
+  join_network: defineCommand(['person'], z.object({ address: z.string().url(), code: z.string().min(1), role: NetworkRole }), z.object({ network: NetworkEntity, leftOut: z.array(z.string()) })),
+  /** The owner only: lets go of an extra key. A home key is replaced, not removed. */
+  remove_network: defineCommand(['person'], z.object({ networkId: z.string() }), Empty),
+  /** The owner only: the name this server gives its owner to servers in shared networks, where they are `human@<name>`. */
+  set_owner_name: defineCommand(['person'], z.object({ name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/) }), z.object({ server: ServerEntity })),
+  /** Owner and agents, on a private server: a copy of an agent in a shared network this server holds a key for. The
+   * original stays and doesn't follow. The copy arrives paused and labelled, under `name` or its own name. */
+  pull_agent: defineCommand(['person', 'agent'], z.object({ remoteAgentId: z.string(), name: z.string().nullable() }), z.object({ agent: AgentEntity })),
+  /** Owner and agents: a pulled copy may run, and starts on what waits for it. */
+  start_pulled_agent: defineCommand(['person', 'agent'], z.object({ agentId: z.string() }), z.object({ agent: AgentEntity })),
+  /** Owner and agents, on a private server: the shared notes of the project at `folder` (the calling agent's own folder if
+   * null) sent into a shared network, to that computer. Off unless asked: nothing else takes memory out. */
+  push_memory: defineCommand(['person', 'agent'], z.object({ computerId: z.string(), folder: z.string().nullable() }), z.object({ notes: z.number().int() })),
+  /** Kept for older phones and agents. Inside a network every server is trusted fully; refused once this server has one. */
   set_computer_trust: defineCommand(['person', 'agent'], z.object({ computerId: z.string(), trust: ComputerTrust }), z.object({ computer: ComputerEntity })),
   /** Owner only. Raising a limit lets held agents carry on at once. */
   set_limits: defineCommand(['person'], z.object({
