@@ -1,22 +1,19 @@
 // One conversation as data. Pure: messages + outbox -> what the list and bars show. Screen.tsx only draws this.
-import { goalWaitText, MASTER_AGENT_NAME, receiptOf, turnFailureText } from '@ouro/contract'
-import type { AgentEntity, AskEntity, GoalEntity, MessageEntity, MessageReceipt, RemoteAskEntity, SummaryEntity } from '@ouro/contract'
+import { goalWaitText, receiptOf, turnFailureText } from '@ouro/contract'
+import type { AgentEntity, AskEntity, GoalEntity, MessageEntity, MessageReceipt, SummaryEntity } from '@ouro/contract'
 import { ago, formatSize, oneLine, timerText } from '../../design/format.ts'
 import { outboxEntriesNotYetListed } from '../../core/session/outbox.ts'
 import type { NewSend, OutboxEntry } from '../../core/session/outbox.ts'
 import type { ConnectionStatus } from '../../core/session/syncEngine.ts'
 import { failureText } from '../../core/session/serverApi.ts'
 import type { ApiResult } from '../../core/session/serverApi.ts'
-import { activityOf, askSymbol, connectionNoteOf, isBeforeLatestTurn, isSnoozed, listedAgents, openCopyOf, sortAsks, stateDotOf, statusLine } from '../shared/agentFacts.ts'
-import type { Asker, AskSymbol, ShownAsk, StateDotKind, StoreView } from '../shared/agentFacts.ts'
+import { activityOf, askSymbol, connectionNoteOf, isBeforeLatestTurn, isSnoozed, listedAgents, sortAsks, stateDotOf, statusLine } from '../shared/agentFacts.ts'
+import type { AskSymbol, ShownAsk, StateDotKind, StoreView } from '../shared/agentFacts.ts'
 import { goalColorOf, goalMarkerOf } from '../agents/model.ts'
 import type { GoalColor } from '../agents/model.ts'
 
-/** A done report this close after the previous message folds under it. */
-export const DONE_FOLD_MS = 15 * 60_000
-
 export type ChatItem =
-  | { kind: 'message'; key: string; message: MessageEntity; mine: boolean; receiptText: string | null; doneReport: { at: number; summary: string; messageId: string } | null; failedText: string | null }
+  | { kind: 'message'; key: string; message: MessageEntity; mine: boolean; receiptText: string | null; failedText: string | null }
   | { kind: 'outbox'; key: string; entry: OutboxEntry }
 
 export const receiptText: Record<Exclude<MessageReceipt, 'undeliverable' | 'failed'>, string> = {
@@ -24,18 +21,6 @@ export const receiptText: Record<Exclude<MessageReceipt, 'undeliverable' | 'fail
   queued: '◌ queued',
   delivered: '→ delivered',
   read: '✓ read',
-}
-
-/** A done report right after the same sender's own message folds into that message; display only. */
-export function foldDoneReports(messages: readonly MessageEntity[]): (MessageEntity & { doneReport?: MessageEntity })[] {
-  const out: (MessageEntity & { doneReport?: MessageEntity })[] = []
-  for (const message of messages) {
-    const previous = out[out.length - 1]
-    if (previous && !previous.doneReport && message.purpose === 'done_report' && previous.purpose !== 'done_report' && previous.from === message.from && message.at - previous.at <= DONE_FOLD_MS) {
-      out[out.length - 1] = { ...previous, doneReport: message }
-    } else out.push(message)
-  }
-  return out
 }
 
 function undeliverableReason(message: MessageEntity) {
@@ -48,7 +33,7 @@ function undeliverableReason(message: MessageEntity) {
 /** Newest first, as an inverted list wants them: what's listed, then what's still going out. */
 export function chatItems(input: { messages: readonly MessageEntity[]; outbox: readonly OutboxEntry[]; viewerAddress: string | undefined; recipientLastOutputAt: number | null }): ChatItem[] {
   const { messages, outbox, viewerAddress, recipientLastOutputAt } = input
-  const listed: ChatItem[] = foldDoneReports(messages).map((message) => {
+  const listed: ChatItem[] = messages.map((message) => {
     const mine = message.from === viewerAddress
     const receipt = mine ? receiptOf(message, recipientLastOutputAt) : null
     const reason = undeliverableReason(message)
@@ -59,7 +44,6 @@ export function chatItems(input: { messages: readonly MessageEntity[]; outbox: r
       mine,
       receiptText: receipt && receipt !== 'undeliverable' && receipt !== 'failed' ? receiptText[receipt] : null,
       failedText: mine && (receipt === 'undeliverable' || receipt === 'failed') ? `⚠ not delivered: ${reason ?? 'refused'}` : null,
-      doneReport: message.doneReport ? { at: message.doneReport.at, summary: message.doneReport.text, messageId: message.doneReport.id } : null,
     }
   })
   const going: ChatItem[] = outboxEntriesNotYetListed(outbox, messages).map((entry) => ({ kind: 'outbox', key: entry.idempotencyKey, entry }))
@@ -115,12 +99,14 @@ export function messageFiles(message: MessageEntity, attachmentUrl: (attachmentI
 /** The header's "next unread" button: how many there are, and its words when there are none. */
 export const nextUnreadLabel = (count: number) => (count ? `Next unread, ${count}` : 'No other unread')
 
-export type ChatMenuAction = 'log' | 'goal' | 'summaries' | 'details' | 'interrupt' | 'stop'
+export type ChatMenuAction = 'pin' | 'log' | 'goal' | 'summaries' | 'details' | 'interrupt' | 'stop'
 export interface ChatMenuItem { action: ChatMenuAction; title: string; symbol: string; disabled?: boolean; destructive?: boolean }
 
-/** The More menu: Interrupt and Stop only while it runs, Interrupt only while it's busy; Goal or Set a goal by whether it has one. */
-export function chatMoreMenu(agent: { hasGoal: boolean; running: boolean; busy: boolean }): ChatMenuItem[] {
+/** The More menu: Pin or Unpin first; Interrupt and Stop only while it runs, Interrupt only while it's busy; Goal or Set a
+ * goal by whether it has one. */
+export function chatMoreMenu(agent: { hasGoal: boolean; running: boolean; busy: boolean; pinned: boolean }): ChatMenuItem[] {
   const items: ChatMenuItem[] = [
+    agent.pinned ? { action: 'pin', title: 'Unpin', symbol: 'pin.slash' } : { action: 'pin', title: 'Pin to top', symbol: 'pin' },
     { action: 'log', title: 'Log', symbol: 'text.alignleft' },
     { action: 'goal', title: agent.hasGoal ? 'Goal' : 'Set a goal', symbol: 'target' },
     { action: 'summaries', title: 'Summaries', symbol: 'text.badge.star' },
@@ -249,9 +235,9 @@ export class ChoiceTapGuard {
   }
 }
 
-// ---- the master's chat ----
+// ---- agents a message names ----
 
-/** Agents a master message points at ("→ ios", "`ios`", the bare name), in the order they appear, at most 4. */
+/** Agents an agent's message points at ("→ ios", "`ios`", the bare name), in the order they appear, at most 4. */
 export function routedAgents(text: string, store: StoreView, selfId: string): AgentEntity[] {
   const candidates = listedAgents(store).filter((agent) => agent.id !== selfId).sort((x, y) => y.name.length - x.name.length)
   const lower = text.toLowerCase()
@@ -262,20 +248,6 @@ export function routedAgents(text: string, store: StoreView, selfId: string): Ag
     if (mention.test(text) && !found.some((f) => f.name.includes(agent.name))) found.push(agent)
   }
   return found.sort((x, y) => lower.indexOf(x.name.toLowerCase()) - lower.indexOf(y.name.toLowerCase())).slice(0, 4)
-}
-
-export interface StripAskModel { askId: string; asker: Asker; agentName: string; symbol: AskSymbol; text: string }
-
-/** Every other agent's open asks, those on other computers too (named `name@machine`): the strip at the top of the
- * master's chat. */
-export function asksStrip(store: StoreView & { readonly remoteAsks: ReadonlyMap<string, RemoteAskEntity> }, now: number): StripAskModel[] {
-  const master = [...store.agents.values()].find((agent) => agent.name === MASTER_AGENT_NAME)
-  const local = [...store.asks.values()].filter((ask) => ask.agentId !== master?.id && !isSnoozed(ask, now))
-    .map((ask) => ({ ...ask, asker: { kind: 'local', agentId: ask.agentId } as const, shownName: ask.agentName }))
-  const remote = [...store.remoteAsks.values()].filter((ask) => !isSnoozed(ask, now))
-    .map((ask) => ({ ...openCopyOf(ask), asker: { kind: 'remote', remoteAgentId: ask.remoteAgentId } as const, shownName: ask.address }))
-  return sortAsks<ShownAsk & { asker: Asker; shownName: string }>([...local, ...remote], now)
-    .map((ask) => ({ askId: ask.id, asker: ask.asker, agentName: ask.shownName, symbol: askSymbol(ask.level), text: oneLine(ask.text) }))
 }
 
 /** A posed ask's choices stay on its message only while the ask is open. */
@@ -306,11 +278,11 @@ export const JUMP_COPY = {
   notHere: 'That message isn’t in this chat any more.',
 } as const
 
-/** What to do next to show `target`, given the items as listed (newest first) and the pages loaded so far. A done report
- * folded into the message before it is found at that message. Once its place is loaded and it isn't there, the nearest
- * message at or before it stands in (CHAT-71), or the oldest when all are after it. */
+/** What to do next to show `target`, given the items as listed (newest first) and the pages loaded so far. Once its place
+ * is loaded and it isn't there, the nearest message at or before it stands in (CHAT-71), or the oldest when all are after
+ * it. */
 export function jumpStep(items: readonly ChatItem[], target: MessageAt, hasOlder: boolean, pagesLoaded: number): JumpStep {
-  const index = items.findIndex((item) => item.kind === 'message' && (item.message.id === target.messageId || item.doneReport?.messageId === target.messageId))
+  const index = items.findIndex((item) => item.kind === 'message' && item.message.id === target.messageId)
   const found = items[index]
   if (found?.kind === 'message') return { kind: 'scroll', index, messageId: found.message.id }
   const oldestSeq = items.reduce((oldest, item) => (item.kind === 'message' ? Math.min(oldest, item.message.seq) : oldest), Infinity)

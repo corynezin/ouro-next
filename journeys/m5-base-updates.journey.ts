@@ -1,5 +1,5 @@
 // Taking bases (J-34, server side): an offered base is merged beside the person's live source and goes live through the
-// guardian's release path, then into their branch; a conflict goes to the master agent and nothing live changes until it
+// guardian's release path, then into their branch; a conflict goes to an agent started for it and nothing live changes until it
 // is resolved; a base that doesn't build changes nothing. A local bare repository stands in for the public base repository.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
@@ -7,8 +7,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { after, before, test } from 'node:test'
-import { MASTER_AGENT_NAME } from '@ouro/contract'
-import type { BaseStatus, LogRecord, MessageEntity } from '@ouro/contract'
+import type { AgentEntity, BaseStatus, MessageEntity } from '@ouro/contract'
 import { BaseRepo } from '../server/src/adapters/base-repo-fixture.ts'
 import { GuardianRun } from './guardian-harness.ts'
 import { standInScript, waitFor } from './harness.ts'
@@ -47,7 +46,7 @@ async function makeBaseTrees(): Promise<void> {
   await execFileAsync('tar', ['-xf', archive, '-C', treeOf(0)])
 
   cpSync(treeOf(0), treeOf(1), { recursive: true })
-  writeFileSync(join(treeOf(1), 'server/protocols/master.md'), `${readFileSync(join(treeOf(1), 'server/protocols/master.md'), 'utf8')}\nBase 1 was here.\n`)
+  writeFileSync(join(treeOf(1), 'server/protocols/starter.md'), `${readFileSync(join(treeOf(1), 'server/protocols/starter.md'), 'utf8')}\nBase 1 was here.\n`)
   mkdirSync(join(treeOf(1), 'apps/mobile'), { recursive: true })
   writeFileSync(join(treeOf(1), 'apps/mobile/base-1.txt'), 'the app, as of base 1\n')
   writeFileSync(join(treeOf(1), 'apps/mobile/app.json'), JSON.stringify({ expo: { name: 'Ouro Next', version: '0.1.0', runtimeVersion: { policy: 'appVersion' } } }))
@@ -73,7 +72,7 @@ before(async () => {
   run.editSource(DEFAULT_PROTOCOL, FOLDER_LINE, PERSON_LINE)
   await run.commitAll('my own wording')
   await makeBaseTrees()
-  await offer(1, 'the master protocol gains a line, and the app a file')
+  await offer(1, 'the starter protocol gains a line, and the app a file')
 
   run.extraOurodEnv = { OURO_BASE_REPO: baseRepo.url, OURO_APP_EXPORT_COMMAND: FAKE_EXPORT }
   await run.start()
@@ -98,19 +97,13 @@ async function base(): Promise<Extract<BaseStatus, { kind: 'taker' }> | null> {
 const head = async () => (await run.git('rev-parse', 'main')).trim()
 const sourceText = (path: string) => readFileSync(join(run.source, path), 'utf8')
 
-/** The person's chat with the master agent; it opens with the person's first message. */
-async function conversationWithMaster(): Promise<MessageEntity[]> {
-  const snapshot = await phone.snapshot()
-  const opened = snapshot.chats.some((chat) => chat.kind === 'direct'
-    && chat.members.some((member) => member.address === snapshot.viewer.address)
-    && chat.members.some((member) => member.address === MASTER_AGENT_NAME))
-  return opened ? await phone.conversation(MASTER_AGENT_NAME) : []
+/** The agent a base update started for its work, once there is one. */
+async function startedFor(name: string): Promise<AgentEntity | undefined> {
+  return (await phone.snapshot()).agents.find((agent) => agent.name === name)
 }
 
-async function masterNotices(): Promise<string[]> {
-  const records = (JSON.parse(await run.cli('log', MASTER_AGENT_NAME)) as { records: LogRecord[] }).records
-  return records.flatMap((record) => (record.kind === 'incoming' && record.from === 'system' ? [record.text] : []))
-}
+/** The person's chat with an agent. */
+const conversationWith = async (name: string): Promise<MessageEntity[]> => await phone.conversation(name)
 
 test('an offered base is merged beside the live source, goes live through the guardian, and then into the person\'s branch', async () => {
   const offered = await waitFor('base 1 to be offered', async () => (await base())?.offered?.n === 1 && await base())
@@ -130,17 +123,17 @@ test('an offered base is merged beside the live source, goes live through the gu
   const status = await run.status()
   assert.notEqual(status.active, releaseBefore)
   assert.ok(status.active!.endsWith((await head()).slice(0, 8)), 'main is the commit that went live')
-  assert.match(sourceText('server/protocols/master.md'), /Base 1 was here\./)
+  assert.match(sourceText('server/protocols/starter.md'), /Base 1 was here\./)
   assert.match(sourceText(DEFAULT_PROTOCOL), /Keep notes short\./, 'the person\'s own change is kept')
   assert.ok(!existsSync(besideDirOf(1)), 'the merge beside is cleaned up')
   assert.equal((await run.git('branch', '--list', 'ouro-update/*')).trim(), '')
   const latestUpdate = await waitFor('the app to be published', async () => ((await (await fetch(`${run.url}/v2/identity`)).json()) as { latestUpdate: { updateNumber: number } | null }).latestUpdate)
   assert.equal(latestUpdate.updateNumber, 1, 'base 1 changes the app, so the phone has it without anyone running ouro publish')
-  assert.ok(!(await masterNotices()).some((text) => text.includes('Ouro base 1 is live')), 'nothing is left for the master agent to do')
+  assert.equal(await startedFor('base-1-publish'), undefined, 'no agent is started to publish it')
   assert.equal(done.offered?.n, 2, 'the next base is offered once this one is in')
 })
 
-test('a base that conflicts with the person\'s changes goes to the master agent, who resolves it and carries on', async () => {
+test('a base that conflicts with the person\'s changes goes to an agent started for it, which resolves it and carries on', async () => {
   await waitFor('base 2 to be offered', async () => (await base())?.offered?.n === 2)
   const releaseBefore = (await run.status()).active
   const headBefore = await head()
@@ -153,27 +146,28 @@ test('a base that conflicts with the person\'s changes goes to the master agent,
   assert.deepEqual(conflicted, { state: 'conflict', n: 2, files: [DEFAULT_PROTOCOL] })
   assert.equal((await run.status()).active, releaseBefore, 'nothing live changed')
   assert.equal(await head(), headBefore)
-  const brief = await waitFor('the master agent\'s brief', async () => (await masterNotices()).find((text) => text.startsWith('Ouro base 2 conflicts')))
+  const brief = (await waitFor('an agent started with the brief', async () => await startedFor('base-2'))).task
+  assert.ok(brief.startsWith('Ouro base 2 conflicts'))
   assert.ok(brief.includes(DEFAULT_PROTOCOL) && brief.includes(besideDirOf(2)) && brief.includes('ouro base continue'))
 
-  // What the master agent's model would do: keep the person's wording and take the base's.
+  // What the base agent's model would do: keep the person's wording and take the base's.
   const resolved = join(run.dir, 'resolved.md')
   writeFileSync(resolved, readFileSync(join(treeOf(2), DEFAULT_PROTOCOL), 'utf8').replace(BASE_2_LINE, RESOLVED_LINE))
   await offer(3, 'a change that does not build')
   const beside = besideDirOf(2)
-  const seenBefore = (await conversationWithMaster()).length
+  const seenBefore = (await conversationWith('base-2')).length
   await phone.command('send_message', {
-    to: MASTER_AGENT_NAME,
+    to: 'base-2',
     text: standInScript({
       do: 'run',
-      command: `cp ${resolved} ${join(beside, DEFAULT_PROTOCOL)} && git -C ${beside} add -A && git -C ${beside} -c user.name=master -c user.email=master@invalid commit -q --no-edit && ouro base continue > continued.txt 2>&1; ouro reply "$(cat continued.txt)"`,
+      command: `cp ${resolved} ${join(beside, DEFAULT_PROTOCOL)} && git -C ${beside} add -A && git -C ${beside} -c user.name=base-2 -c user.email=base-2@invalid commit -q --no-edit && ouro base continue > continued.txt 2>&1; ouro reply "$(cat continued.txt)"`,
     }),
     attachmentIds: [],
     wake: 'wake',
     answersAskId: null,
   })
-  const reply = await waitFor('the master agent to carry on', async () => (await conversationWithMaster()).slice(seenBefore)
-    .find((message) => message.from === MASTER_AGENT_NAME && !message.text.startsWith('stand-in received')), 60_000)
+  const reply = await waitFor('the base agent to carry on', async () => (await conversationWith('base-2')).slice(seenBefore)
+    .find((message) => message.from === 'base-2' && !message.text.startsWith('stand-in received')), 60_000)
   assert.match(reply.text, /updating to base 2/)
 
   await waitFor('base 2 to be integrated', async () => {

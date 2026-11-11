@@ -134,3 +134,12 @@ test("a copy of an ask leaves to its computer the phones it was pushed to there 
   assert.deepEqual(store.remoteAskSenderPushTokenHashes('new'), ['h1', 'h2'])
   store.close()
 })
+
+test('a client is sent changes of an opt-in kind only when it asks for them', () => {
+  const store = new Store(':memory:')
+  store.markChanged('agent', 'a')
+  store.markChanged('pin', 'p1', 'p')
+  assert.deepEqual(store.changesAfter(0, 'p', 10).map((row) => row.entity), ['agent', 'pin'])
+  assert.deepEqual(store.changesAfter(0, 'p', 10, ['pin']).map((row) => row.entity), ['agent'])
+  store.close()
+})

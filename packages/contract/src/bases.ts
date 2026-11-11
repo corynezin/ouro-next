@@ -6,7 +6,7 @@ export const BaseOffer = z.object({ n: z.number().int().positive(), notes: z.str
 export type BaseOffer = z.infer<typeof BaseOffer>
 
 /**
- * Taking a base. `conflict`: the base and the person's changes touch the same files; the master agent is resolving them
+ * Taking a base. `conflict`: the base and the person's changes touch the same files; an agent started for it is resolving
  * beside the live source, and nothing live has changed. `failed`: the base didn't go in; `why` says what, if anything,
  * changed.
  */

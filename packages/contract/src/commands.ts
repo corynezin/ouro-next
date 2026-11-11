@@ -5,7 +5,7 @@ import { Address } from './address.ts'
 import { AgentEntity, AskLevel, AskSnooze, BranchMerge, ModelId, PromptCacheLifetime } from './agent.ts'
 import { BaseOffer } from './bases.ts'
 import { ComputerEntity, ComputerInvite, ComputerTrust, RemoteAgentAction, RemoteAgentEntity, RemoteAskEntity } from './computers.ts'
-import { AskEntity, ChatEntity, ChatTitle, DeviceEntity, ServerEntity, GoalEntity, GoalKind, ReadStateEntity } from './entities.ts'
+import { AskEntity, ChatEntity, ChatTitle, DeviceEntity, ServerEntity, GoalEntity, GoalKind, PinEntity, PinTarget, ReadStateEntity } from './entities.ts'
 import { DeliveryWake, MessageEntity } from './message.ts'
 import { NotificationSettings, NotificationSettingsEntity, PushTokenRegistration } from './notifications.ts'
 
@@ -90,7 +90,7 @@ export const commands = {
   /** Brings the calling agent's project memory and the person's shared notes together; Claude Code's hooks call it. */
   sync_memory: defineCommand(['agent'], Empty, Empty),
 
-  /** The master agent passes the person's own words to an agent, as theirs: their answer to a question, say. */
+  /** An agent passes its creator's own words to an agent here, as theirs: their answer to a question, say. */
   relay_message: defineCommand(['agent'], z.object({
     to: Address,
     text: z.string().min(1),
@@ -143,6 +143,15 @@ export const commands = {
    * within WATCH_LEASE_MS to keep it; there is nothing to send when the screen closes.
    */
   watch_agent: defineCommand(['person'], AgentTarget, Empty),
+  /**
+   * Keeps an agent or group at the top of the person's lists, after their other pins. An agent calls it for its creator.
+   * Pinning what is already pinned returns the pin as it is.
+   */
+  pin: defineCommand(['person', 'agent'], z.object({ target: PinTarget }), z.object({ pin: PinEntity })),
+  /** Unpinning what isn't pinned does nothing. */
+  unpin: defineCommand(['person', 'agent'], z.object({ target: PinTarget }), Empty),
+  /** Moves a pin just before another of the person's pins, or to the end when `beforePinId` is null. */
+  move_pin: defineCommand(['person'], z.object({ pinId: z.string(), beforePinId: z.string().nullable() }), z.object({ pin: PinEntity })),
   mark_chat_read: defineCommand(['person'], z.object({ chatId: z.string(), readThroughSeq: z.number().int().nonnegative() }), z.object({ readState: ReadStateEntity })),
 
   /** A one-time code for a new device of the owner, or for a named new person. */

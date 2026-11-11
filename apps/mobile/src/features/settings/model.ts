@@ -225,7 +225,7 @@ export function baseSection(base: ServerEntity['release']['base'], isOwner: bool
     versionText: `Base ${base.integrated}`,
     updatingText: update.state === 'updating' ? `Updating to base ${update.n}…` : null,
     note: update.state === 'conflict'
-      ? { text: `Base ${update.n} touches files you changed (${update.files.join(', ')}). Your master agent is working it out; nothing has changed yet.`, color: 'orange' }
+      ? { text: `Base ${update.n} touches files you changed (${update.files.join(', ')}). An agent, base-${update.n}, is working it out; nothing has changed yet.`, color: 'orange' }
       : update.state === 'failed'
         ? { text: `Base ${update.n} didn't go in: ${update.why}. Nothing live changed unless it says so.`, color: 'red' }
         : null,

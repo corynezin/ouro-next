@@ -229,7 +229,7 @@ export const migrations: readonly string[] = [
     model TEXT NOT NULL
   ) STRICT;
   `,
-  // 6: a person's words carried by the master agent say so. Expand only.
+  // 6: a person's words carried for them by an agent say so. Expand only.
   `
   ALTER TABLE messages ADD COLUMN relayed_by TEXT;
   `,
@@ -500,6 +500,20 @@ export const migrations: readonly string[] = [
   `
   CREATE TABLE group_posts_pushed (
     message_id TEXT PRIMARY KEY REFERENCES messages(id)
+  ) STRICT;
+  `,
+  // 27: each person's pins: agents here, agents on their other computers, and group chats kept at the top of their lists.
+  // And an agent's standing instructions, added to its rules. Expand only.
+  `
+  ALTER TABLE agents ADD COLUMN instructions TEXT;
+  CREATE TABLE pins (
+    id TEXT PRIMARY KEY,
+    person_id TEXT NOT NULL REFERENCES people(id),
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('agent', 'remote_agent', 'chat')),
+    target_ref TEXT NOT NULL,
+    position REAL NOT NULL,
+    pinned_at INTEGER NOT NULL,
+    UNIQUE (person_id, target_kind, target_ref)
   ) STRICT;
   `,
 ]

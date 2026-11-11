@@ -51,7 +51,7 @@ export function continueDecision(record: BaseUpdateRecord, unresolvedIn: (n: num
   return { kind: 'continues', n: record.n }
 }
 
-/** What the master agent is told when a base and the person's changes touch the same files. */
+/** The task of the agent started when a base and the person's changes touch the same files. */
 export function conflictBrief(n: number, notes: string, files: string[], besideDir: string): string {
   return `Ouro base ${n} conflicts with this computer's own changes in: ${files.join(', ')}. Nothing live has changed. What the base changes: ${notes}\n`
     + `Resolve it in ${besideDir}, a worktree with the merge in progress. Rule: keep what the person's change was for, and take the base's change. `

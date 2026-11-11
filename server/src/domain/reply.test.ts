@@ -14,10 +14,16 @@ test('a message from a person or an agent is owed a reply until the agent writes
   assert.equal(owesReply({ ...fromPerson, answeredInChat: true }), false)
 })
 
-test('FYIs, tasks, done reports, system notices and answers to the agent\'s own questions owe nothing', () => {
+test('FYIs, done reports, system notices and answers to the agent\'s own questions owe nothing', () => {
   assert.equal(owesReply({ ...fromPerson, wake: 'fyi' }), false)
-  for (const purpose of ['task', 'done_report', 'system_notice', 'reply_reminder', 'goal_cycle'] as const) assert.equal(owesReply({ ...fromAgent, purpose }), false, purpose)
+  for (const purpose of ['done_report', 'system_notice', 'reply_reminder', 'goal_cycle'] as const) assert.equal(owesReply({ ...fromAgent, purpose }), false, purpose)
   assert.equal(owesReply({ ...fromPerson, answersOwnAsk: true }), false)
+})
+
+test('a task is owed a reply like a message', () => {
+  assert.equal(owesReply({ ...fromPerson, purpose: 'task' }), true)
+  assert.equal(owesReply({ ...fromAgent, purpose: 'task' }), true)
+  assert.equal(owesReply({ ...fromPerson, purpose: 'task', answeredInChat: true }), false)
 })
 
 test('an agent writing back to this agent is owed nothing; a person writing back still is', () => {

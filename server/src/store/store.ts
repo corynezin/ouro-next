@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { AgentState, DEFAULT_NOTIFICATION_SETTINGS, DeliveryState, PeerHello, PromptCacheLifetime } from '@ouro/contract'
 import type {
   AgentEntity, AskEntity, AttachmentRef, ChatEntity, DeliveryWake, DeviceEntity, EntityKind, IntegrationEntity, IntegrationProvider, MessageEntity, MessagePurpose,
-  AskLevel, AskSnooze, ComputerTrust, NotificationSettings, PeerGroupPost, PeerGroupUpdate, PeerMessage, PeerOwnerAsk, PeerOwnerMessage, PersonEntity, PlanWindow, RemoteAskEntity, RemoteDelivery, PushTokenRegistration, ReadStateEntity, SummaryEntity, SummaryRecord,
+  AskLevel, AskSnooze, ComputerTrust, NotificationSettings, PeerGroupPost, PeerGroupUpdate, PeerMessage, PeerOwnerAsk, PeerOwnerMessage, PersonEntity, PinEntity, PinTarget, PlanWindow, RemoteAskEntity, RemoteDelivery, PushTokenRegistration, ReadStateEntity, SummaryEntity, SummaryRecord,
 } from '@ouro/contract'
 import type { AgentLifecycle } from '../domain/agent.ts'
 import { cacheStateOf } from '../domain/compaction.ts'
@@ -49,6 +49,8 @@ export interface AgentRow {
   /** Its own worktree, while it has one; null when it works in its folder directly. */
   worktree: AgentWorktree | null
   promptCacheLifetime: PromptCacheLifetime
+  /** Standing instructions added to the agent's rules, such as the starter agent's; null for none. */
+  instructions: string | null
   /** Null until a turn reports its context, and for models without a timed prompt cache. */
   promptCache: PromptCacheRecord | null
 }
@@ -75,6 +77,8 @@ export interface NewAgent {
   credentialHash: string
   worktree: AgentWorktree | null
   promptCacheLifetime: PromptCacheLifetime
+  /** Standing instructions added to its rules. Null or left out: none. */
+  instructions?: string | null
 }
 
 export interface DeliveryRow {
@@ -241,10 +245,12 @@ export class Store {
     return this.get<{ cursor: number | null }>('SELECT max(cursor) AS cursor FROM changes')?.cursor ?? 0
   }
 
-  changesAfter(cursor: number, personId: string, limit: number): ChangeRow[] {
+  /** `left out`: kinds this client isn't sent. */
+  changesAfter(cursor: number, personId: string, limit: number, leftOut: readonly EntityKind[] = []): ChangeRow[] {
+    const notIn = leftOut.length === 0 ? '' : ` AND entity NOT IN (${leftOut.map(() => '?').join(', ')})`
     const rows = this.all<{ cursor: number; entity: EntityKind; entity_id: string; deleted: number }>(
-      'SELECT cursor, entity, entity_id, deleted FROM changes WHERE cursor > ? AND (audience_person_id IS NULL OR audience_person_id = ?) ORDER BY cursor LIMIT ?',
-      cursor, personId, limit,
+      `SELECT cursor, entity, entity_id, deleted FROM changes WHERE cursor > ? AND (audience_person_id IS NULL OR audience_person_id = ?)${notIn} ORDER BY cursor LIMIT ?`,
+      cursor, personId, ...leftOut, limit,
     )
     return rows.map((row) => ({ cursor: row.cursor, entity: row.entity, entityId: row.entity_id, deleted: row.deleted === 1 }))
   }
@@ -347,11 +353,12 @@ export class Store {
 
   insertAgent(agent: NewAgent): void {
     this.run(
-      `INSERT INTO agents (id, name, task, folder, model, parent, created_by, created_at, state_name, state_json, instance_generation, consecutive_crashes, ownership_epoch, last_activity_at, credential_hash, worktree_json, prompt_cache_lifetime)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO agents (id, name, task, folder, model, parent, created_by, created_at, state_name, state_json, instance_generation, consecutive_crashes, ownership_epoch, last_activity_at, credential_hash, worktree_json, prompt_cache_lifetime, instructions)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       agent.id, agent.name, agent.task, agent.folder, agent.model, agent.parent, agent.createdBy, agent.createdAt,
       agent.lifecycle.state.state, JSON.stringify(agent.lifecycle.state), agent.lifecycle.instanceGeneration, agent.lifecycle.consecutiveCrashes,
       agent.lifecycle.ownershipEpoch, agent.createdAt, agent.credentialHash, agent.worktree === null ? null : JSON.stringify(agent.worktree), agent.promptCacheLifetime,
+      agent.instructions ?? null,
     )
     this.markChanged('agent', agent.id)
   }
@@ -388,6 +395,7 @@ export class Store {
       repliesSettledThroughSeq: row.replies_settled_through_seq as number,
       worktree: row.worktree_json === null ? null : JSON.parse(row.worktree_json as string) as AgentWorktree,
       promptCacheLifetime: PromptCacheLifetime.parse(row.prompt_cache_lifetime),
+      instructions: (row.instructions as string | null) ?? null,
       promptCache: row.prompt_cache_json === null ? null : JSON.parse(row.prompt_cache_json as string) as PromptCacheRecord,
     }
   }
@@ -469,12 +477,13 @@ export class Store {
   updateAgentFields(id: string, fields: Partial<{
     model: string; providerSessionId: string | null; runnerPid: number | null; runnerRelease: string | null; journalCursor: number
     lastOutputAt: number; lastActivityAt: number; interruptedBy: string | null; costUsd: number; longTurnReportedTurnId: string
-    repliesSettledThroughSeq: number
+    repliesSettledThroughSeq: number; task: string; instructions: string | null
   }>): void {
     const columns: Record<string, string> = {
       model: 'model', providerSessionId: 'provider_session_id', runnerPid: 'runner_pid', runnerRelease: 'runner_release', journalCursor: 'journal_cursor',
       lastOutputAt: 'last_output_at', lastActivityAt: 'last_activity_at', interruptedBy: 'interrupted_by', costUsd: 'cost_usd',
       longTurnReportedTurnId: 'long_turn_reported_turn_id', repliesSettledThroughSeq: 'replies_settled_through_seq',
+      task: 'task', instructions: 'instructions',
     }
     const entries = Object.entries(fields)
     if (entries.length === 0) return
@@ -790,6 +799,44 @@ export class Store {
 
   countUnread(chatId: string, afterSeq: number, viewerAddress: string): number {
     return this.get<{ count: number }>('SELECT count(*) AS count FROM messages WHERE chat_id = ? AND seq > ? AND from_address <> ?', chatId, afterSeq, viewerAddress)!.count
+  }
+
+  // Pins
+
+  listPins(personId: string): PinEntity[] {
+    return this.all<Record<string, SqlValue>>('SELECT * FROM pins WHERE person_id = ? ORDER BY position, pinned_at', personId).map((row) => pinEntityOf(row))
+  }
+
+  pinById(id: string): { personId: string; pin: PinEntity } | null {
+    const row = this.get<Record<string, SqlValue>>('SELECT * FROM pins WHERE id = ?', id)
+    return row ? { personId: row.person_id as string, pin: pinEntityOf(row) } : null
+  }
+
+  pinOf(personId: string, target: PinTarget): PinEntity | null {
+    const row = this.get<Record<string, SqlValue>>('SELECT * FROM pins WHERE person_id = ? AND target_kind = ? AND target_ref = ?', personId, target.kind, pinTargetRef(target))
+    return row ? pinEntityOf(row) : null
+  }
+
+  /** Everyone's pins of one thing. */
+  pinsOf(target: PinTarget): { personId: string; pin: PinEntity }[] {
+    return this.all<Record<string, SqlValue>>('SELECT * FROM pins WHERE target_kind = ? AND target_ref = ?', target.kind, pinTargetRef(target))
+      .map((row) => ({ personId: row.person_id as string, pin: pinEntityOf(row) }))
+  }
+
+  insertPin(personId: string, pin: PinEntity): void {
+    this.run('INSERT INTO pins (id, person_id, target_kind, target_ref, position, pinned_at) VALUES (?, ?, ?, ?, ?, ?)',
+      pin.id, personId, pin.target.kind, pinTargetRef(pin.target), pin.position, pin.pinnedAt)
+    this.markChanged('pin', pin.id, personId)
+  }
+
+  updatePin(personId: string, pin: PinEntity): void {
+    this.run('UPDATE pins SET target_kind = ?, target_ref = ?, position = ? WHERE id = ? AND person_id = ?', pin.target.kind, pinTargetRef(pin.target), pin.position, pin.id, personId)
+    this.markChanged('pin', pin.id, personId)
+  }
+
+  deletePin(personId: string, id: string): void {
+    this.run('DELETE FROM pins WHERE id = ? AND person_id = ?', id, personId)
+    this.markDeleted('pin', id, personId)
   }
 
   // Attachments
@@ -1332,6 +1379,21 @@ export class Store {
     const agentIds = this.all<{ agent_id: string }>('SELECT agent_id FROM summaries UNION SELECT agent_id FROM summary_progress UNION SELECT agent_id FROM live_lines').map((row) => row.agent_id)
     return agentIds.map((agentId) => this.summaryEntity(agentId)).filter((entity) => entity !== null)
   }
+}
+
+const pinTargetRef = (target: PinTarget): string => {
+  switch (target.kind) {
+    case 'agent': return target.agentId
+    case 'remote_agent': return target.address
+    case 'chat': return target.chatId
+  }
+}
+
+function pinEntityOf(row: Record<string, SqlValue>): PinEntity {
+  const ref = row.target_ref as string
+  const kind = row.target_kind as PinTarget['kind']
+  const target: PinTarget = kind === 'agent' ? { kind, agentId: ref } : kind === 'remote_agent' ? { kind, address: ref } : { kind, chatId: ref }
+  return { id: row.id as string, target, position: row.position as number, pinnedAt: row.pinned_at as number }
 }
 
 export const readStateId = (personId: string, chatId: string): string => `${personId}:${chatId}`

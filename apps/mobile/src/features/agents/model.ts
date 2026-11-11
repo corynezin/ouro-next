@@ -4,10 +4,12 @@ import { ago, foldForSearch, money, oneLine } from '../../design/format.ts'
 import type { IdleFold } from '../../core/accounts/preferences.ts'
 import type { ConnectionStatus } from '../../core/session/syncEngine.ts'
 import {
-  activityTime, askSnoozeText, listPlaceOrder, connectionNoteOf, askSymbol, asksOf, directChatOf, directChatWith, isBusy, isMaster, isSnoozed, lastMessagePreview, listedAgents, listOrder, shownConnection,
-  openCopyOf, sortAsks, stateDotOf, statusLine, stateOf, topAsk, unreadElsewhereCount, unreadOf,
+  activityTime, askSnoozeText, listPlaceOrder, connectionNoteOf, askSymbol, asksOf, directChatOf, directChatWith, isBusy, isSnoozed, lastMessagePreview, listedAgents, listOrder, shownConnection,
+  openCopyOf, pinOf, sortAsks, sortedPins, statusLine, stateOf, topAsk, unreadElsewhereCount, unreadOf,
 } from '../shared/agentFacts.ts'
-import type { Asker, AskSymbol, ListPlace, ShownAsk, StateDotKind, StoreView } from '../shared/agentFacts.ts'
+import type { Asker, AskSymbol, ListPlace, PinView, ShownAsk, StoreView } from '../shared/agentFacts.ts'
+import { chatRow } from '../chats/model.ts'
+import type { ChatRowModel } from '../chats/model.ts'
 import { remoteListEntries } from '../remoteAgent/model.ts'
 import type { RemoteAgentRowModel, RemoteView } from '../remoteAgent/model.ts'
 import { isClaudeOnPlan, openRouterSpentUsd, planUsageLine } from '../shared/planUsage.ts'
@@ -38,14 +40,8 @@ export type ListedRow = { kind: 'local'; row: AgentRowModel } | { kind: 'remote'
 
 export type GoalColor = 'secondary' | 'yellow' | 'orange'
 
-export interface MasterCardModel {
-  agentId: string
-  dot: StateDotKind
-  timeText: string
-  statusText: string
-  previewText: string | null
-  unread: number
-}
+/** A pinned row: an agent here or elsewhere, or a group chat, in the person's order. */
+export type PinnedRow = { pinId: string } & (ListedRow | { kind: 'group'; row: ChatRowModel })
 
 export interface AskRowModel {
   askId: string
@@ -70,7 +66,8 @@ export interface AgentsListModel {
   /** Null until a plan's usage has been read. */
   usageLine: string | null
   notes: NoteRow[]
-  master: MasterCardModel | null
+  /** Kept at the top, out of Awake and Idle; hidden while searching. */
+  pinned: PinnedRow[]
   /** Null when there are no open asks. */
   asks: { headerText: string; headerTone: 'orange' | 'secondary'; rows: AskRowModel[] } | null
   awake: ListedRow[]
@@ -136,18 +133,6 @@ function agentRow(store: StoreView, agent: AgentEntity, now: number): AgentRowMo
   }
 }
 
-function masterCard(store: StoreView, master: AgentEntity, now: number): MasterCardModel {
-  const preview = lastMessagePreview(store, master)
-  return {
-    agentId: master.id,
-    dot: stateDotOf(master),
-    timeText: ago(activityTime(master, now), now),
-    statusText: isBusy(master) ? statusLine(master, store.goals.get(master.id), store.viewer?.address, now) : 'Tell me what you need; I route it',
-    previewText: preview ? (preview.mine ? 'you: ' : '') + oneLine(preview.text) : null,
-    unread: unreadOf(store, master),
-  }
-}
-
 /** A local ask or a remote ask's copy, with who asked: the section orders them together. */
 type ListedAsk = ShownAsk & { asker: Asker; agentName: string }
 
@@ -167,8 +152,8 @@ function askRow(ask: ListedAsk, now: number): AskRowModel {
   }
 }
 
-function asksSection(store: StoreView & RemoteView, masterId: string | undefined, now: number): AgentsListModel['asks'] {
-  const local = [...store.asks.values()].filter((ask) => ask.agentId !== masterId)
+function asksSection(store: StoreView & RemoteView, now: number): AgentsListModel['asks'] {
+  const local = [...store.asks.values()]
     .map((ask): ListedAsk => ({ ...ask, asker: { kind: 'local', agentId: ask.agentId } }))
   const remote = [...store.remoteAsks.values()]
     .map((ask): ListedAsk => ({ ...openCopyOf(ask), asker: { kind: 'remote', remoteAgentId: ask.remoteAgentId }, agentName: ask.address }))
@@ -193,7 +178,7 @@ function searchRankOf(q: string, names: readonly string[], texts: readonly (stri
   return texts.some(has) ? 2 : null
 }
 
-/** Case- and accent-insensitive, idle agents and master included, agents here and on the person's other computers side by
+/** Case- and accent-insensitive, idle and pinned agents included, agents here and on the person's other computers side by
  * side: by rank, then by the list's own order. */
 export function searchAgents(store: StoreView & RemoteView, query: string, now: number): ListedRow[] {
   const q = foldForSearch(query.trim())
@@ -232,12 +217,32 @@ export function otherServersUnreadTotal(counts: ReadonlyMap<string, number>, act
 /** The integrations the list's usage line reads: whether Claude is on a plan, and OpenRouter's spend. */
 export interface IntegrationView { integration<P extends 'claude' | 'openrouter'>(provider: P): Extract<IntegrationEntity, { provider: P }> | null }
 
-export function agentsListModel(store: StoreView & RemoteView & IntegrationView, input: { connection: ConnectionStatus; fold: IdleFold; query: string; failureNote: string | null; now: number }): AgentsListModel {
+/** The pins whose agent or group is still here to show, in order. A pin of an agent on a computer that isn't reporting it
+ * stays, hidden, until it is back. */
+function pinnedRows(store: StoreView & RemoteView & PinView, now: number, remoteRows: ReadonlyMap<string, RemoteAgentRowModel>): PinnedRow[] {
+  return sortedPins(store).flatMap((pin): PinnedRow[] => {
+    const { target } = pin
+    if (target.kind === 'agent') {
+      const agent = store.agents.get(target.agentId)
+      return agent && agent.state.state !== 'archived' ? [{ pinId: pin.id, kind: 'local', row: agentRow(store, agent, now) }] : []
+    }
+    if (target.kind === 'remote_agent') {
+      const remote = [...store.remoteAgents.values()].find((candidate) => candidate.address === target.address)
+      const row = remote && remoteRows.get(remote.id)
+      return row ? [{ pinId: pin.id, kind: 'remote', row }] : []
+    }
+    const chat = store.chats.get(target.chatId)
+    return chat ? [{ pinId: pin.id, kind: 'group', row: chatRow(store, chat, now) }] : []
+  })
+}
+
+export function agentsListModel(store: StoreView & RemoteView & IntegrationView & PinView, input: { connection: ConnectionStatus; fold: IdleFold; query: string; failureNote: string | null; now: number }): AgentsListModel {
   const { connection, fold, now, query, failureNote } = input
   const shown = shownConnection(connection, now)
   const everyone = listedAgents(store)
-  const master = everyone.find(isMaster) ?? null
-  const others = (agents: readonly AgentEntity[]) => agents.filter((agent) => !isMaster(agent))
+  const pinnedAgentIds = new Set(sortedPins(store).flatMap((pin) => (pin.target.kind === 'agent' ? [pin.target.agentId] : [])))
+  const pinnedAddresses = new Set(sortedPins(store).flatMap((pin) => (pin.target.kind === 'remote_agent' ? [pin.target.address] : [])))
+  const others = (agents: readonly AgentEntity[]) => agents.filter((agent) => !pinnedAgentIds.has(agent.id))
 
   const notes: NoteRow[] = []
   const connectionNote = connectionNoteOf(connection, now)
@@ -247,8 +252,10 @@ export function agentsListModel(store: StoreView & RemoteView & IntegrationView,
   const { awake, idle } = listOrder(store, fold, now)
   const trimmedQuery = query.trim()
   const found = trimmedQuery ? searchAgents(store, trimmedQuery, now) : null
-  const remote = remoteListEntries(store, fold, now)
-  const noOthers = others(everyone).length === 0 && remote.length === 0
+  const allRemote = remoteListEntries(store, fold, now)
+  const pinned = pinnedRows(store, now, new Map(allRemote.map((entry) => [entry.row.remoteAgentId, entry.row])))
+  const remote = allRemote.filter((entry) => !pinnedAddresses.has(store.remoteAgents.get(entry.row.remoteAgentId)?.address ?? ''))
+  const noOthers = others(everyone).length === 0 && remote.length === 0 && pinned.length === 0
   const localEntries = (agents: readonly AgentEntity[]) => others(agents).map((agent) => ({
     row: { kind: 'local', row: agentRow(store, agent, now) } satisfies ListedRow,
     place: { name: agent.name, at: activityTime(agent, now) },
@@ -260,8 +267,8 @@ export function agentsListModel(store: StoreView & RemoteView & IntegrationView,
     dotColor: shown === 'live' ? 'green' : shown === 'connecting' ? 'yellow' : 'red',
     usageLine: store.server ? planUsageLine(store.server.planUsage, isClaudeOnPlan(store.integration('claude')?.state ?? null), openRouterSpentUsd(store.integration('openrouter')?.state ?? null, everyone, store.server.models), now) : null,
     notes,
-    master: master ? masterCard(store, master, now) : null,
-    asks: asksSection(store, master?.id, now),
+    pinned,
+    asks: asksSection(store, now),
     awake: interleave(localEntries(awake), remoteEntries(false), now),
     idle: interleave(localEntries(idle), remoteEntries(true), now),
     search: found && {
@@ -275,17 +282,20 @@ export function agentsListModel(store: StoreView & RemoteView & IntegrationView,
 }
 
 export type SwipeActionModel =
+  | { kind: 'pin' }
+  | { kind: 'unpin' }
   | { kind: 'interrupt' }
   | { kind: 'pause_goal' }
   | { kind: 'resume_goal' }
   | { kind: 'archive' }
   | { kind: 'stop' }
 
-/** In order, as the reference: Interrupt (busy), Pause or Resume goal (unfinished goal), Archive (not running), Stop (running). */
-export function swipeActionsOf(store: StoreView, agent: AgentEntity): SwipeActionModel[] {
+/** In order: Pin or Unpin, then as the reference: Interrupt (busy), Pause or Resume goal (unfinished goal), Archive (not
+ * running), Stop (running). */
+export function swipeActionsOf(store: StoreView & PinView, agent: AgentEntity): SwipeActionModel[] {
   const running = stateOf(agent) === 'running'
   const goal = store.goals.get(agent.id)
-  const actions: SwipeActionModel[] = []
+  const actions: SwipeActionModel[] = [{ kind: pinOf(store, { kind: 'agent', agentId: agent.id }) ? 'unpin' : 'pin' }]
   if (running && isBusy(agent)) actions.push({ kind: 'interrupt' })
   if (goal && goal.status.status !== 'complete') actions.push({ kind: goal.status.status === 'paused' ? 'resume_goal' : 'pause_goal' })
   if (!running) actions.push({ kind: 'archive' })

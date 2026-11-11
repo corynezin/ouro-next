@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { Address } from './address.ts'
 import { AgentEntity } from './agent.ts'
 import {
-  AskEntity, ChatEntity, DeviceEntity, GoalEntity, PersonEntity, ReadStateEntity, ServerEntity, SummaryEntity, SummaryRecord,
+  AskEntity, ChatEntity, DeviceEntity, GoalEntity, PersonEntity, PinEntity, ReadStateEntity, ServerEntity, SummaryEntity, SummaryRecord,
 } from './entities.ts'
 import { MessageEntity } from './message.ts'
 import { ComputerEntity, RemoteAgentEntity, RemoteAskEntity } from './computers.ts'
@@ -31,6 +31,8 @@ export const Snapshot = z.object({
   agents: z.array(AgentEntity),
   chats: z.array(ChatEntity),
   readStates: z.array(ReadStateEntity),
+  /** The viewer's own pins. A server from before pins sends none. */
+  pins: z.array(PinEntity).default([]),
   asks: z.array(AskEntity),
   goals: z.array(GoalEntity),
   summaries: z.array(SummaryEntity),
@@ -54,6 +56,7 @@ export const EntityUpsert = z.discriminatedUnion('entity', [
   upsert('message', MessageEntity),
   upsert('chat', ChatEntity),
   upsert('read_state', ReadStateEntity),
+  upsert('pin', PinEntity),
   upsert('ask', AskEntity),
   upsert('goal', GoalEntity),
   upsert('summary', SummaryEntity),
@@ -69,7 +72,7 @@ export type EntityUpsert = z.infer<typeof EntityUpsert>
 
 export const EntityDeletion = z.object({
   cursor: z.number().int().positive(),
-  entity: z.enum(['server', 'agent', 'message', 'chat', 'read_state', 'ask', 'goal', 'summary', 'person', 'device', 'notification_settings', 'integration', 'computer', 'remote_agent', 'remote_ask']),
+  entity: z.enum(['server', 'agent', 'message', 'chat', 'read_state', 'pin', 'ask', 'goal', 'summary', 'person', 'device', 'notification_settings', 'integration', 'computer', 'remote_agent', 'remote_ask']),
   id: z.string(),
   op: z.literal('delete'),
 })
@@ -77,6 +80,12 @@ export type EntityDeletion = z.infer<typeof EntityDeletion>
 
 export const Change = z.union([EntityUpsert, EntityDeletion])
 export type Change = z.infer<typeof Change>
+
+/**
+ * Entity kinds a client is sent changes of only when it asks for them by name (`&entities=pin` on the changes stream):
+ * an app from before them would fail to read them. Its snapshot leaves them out by itself.
+ */
+export const OPT_IN_ENTITIES = ['pin'] as const
 
 /** The server writes an SSE comment at least this often, starting when the stream opens. Silence well past it means dead. */
 export const CHANGES_HEARTBEAT_MS = 15_000

@@ -16,7 +16,7 @@ const repoRoot = resolve(import.meta.dirname, '..')
 const baseDir = join(repoRoot, 'runs', `gb-${randomBytes(4).toString('hex')}`)
 const repo = new BaseRepo(join(baseDir, 'bases.git'))
 const taker = new GuardianRun()
-const MASTER_PROTOCOL = 'server/protocols/master.md'
+const STARTER_PROTOCOL = 'server/protocols/starter.md'
 let phone: AppClient
 
 before(async () => {
@@ -25,11 +25,11 @@ before(async () => {
   await taker.createSource()
   await taker.git('branch', 'ouro-base')
   await repo.create({ repo: taker.source, commit: (await taker.git('rev-parse', 'ouro-base')).trim() })
-  // Base 1 is the same Ouro with a line added to the master protocol.
+  // Base 1 is the same Ouro with a line added to the starter protocol.
   const tree = join(baseDir, 'base-1')
   cpSync(taker.source, tree, { recursive: true, filter: (path) => !path.includes('/.git') && !path.includes('node_modules') })
-  appendFileSync(join(tree, MASTER_PROTOCOL), '\nBase 1 was here.\n')
-  await repo.release(1, 'the master protocol gains a line', tree)
+  appendFileSync(join(tree, STARTER_PROTOCOL), '\nBase 1 was here.\n')
+  await repo.release(1, 'the starter protocol gains a line', tree)
   taker.extraOurodEnv = { OURO_BASE_REPO: repo.url }
   await taker.start()
   const first = await taker.waitForFirstRelease()
@@ -56,7 +56,7 @@ async function takerBase(): Promise<Extract<BaseStatus, { kind: 'taker' }> | nul
 
 test('the computer is offered the base from the repository, takes it, and has it live and in its person\'s branch', async () => {
   const offered = await waitFor('base 1 to be offered', async () => (await takerBase())?.offered?.n === 1 && await takerBase())
-  assert.deepEqual(offered.offered, { n: 1, notes: 'the master protocol gains a line' })
+  assert.deepEqual(offered.offered, { n: 1, notes: 'the starter protocol gains a line' })
   assert.equal(offered.integrated, 0)
   await phone.command('take_base_update', { n: 1 })
   await waitFor('base 1 to be integrated', async () => {
@@ -65,11 +65,11 @@ test('the computer is offered the base from the repository, takes it, and has it
   }, 240_000)
   const head = (await taker.git('rev-parse', 'main')).trim()
   assert.ok((await taker.status()).active!.endsWith(head.slice(0, 8)), 'main is the commit that went live')
-  assert.match(readFileSync(join(taker.source, MASTER_PROTOCOL), 'utf8'), /Base 1 was here\./)
+  assert.match(readFileSync(join(taker.source, STARTER_PROTOCOL), 'utf8'), /Base 1 was here\./)
 })
 
 test('a withdrawn base is offered no more, and its files stay in the repository', async () => {
   await repo.withdraw(1)
-  assert.match(await repo.git(['show', `base-1:${MASTER_PROTOCOL}`]), /Base 1 was here\./)
+  assert.match(await repo.git(['show', `base-1:${STARTER_PROTOCOL}`]), /Base 1 was here\./)
   assert.equal((await takerBase())?.integrated, 1)
 })

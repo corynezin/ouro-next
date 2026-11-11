@@ -1,4 +1,4 @@
-// Reply reminders. An agent's final text reaches no one, so a message from a person or an agent is owed a reply sent
+// Reply reminders. An agent's final text reaches no one, so a message or task from a person or an agent is owed a reply sent
 // through ouro: in the chat it came in, in that turn or a later one. A turn that ends with nothing more to do and a reply
 // still owed gets one reminder, and after it nothing from before is owed any more.
 import type { DeliveryWake, MessagePurpose } from '@ouro/contract'
@@ -20,12 +20,12 @@ export interface TakenMessage {
 }
 
 /**
- * Owes nothing: an FYI, the task (its result answers it), a done report, the system's own notices and goal cycles, an
+ * Owes nothing: an FYI, a done report, the system's own notices and goal cycles, an
  * answer to this agent's question, and an agent writing back to this agent. A person's message is owed even then: they
  * expect to hear back.
  */
 export function owesReply(message: TakenMessage): boolean {
-  if (message.wake !== 'wake' || message.purpose !== 'message' || message.answeredInChat || message.answersOwnAsk) return false
+  if (message.wake !== 'wake' || (message.purpose !== 'message' && message.purpose !== 'task') || message.answeredInChat || message.answersOwnAsk) return false
   return message.fromKind === 'person' || !message.followsOwnMessage
 }
 

@@ -41,6 +41,8 @@ export const PeerMove = z.object({
     ownershipEpoch: z.number().int(),
     /** Older computers don't send it; every agent there had the 5 minute cache, so that is what it means. */
     promptCacheLifetime: PromptCacheLifetime.default('5m'),
+    /** Standing instructions added to its rules. Older computers don't send it: none. */
+    instructions: z.string().nullable().default(null),
   }),
   goal: z.object({
     text: z.string(),
