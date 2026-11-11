@@ -41,13 +41,11 @@ function windowName(windowMinutes: number) {
   return windowLabel(windowMinutes)
 }
 
-/** "~3% of 5h · ~1% of 7d" from its share of the Claude plan; dollars for an agent not on it or before the plan is read. */
+/** "41%": its share of the Claude plan's longest window; dollars for an agent not on it or before the plan is read. */
 export function agentUsageText(agent: Pick<AgentEntity, 'planShare' | 'costUsd'>): string | null {
   if (agent.planShare?.length) {
-    return [...agent.planShare]
-      .sort((a, b) => a.windowMinutes - b.windowMinutes)
-      .map((window) => `~${capPct(window.usedFraction)} of ${windowLabel(window.windowMinutes)}`)
-      .join(' · ')
+    const longest = agent.planShare.reduce((found, window) => (found.windowMinutes >= window.windowMinutes ? found : window))
+    return capPct(longest.usedFraction)
   }
   return agent.costUsd > 0 ? money(agent.costUsd) : null
 }

@@ -36,7 +36,7 @@ test("Plan usage: a turn's report shows on the list's line, in Settings, and as 
     assert.match(rows[1]!.valueText, /^7% \(resets .+\)$/)
 
     const usage = () => detailsModel(session.store, session.store.agents.get(agentId)!, Date.now()).rows.find((row) => row.label === 'Usage')?.value
-    await waitFor('its share in its details', () => usage() === '~20% of 5h · ~7% of 7d', 20_000)
+    await waitFor('its share in its details', () => usage() === '7%', 20_000)
     const listed = agentsListModel(session.store, { connection: session.connection, fold: { kind: 'never' }, query: '', failureNote: null, now: Date.now() })
     const listedRow = [...listed.awake, ...listed.idle].find((row) => row.kind === 'local' && row.row.agentId === agentId)
     assert.ok(listedRow?.kind === 'local')
