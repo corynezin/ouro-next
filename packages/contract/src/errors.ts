@@ -33,18 +33,14 @@ export const ErrorCode = z.enum([
   'base_update_in_progress',
   /** There is no base update waiting on conflicts, or they aren't resolved and committed yet. */
   'base_conflict_unresolved',
-  /** This machine publishes no bases: it has no source, nowhere to publish to, or takes bases itself. */
-  'not_base_publisher',
-  /** The source has uncommitted changes, which a base made of it would leave out. */
-  'base_source_uncommitted',
-  /** The source's branch isn't the version live on the publisher: only a deployed, confirmed version is published. */
-  'base_not_live',
-  /** The source's distribution.json is missing, unreadable, or ships what isn't there. */
-  'distribution_rule_unusable',
-  /** What would ship holds an internal document or one of the publisher's private names. */
-  'base_private_content',
-  /** What would ship failed one of its checks. */
-  'base_checks_failed',
+  /** Backing up the source needs the connected GitHub account. */
+  'github_not_connected',
+  /** This machine has no copy of the source that takes bases, so there is nothing to back up. */
+  'source_backup_not_applicable',
+  /** The source has no backup to push to yet. */
+  'no_source_backup',
+  /** GitHub or git refused the push to the backup; the message says why. */
+  'push_failed',
   /** This server isn't one Ouro sets Tailscale up on. */
   'tailscale_not_needed',
   'internal',
@@ -89,12 +85,10 @@ export const httpStatusOfError: Record<ErrorCode, number> = {
   base_not_offered: 409,
   base_update_in_progress: 409,
   base_conflict_unresolved: 409,
-  not_base_publisher: 409,
-  base_source_uncommitted: 409,
-  base_not_live: 409,
-  distribution_rule_unusable: 409,
-  base_private_content: 409,
-  base_checks_failed: 409,
+  github_not_connected: 409,
+  source_backup_not_applicable: 409,
+  no_source_backup: 409,
+  push_failed: 502,
   tailscale_not_needed: 409,
   internal: 500,
 }

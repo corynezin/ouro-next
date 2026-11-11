@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
 import {
-  besideDirOf, changedBetween, commitBase, commitToDeploy, integratedBase, isMergedBeside, mergeBeside, mergeIntoPersonBranch,
-  exportPersonBranch, receivedBase, removeBeside, treeHashOf, unfinishedMergeIn,
+  besideDirOf, branchHas, changedBetween, commitToDeploy, integratedBase, isMergedBeside, mergeBeside, mergeIntoPersonBranch,
+  receivedBase, removeBeside, trackBase, unfinishedMergeIn,
 } from './base-checkout.ts'
 
 const made: string[] = []
@@ -32,7 +32,7 @@ function baseTree(files: Record<string, string>): string {
   return dir
 }
 
-/** A person's source at base 0: `ouro-base` holds base 0, and main is it plus one change of their own. */
+/** A person's source at base 0: `ouro-base` is the commit before any base tag, and main is it plus one change of their own. */
 function source(): string {
   const root = join(folder('ouro-base-checkout-'), 'source')
   mkdirSync(root)
@@ -43,7 +43,7 @@ function source(): string {
   mkdirSync(join(root, 'apps', 'mobile'), { recursive: true })
   writeFileSync(join(root, 'apps', 'mobile', 'app.txt'), 'app 0\n')
   git(root, 'add', '.')
-  git(root, 'commit', '-q', '-m', 'Ouro base 0', '-m', 'Ouro-Base: 0')
+  git(root, 'commit', '-q', '-m', 'the starting point')
   git(root, 'checkout', '-q', '-b', 'main')
   commit(root, 'mine.txt', 'my change\n')
   return root
@@ -57,8 +57,22 @@ function commit(dir: string, file: string, text: string): void {
 
 const base1 = () => baseTree({ 'server.txt': 'server 1\n', 'apps/mobile/app.txt': 'app 0\n' })
 
-/** Commits base `n` as published: its tree hash is its files' own. */
-const receive = (root: string, n: number, treeDir: string) => commitBase(root, n, treeDir, treeHashOf(root, treeDir))
+/**
+ * Releases base `n` as the base repository does: a commit of `treeDir`'s files on top of the history `root` shares, tagged
+ * `base-<n>`; fetched into `root`, whose `ouro-base` then tracks it. Returns the commit.
+ */
+function receive(root: string, n: number, treeDir: string): string {
+  const upstream = join(folder('ouro-base-upstream-'), 'upstream')
+  git(folder('ouro-base-clone-'), 'clone', '-q', '--branch', 'ouro-base', root, upstream)
+  for (const entry of readdirSync(upstream).filter((name) => name !== '.git')) rmSync(join(upstream, entry), { recursive: true })
+  cpSync(treeDir, upstream, { recursive: true })
+  git(upstream, 'add', '--all')
+  git(upstream, '-c', 'user.name=Ouro', '-c', 'user.email=o@example.com', 'commit', '-q', '-m', `Ouro base ${n}`)
+  git(upstream, '-c', 'user.name=Ouro', '-c', 'user.email=o@example.com', 'tag', '-a', '-m', `base ${n}`, `base-${n}`)
+  git(root, 'fetch', '-q', '--no-tags', upstream, `refs/tags/base-${n}:refs/tags/base-${n}`)
+  trackBase(root, n)
+  return git(root, 'rev-parse', `base-${n}^{commit}`)
+}
 
 test('a copy without ouro-base takes no bases; with it, the base is what main and ouro-base share', () => {
   const plain = join(folder('ouro-plain-'), 'p')
@@ -131,36 +145,13 @@ test('a person\'s branch that moved on in a way that no longer merges stops the 
   assert.equal(unfinishedMergeIn(besideDirOf(root, 1)), null, 'the failed merge is aborted, leaving the merge beside as it was')
 })
 
-test('a base whose files aren\'t the ones published isn\'t committed', () => {
+test('a base whose commit the branch already has is not a base to merge, and ouro-base only follows tags that are fetched', () => {
   const root = source()
-  const published = treeHashOf(root, base1())
-  const tampered = baseTree({ 'server.txt': 'server 1, changed on the way\n', 'apps/mobile/app.txt': 'app 0\n' })
-  assert.throws(() => commitBase(root, 1, tampered, published), /base 1's files aren't the ones published/)
-  assert.equal(receivedBase(root), 0, 'ouro-base is as it was')
-})
-
-test('a base\'s files are all committed, even those its own ignore rules name', () => {
-  const root = source()
-  const tree = baseTree({ '.gitignore': 'runs/\n', 'runs/.keep': '', 'server.txt': 'server 1\n' })
-  receive(root, 1, tree)
-  assert.equal(git(root, 'show', 'ouro-base:runs/.keep'), '')
-})
-
-test('a publisher exports its branch as committed, and a taker hashes the same files to the same tree', () => {
-  const publisher = source()
-  git(publisher, 'branch', '-D', 'ouro-base')
-  writeFileSync(join(publisher, 'untracked.txt'), 'not in the base\n')
-  writeFileSync(join(publisher, 'mine.txt'), 'not committed\n')
-  assert.deepEqual(exportPersonBranch(publisher, folder('ouro-export-')), { kind: 'uncommitted', files: ['mine.txt'] })
-
-  git(publisher, 'checkout', '-q', 'mine.txt')
-  const exported = folder('ouro-export-')
-  const result = exportPersonBranch(publisher, exported)
-  assert.deepEqual(result, { kind: 'exported', commit: git(publisher, 'rev-parse', 'HEAD') })
-  assert.equal(readFileSync(join(exported, 'mine.txt'), 'utf8'), 'my change\n')
-  assert.ok(!existsSync(join(exported, 'untracked.txt')))
-
-  const taker = source()
-  receive(taker, 1, exported)
-  assert.equal(git(taker, 'rev-parse', 'ouro-base^{tree}'), git(publisher, 'rev-parse', 'HEAD^{tree}'))
+  const commit1 = receive(root, 1, base1())
+  assert.equal(branchHas(root, commit1), false)
+  git(root, 'merge', '-q', '--no-edit', commit1)
+  assert.equal(branchHas(root, commit1), true)
+  assert.equal(integratedBase(root), 1)
+  assert.throws(() => trackBase(root, 2), /base 2's tag isn't in/)
+  assert.equal(receivedBase(root), 1)
 })

@@ -6,7 +6,7 @@ import { MessageEntity } from './message.ts'
 import { ComputerEntity, RemoteAgentEntity, RemoteAskEntity } from './computers.ts'
 import { IntegrationEntity } from './integrations.ts'
 import { NotificationSettingsEntity } from './notifications.ts'
-import { BaseStatus } from './bases.ts'
+import { BaseStatus, SourceBackup } from './bases.ts'
 import { PlanUsage, windowLabel } from './usage.ts'
 
 export const ChatMember = z.object({ address: Address, joinedAt: z.number().int() })
@@ -195,6 +195,7 @@ export const ServerEntity = z.object({
   id: z.literal('server'),
   machineName: z.string(),
   release: z.object({ id: z.string(), base: BaseStatus }),
+  sourceBackup: SourceBackup,
   defaultModel: ModelId,
   models: z.array(ModelOption),
   limits: z.object({

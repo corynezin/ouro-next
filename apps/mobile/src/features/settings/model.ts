@@ -232,3 +232,43 @@ export function baseSection(base: ServerEntity['release']['base'], isOwner: bool
     take: takeable ? { n: newer.n, label: `Update to base ${newer.n}` } : null,
   }
 }
+
+export const BACKUP_WARNING = "Your changes aren't backed up"
+export const BACKUP_MADE_TOAST = 'Private copy made on your GitHub account.'
+
+/**
+ * The "Backup" section: shown while the source has changes on no base and no private copy, and while a copy exists but its
+ * last push failed. Only the owner sets one up. Tapping the warning connects GitHub first when it isn't, then makes the copy.
+ */
+export interface BackupSection {
+  warning: string
+  detail: string
+  /** What tapping the row does; null when it isn't the viewer's to do. */
+  action: { kind: 'connect_github'; label: string } | { kind: 'make_private_copy'; label: string } | null
+  /** Why the last push to the copy failed, shown beneath. */
+  failure: string | null
+}
+
+export function backupSection(backup: ServerEntity['sourceBackup'], isOwner: boolean): BackupSection | null {
+  switch (backup.state) {
+    case 'not_applicable':
+    case 'nothing_to_back_up':
+      return null
+    case 'not_backed_up':
+      return {
+        warning: BACKUP_WARNING,
+        detail: "Changes you or your agents made to Ouro exist only on this server. A private copy on your GitHub account keeps them safe, and only you can see it.",
+        action: !isOwner ? null : backup.github === 'connected'
+          ? { kind: 'make_private_copy', label: 'Make a private copy' }
+          : { kind: 'connect_github', label: 'Connect GitHub to back up' },
+        failure: null,
+      }
+    case 'backed_up':
+      return backup.lastPushError === null ? null : {
+        warning: "Your last changes didn't reach the backup",
+        detail: `Your private copy, ${backup.repository}, is behind. Ouro tries again after the next update.`,
+        action: null,
+        failure: backup.lastPushError,
+      }
+  }
+}

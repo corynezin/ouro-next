@@ -24,7 +24,7 @@ import { conversationFilesOf, installConversation } from '../adapters/conversati
 import type { ConversationStores } from '../adapters/conversations.ts'
 import { loadOrCreateMachineKey } from '../adapters/peer-transport.ts'
 import { pushTokenHash } from './notifier.ts'
-import type { BasePublishTarget, BaseSource, PublishedBase } from '../adapters/base-source.ts'
+import type { BaseSource } from '../adapters/base-source.ts'
 import type { GuardianClient } from '../adapters/guardian-client.ts'
 import type { RunnerConfig } from '../adapters/runner-protocol.ts'
 import { tailscaleHostnameOf } from '../adapters/tailscale.ts'
@@ -70,8 +70,8 @@ import { Notifier } from './notifier.ts'
 import { Integrations } from './integrations.ts'
 import { Peers } from './peers.ts'
 import { BaseUpdates } from './base-updates.ts'
-import { publishBase, withdrawBase } from './base-publishing.ts'
-import type { BasePublisher } from './base-publishing.ts'
+import { SourceBackupKeeper } from './source-backup.ts'
+import type { GitHubApi } from '../adapters/github-api.ts'
 import { Memory } from './memory.ts'
 import type { ProjectMemory } from './memory.ts'
 import type { AgentAccount } from './integrations.ts'
@@ -130,10 +130,7 @@ export interface CoreConfig {
   peerMemoryPullIntervalMs: number
   /** Null: nothing offers this machine bases. */
   baseSource: BaseSource | null
-  /** Null: this machine publishes no bases. */
-  basePublishTarget: BasePublishTarget | null
-  /** The publisher's private names, which no base may hold; null where none are set. */
-  privateNamesFile: string | null
+  githubApi: GitHubApi
   /** Null: no guardian, so this machine can't switch releases by itself. */
   guardian: GuardianClient | null
   /** Whether Ouro sets Tailscale up on this server, and with what. */
@@ -240,6 +237,7 @@ export class OuroCore {
   readonly integrations: Integrations
   readonly peers: Peers
   private readonly baseUpdates: BaseUpdates
+  private readonly sourceBackup: SourceBackupKeeper
   private readonly memory: Memory
   /** Claude Code's own configuration folder for agents: where it keeps their conversations and per-folder memory. */
   private readonly claudeConfigDir: string
@@ -292,6 +290,17 @@ export class OuroCore {
       commit: (body) => this.commit(body),
       accountSignedIn: (account) => this.commit(() => this.releaseHolds('logged_out', (agent) => this.accountOf(agent) === account)),
       planUsageRead: (account, windows) => this.observePlanUsage(account, windows, config.clock.now()),
+      log: config.log,
+    })
+    this.sourceBackup = new SourceBackupKeeper({
+      sourceRoot: config.personSource?.root ?? null,
+      machineName: config.machineName,
+      api: config.githubApi,
+      githubToken: () => config.integrationTools.githubToken(),
+      githubState: () => { const github = this.store.integrationOf('github'); return github?.provider === 'github' ? github.state.status : null },
+      guardian: config.guardian,
+      now: () => config.clock.now(),
+      changed: () => this.store.markChanged('server', 'server'),
       log: config.log,
     })
     this.baseUpdates = new BaseUpdates({
@@ -508,6 +517,7 @@ export class OuroCore {
     this.continueMoves(now)
     this.keepHostAwakeForWork(now)
     this.baseUpdates.tick()
+    this.sourceBackup.tick()
     this.moveAgentsToConfirmedRelease()
     this.store.pruneIdempotentResults(now - IDEMPOTENT_RESULT_RETENTION_MS)
   }
@@ -883,46 +893,6 @@ export class OuroCore {
     if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner takes base updates')
     this.baseUpdates.take(input.n)
     return { server: this.serverEntity() }
-  }
-
-  private basePublisher(): BasePublisher {
-    return {
-      sourceRoot: this.config.personSource?.root ?? null,
-      target: this.config.basePublishTarget,
-      guardian: this.config.guardian,
-      privateNamesFile: this.config.privateNamesFile,
-    }
-  }
-
-  /**
-   * Publishing is slow and outside the command's transaction, so it is checked here, before anything is published, rather
-   * than by the command itself.
-   */
-  private async publishBase(caller: Caller, rawInput: unknown): Promise<{ base: PublishedBase; alreadyPublished: boolean }> {
-    if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner publishes bases')
-    const input = commands.publish_base.input.safeParse(rawInput)
-    if (!input.success) throw new CommandRefused('invalid_request', input.error.message)
-    return await publishBase(this.basePublisher(), input.data.notes)
-  }
-
-  private commandPublishBase(prepared: PreparedChecks): CommandOutput<'publish_base'> {
-    const { basePublished } = prepared
-    if (basePublished.kind !== 'published') throw new Error('publish_base runs only with its base published')
-    return { base: { n: basePublished.base.n, notes: basePublished.base.notes }, alreadyPublished: basePublished.alreadyPublished }
-  }
-
-  /** Like publishing: withdrawn at the target before the command's transaction. */
-  private async withdrawBase(caller: Caller, rawInput: unknown): Promise<PublishedBase> {
-    if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner withdraws bases')
-    const input = commands.withdraw_base.input.safeParse(rawInput)
-    if (!input.success) throw new CommandRefused('invalid_request', input.error.message)
-    return await withdrawBase(this.basePublisher(), input.data.n)
-  }
-
-  private commandWithdrawBase(prepared: PreparedChecks): CommandOutput<'withdraw_base'> {
-    const { baseWithdrawn } = prepared
-    if (baseWithdrawn.kind !== 'withdrawn') throw new Error('withdraw_base runs only with its base withdrawn')
-    return { base: { n: baseWithdrawn.base.n, notes: baseWithdrawn.base.notes } }
   }
 
   private commandContinueBaseUpdate(): CommandOutput<'continue_base_update'> {
@@ -1374,6 +1344,7 @@ export class OuroCore {
       id: 'server',
       machineName: this.config.machineName,
       release: { id: this.config.releaseId, base: this.baseUpdates.status() },
+      sourceBackup: this.sourceBackup.status(),
       defaultModel: this.config.defaultModel,
       models: this.modelOptions(),
       limits: { agentLimit: this.agentLimit(), idleFoldMinutes: 60, budgetUsd: this.budgetUsd(), autoArchiveAfterHours: this.autoArchiveAfterHours(), replyReminders: this.replyRemindersOn() },
@@ -1690,8 +1661,6 @@ export class OuroCore {
     // A retry of a command that already ran answers as it did then, without going to the network again.
     if (this.store.idempotentResult(callerKeyOf(caller), idempotencyKey)) return nothing
     if (name === 'refresh_plan_usage') return { ...nothing, planUsageRead: await this.readUsageNow(rawInput) }
-    if (name === 'publish_base') return { ...nothing, basePublished: { kind: 'published', ...await this.publishBase(caller, rawInput) } }
-    if (name === 'withdraw_base') return { ...nothing, baseWithdrawn: { kind: 'withdrawn', base: await this.withdrawBase(caller, rawInput) } }
     if (caller.kind === 'person' && commandBringsWork(name, rawInput) && !(await this.holdHostForWork())) {
       throw new CommandRefused('host_hold_refused', `${this.config.machineName} couldn't stay awake for it; try again`)
     }
@@ -1733,6 +1702,11 @@ export class OuroCore {
     if (name === 'remove_computer') {
       const input = commands.remove_computer.input.safeParse(rawInput)
       if (input.success) await this.peers.tellOfRemoval(input.data.computerId)
+      return nothing
+    }
+    if (name === 'create_source_backup' || name === 'push_source_backup') {
+      if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner backs the source up')
+      await (name === 'create_source_backup' ? this.sourceBackup.create() : this.sourceBackup.pushNow())
       return nothing
     }
     let agentId: string | null = null
@@ -1804,8 +1778,8 @@ export class OuroCore {
       case 'refresh_plan_usage': return this.commandRefreshPlanUsage(prepared)
       case 'take_base_update': return this.commandTakeBaseUpdate(caller, input as never)
       case 'continue_base_update': return this.commandContinueBaseUpdate()
-      case 'publish_base': return this.commandPublishBase(prepared)
-      case 'withdraw_base': return this.commandWithdrawBase(prepared)
+      case 'create_source_backup':
+      case 'push_source_backup': return { server: this.serverEntity() }
       case 'ask': return this.commandAsk(caller, input as never, idempotencyKey)
       case 'withdraw_ask': return this.commandWithdrawAsk(caller, input as never)
       case 'sync_memory': return this.commandSyncMemory(caller)
@@ -3266,10 +3240,6 @@ export interface PreparedChecks {
   moveTargetReady: boolean
   /** A plan's windows, read from its provider for `refresh_plan_usage`. */
   planUsageRead: { kind: 'not_needed' } | { kind: 'read'; account: PlanAccount; windows: PlanWindowReading[] } | { kind: 'openrouter_read' }
-  /** The base `publish_base` published, or found already published. */
-  basePublished: { kind: 'not_needed' } | { kind: 'published'; base: PublishedBase; alreadyPublished: boolean }
-  /** The base `withdraw_base` withdrew. */
-  baseWithdrawn: { kind: 'not_needed' } | { kind: 'withdrawn'; base: PublishedBase }
   /** snooze_ask on a copy of an ask from another computer: the snooze that computer has now. */
   remoteAskSnoozed: { kind: 'not_needed' } | { kind: 'snoozed'; snooze: AskSnooze | null }
   /** create_agent with no name: the name the model suggested from the task, if any, and what asking cost. */
@@ -3282,8 +3252,6 @@ const NOTHING_PREPARED: PreparedChecks = {
   remoteAgentAnswer: null,
   moveTargetReady: false,
   planUsageRead: { kind: 'not_needed' },
-  basePublished: { kind: 'not_needed' },
-  baseWithdrawn: { kind: 'not_needed' },
   agentName: { kind: 'not_needed' },
   remoteAskSnoozed: { kind: 'not_needed' },
 }

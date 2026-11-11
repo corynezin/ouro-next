@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
-import { gitBasePublishTarget, gitBaseSource } from './git-bases.ts'
+import { BaseRepo } from './base-repo-fixture.ts'
+import { gitBaseSource } from './git-bases.ts'
 
 const made: string[] = []
 afterEach(() => {
@@ -17,120 +18,64 @@ function folder(): string {
   return dir
 }
 
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
-
-function bareRepo(): { url: string; dir: string } {
-  const dir = join(folder(), 'bases.git')
-  mkdirSync(dir)
-  git(dir, 'init', '--quiet', '--bare', '--initial-branch=main')
-  return { url: `file://${dir}`, dir }
+async function bareRepo(): Promise<BaseRepo> {
+  const repo = new BaseRepo(join(folder(), 'bases.git'))
+  await repo.create()
+  return repo
 }
 
-function treeHashOf(dir: string): string {
-  const scratch = folder()
-  const env = { ...process.env, GIT_INDEX_FILE: join(scratch, 'index'), GIT_WORK_TREE: dir, GIT_DIR: join(scratch, 'git') }
-  mkdirSync(env.GIT_DIR)
-  execFileSync('git', ['init', '--quiet', '--bare', env.GIT_DIR], { env: process.env })
-  execFileSync('git', ['add', '--all', '--force', '.'], { env, cwd: dir })
-  return execFileSync('git', ['write-tree'], { env, encoding: 'utf8' }).trim()
-}
-
-/** The files, and the git tree hash they have. */
-function tree(files: Record<string, string>): { dir: string; hash: string } {
+function files(contents: Record<string, string>): string {
   const dir = folder()
-  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text)
-  return { dir, hash: treeHashOf(dir) }
+  for (const [name, text] of Object.entries(contents)) writeFileSync(join(dir, name), text)
+  return dir
 }
 
-const publishInput = (notes: string, files: Record<string, string>) => {
-  const { dir, hash } = tree(files)
-  return { notes, treeHash: hash, treeDir: dir }
-}
+const tagsOf = (root: string) => execFileSync('git', ['-C', root, 'tag', '--list'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
 
-test('an empty repository offers nothing', async () => {
-  const repo = bareRepo()
+test('an empty repository, and one with only a lightweight tag, offer nothing', async () => {
+  const repo = await bareRepo()
   assert.equal(await gitBaseSource(repo.url).latest(), null)
-  assert.equal(await gitBasePublishTarget(repo.url).latest(), null)
+  const commit = await repo.release(1, 'one', files({ 'a.txt': '1' }))
+  await repo.git(['tag', '-d', 'base-1'])
+  await repo.git(['tag', 'base-1', commit])
+  assert.equal(await gitBaseSource(repo.url).latest(), null, 'a lightweight tag is not a release')
 })
 
-test('published bases are numbered commits on main that a reader gets over the source, and the same files again publish nothing', async () => {
-  const repo = bareRepo()
-  const target = gitBasePublishTarget(repo.url)
+test('the newest annotated tag is the latest base: its commit, and its message as the notes with their paragraphs', async () => {
+  const repo = await bareRepo()
   const source = gitBaseSource(repo.url)
-
-  const first = await target.publish(publishInput('the first\n\nwith detail', { 'server.txt': 'one\n' }))
-  assert.deepEqual(first.base.n, 1)
-  assert.equal(first.alreadyPublished, false)
-  const again = await target.publish(publishInput('the first, retried', { 'server.txt': 'one\n' }))
-  assert.deepEqual(again, { base: first.base, alreadyPublished: true })
-  const second = await target.publish(publishInput('the second', { 'server.txt': 'two\n', 'more.txt': 'extra\n' }))
-  assert.equal(second.base.n, 2)
-  assert.deepEqual(await source.latest(), second.base)
-  assert.deepEqual(await source.latest(), { n: 2, notes: 'the second', treeHash: second.base.treeHash })
-
-  assert.equal(git(repo.dir, 'log', '--format=%an <%ae>', 'main').split('\n')[0], 'Ouro Next <bases@ouro-next.invalid>')
-  assert.equal(git(repo.dir, 'log', '-1', '--format=%B', 'main'), 'the second\n\nOuro-Base: 2')
-  assert.deepEqual((await source.latest())?.notes, 'the second')
-  assert.equal((await gitBaseSource(repo.url).latest())?.treeHash, git(repo.dir, 'rev-parse', 'main^{tree}'))
-
-  const into = folder()
-  await source.fetch(1, into)
-  assert.equal(readFileSync(join(into, 'server.txt'), 'utf8'), 'one\n')
-  await assert.rejects(source.fetch(3, folder()), /base 3 isn't in/)
+  await repo.release(1, 'the first\n\nwith detail', files({ 'a.txt': '1' }))
+  const second = await repo.release(2, 'the second', files({ 'a.txt': '2' }))
+  await repo.release(10, 'the tenth', files({ 'a.txt': '10' }))
+  assert.deepEqual(await source.latest(), { n: 10, notes: 'the tenth', commit: await repo.git(['rev-parse', 'base-10^{commit}']) })
+  await repo.withdraw(10)
+  assert.deepEqual(await source.latest(), { n: 2, notes: 'the second', commit: second })
+  await repo.withdraw(2)
+  assert.equal((await source.latest())?.notes, 'the first\n\nwith detail')
 })
 
-test('fetch writes the files with their modes, and notes keep their own paragraphs', async () => {
-  const repo = bareRepo()
-  const target = gitBasePublishTarget(repo.url)
-  const { dir } = tree({ 'run.sh': '#!/bin/sh\n' })
-  execFileSync('chmod', ['755', join(dir, 'run.sh')])
-  // The mode is part of the tree, so the hash is read after it is set.
-  const treeHash = treeHashOf(dir)
-  const published = await target.publish({ notes: 'line one\n\nline two', treeHash, treeDir: dir })
-  assert.equal(published.base.notes, 'line one\n\nline two')
-  assert.equal((await gitBaseSource(repo.url).latest())?.notes, 'line one\n\nline two')
-  const into = folder()
-  await gitBaseSource(repo.url).fetch(1, into)
-  assert.ok((statSync(join(into, 'run.sh')).mode & 0o111) !== 0)
-  await assert.rejects(target.publish({ notes: 'wrong', treeHash: tree({ x: '1' }).hash, treeDir: dir }), /hash to/)
+test('numbers rise past withdrawn bases, and a withdrawal of every base leaves nothing offered', async () => {
+  const repo = await bareRepo()
+  await repo.release(1, 'one', files({ 'a.txt': '1' }))
+  await repo.withdraw(1)
+  assert.equal(await gitBaseSource(repo.url).latest(), null)
+  await repo.release(2, 'two', files({ 'a.txt': '1' }))
+  assert.equal((await gitBaseSource(repo.url).latest())?.n, 2)
 })
 
-test('a withdrawn base is no longer the latest but its files stay fetchable, and numbers keep rising', async () => {
-  const repo = bareRepo()
-  const target = gitBasePublishTarget(repo.url)
-  const source = gitBaseSource(repo.url)
-  await target.publish(publishInput('one', { 'a.txt': '1' }))
-  await target.publish(publishInput('two', { 'a.txt': '2' }))
-
-  assert.equal((await target.withdraw(2))?.n, 2)
-  assert.equal((await source.latest())?.n, 1)
-  assert.equal(git(repo.dir, 'log', '-1', '--format=%B', 'main'), 'Withdraw base 2\n\nOuro-Base-Withdrawn: 2')
-  const commitsAfterWithdraw = git(repo.dir, 'rev-list', '--count', 'main')
-  assert.equal((await target.withdraw(2))?.n, 2, 'withdrawing again is the same answer')
-  assert.equal(git(repo.dir, 'rev-list', '--count', 'main'), commitsAfterWithdraw, 'and adds no commit')
-  assert.equal(await target.withdraw(9), null)
-
-  const into = folder()
-  await source.fetch(2, into)
-  assert.equal(readFileSync(join(into, 'a.txt'), 'utf8'), '2')
-  // The same files as the withdrawn base are a new base, not the withdrawn one again.
-  const republished = await target.publish(publishInput('two again', { 'a.txt': '2' }))
-  assert.equal(republished.base.n, 3)
-  assert.equal(republished.alreadyPublished, false)
-  assert.equal((await source.latest())?.n, 3)
-
-  await target.withdraw(3)
-  await target.withdraw(1)
-  assert.equal(await source.latest(), null)
+test('fetching brings every base tag, withdrawn ones too, and their history, into a copy of the source', async () => {
+  const repo = await bareRepo()
+  await repo.release(1, 'one', files({ 'a.txt': '1' }))
+  const second = await repo.release(2, 'two', files({ 'a.txt': '2' }))
+  await repo.withdraw(2)
+  const root = folder()
+  execFileSync('git', ['init', '-q', root])
+  await gitBaseSource(repo.url).fetchTagsInto(root)
+  assert.deepEqual(tagsOf(root), ['base-1', 'base-2', 'base-2-withdrawn'])
+  assert.equal(execFileSync('git', ['-C', root, 'rev-parse', 'base-2^{commit}'], { encoding: 'utf8' }).trim(), second)
+  await gitBaseSource(repo.url).fetchTagsInto(root)
 })
 
-test('a push is never forced: a repository that moved on refuses the publish', async () => {
-  const repo = bareRepo()
-  const target = gitBasePublishTarget(repo.url)
-  await target.publish(publishInput('one', { 'a.txt': '1' }))
-  // A hook stands in for another publisher pushing between this one's read and push.
-  const hook = join(repo.dir, 'hooks', 'pre-receive')
-  writeFileSync(hook, '#!/bin/sh\necho "refusing: moved on" >&2\nexit 1\n', { mode: 0o755 })
-  await assert.rejects(target.publish(publishInput('two', { 'a.txt': '2' })), /push failed|refusing/)
-  assert.equal((await gitBaseSource(repo.url).latest())?.n, 1)
+test('a repository that can\'t be reached is an error, not no base', async () => {
+  await assert.rejects(gitBaseSource(`file://${join(folder(), 'nowhere')}`).latest(), /git ls-remote failed/)
 })

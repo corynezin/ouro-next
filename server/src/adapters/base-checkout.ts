@@ -1,15 +1,13 @@
-// Bases in the person's own copy of the source. Each base arrives as a commit on `ouro-base`, the bases alone, unchanged;
-// the person's branch merges them, so the base it has is the newest one their branch and `ouro-base` share. A base is
-// merged in a worktree beside the live checkout, so nobody's uncommitted work or running agent is in the way, and the
-// person's branch moves only after the merge is live. Merged, never rebased: a rebase would lose the link to the base.
-import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+// Bases in the person's own copy of the source. A base is the commit its tag `base-<n>` points to, in the base repository's
+// own history, which the person's source shares. `ouro-base` tracks the newest base commit fetched; the person's branch
+// merges it, so the base it has is the highest tag in its history. A base is merged in a worktree beside the live checkout,
+// so nobody's uncommitted work or running agent is in the way, and the person's branch moves only after the merge is
+// live. Merged, never rebased: a rebase would lose the link to the base.
+import { existsSync } from 'node:fs'
 import { git, gitTry, lastLines, refExists } from './git.ts'
 
 const BASE_BRANCH = 'ouro-base'
-const BASE_TRAILER = 'Ouro-Base'
+const BASE_TAG_NAME = /^base-([1-9][0-9]*)$/
 const OURO_IDENTITY = ['-c', 'user.name=Ouro', '-c', 'user.email=ouro@localhost']
 
 const updateBranchOf = (n: number) => `ouro-update/${n}`
@@ -17,7 +15,12 @@ const updateBranchOf = (n: number) => `ouro-update/${n}`
 /** Where base `n` is merged: a worktree beside the person's checkout. */
 export const besideDirOf = (root: string, n: number): string => `${root}.base-update-${n}`
 
-const baseNumberAt = (root: string, commit: string): number => Number(git(root, 'log', '-1', `--format=%(trailers:key=${BASE_TRAILER},valueonly)`, commit).trim() || 0)
+/** The highest base whose tag is in `commit`'s history; 0 when none, as before bases or when the tags aren't fetched. */
+function baseNumberAt(root: string, commit: string): number {
+  const tags = gitTry(root, 'tag', '--merged', commit, '--list', 'base-*')
+  if (!tags.ok) return 0
+  return Math.max(0, ...tags.output.split('\n').map((name) => BASE_TAG_NAME.exec(name.trim())).flatMap((match) => (match ? [Number(match[1])] : [])))
+}
 
 /** The branch the person's checkout has out: bases merge into it. */
 function personBranchOf(root: string): string {
@@ -28,64 +31,20 @@ function personBranchOf(root: string): string {
 
 /** The base the person's branch has merged; null when this copy takes no bases, having no `ouro-base`. */
 export function integratedBase(root: string): number | null {
-  if (!refExists(root, `refs/heads/${BASE_BRANCH}`)) return null
-  const shared = gitTry(root, 'merge-base', 'HEAD', BASE_BRANCH)
-  return shared.ok ? baseNumberAt(root, shared.output) : 0
+  return refExists(root, `refs/heads/${BASE_BRANCH}`) ? baseNumberAt(root, 'HEAD') : null
 }
 
-/** The newest base committed to `ouro-base`, merged or not. */
+/** The newest base `ouro-base` has, merged or not. */
 export const receivedBase = (root: string): number => baseNumberAt(root, BASE_BRANCH)
 
-/**
- * The git tree of the files in `dir`, exactly as they are: ignore rules don't apply, since a base's files are all its own.
- * Its objects are written into `root`'s repository. Equal files make an equal tree on any machine, so it names a base.
- */
-export function treeHashOf(root: string, dir: string): string {
-  const indexDir = mkdtempSync(join(tmpdir(), 'ouro-base-index-'))
-  const gitDir = git(root, 'rev-parse', '--absolute-git-dir')
-  try {
-    const env = { ...process.env, GIT_INDEX_FILE: join(indexDir, 'index'), GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' }
-    const added = spawnSync('git', ['--git-dir', gitDir, '--work-tree', dir, 'add', '-A', '-f', '.'], { cwd: dir, env, encoding: 'utf8' })
-    if (added.status !== 0) throw new Error(`git couldn't read the files in ${dir}: ${lastLines(`${added.stdout}\n${added.stderr}`)}`)
-    const tree = spawnSync('git', ['--git-dir', gitDir, 'write-tree'], { env, encoding: 'utf8' })
-    if (tree.status !== 0) throw new Error(`git couldn't write the tree of ${dir}: ${lastLines(tree.stderr)}`)
-    return tree.stdout.trim()
-  } finally {
-    rmSync(indexDir, { recursive: true, force: true })
-  }
-}
+/** Whether `commit` is in the person's branch already, as a computer made from a base starts: not by merging it. */
+export const branchHas = (root: string, commit: string): boolean => gitTry(root, 'merge-base', '--is-ancestor', commit, 'HEAD').ok
 
-/**
- * Commits base `n`'s files, as they are in `treeDir`, onto `ouro-base`, once they are checked to be the ones published as
- * `treeHash`. The person's branch isn't touched.
- */
-export function commitBase(root: string, n: number, treeDir: string, treeHash: string): void {
-  const tree = treeHashOf(root, treeDir)
-  if (tree !== treeHash) throw new Error(`base ${n}'s files aren't the ones published: their tree is ${tree}, not ${treeHash}`)
-  const parent = git(root, 'rev-parse', BASE_BRANCH)
-  const commit = git(root, ...OURO_IDENTITY, 'commit-tree', tree, '-p', parent, '-m', `Ouro base ${n}`, '-m', `${BASE_TRAILER}: ${n}`)
-  git(root, 'update-ref', `refs/heads/${BASE_BRANCH}`, commit, parent)
-}
-
-export type BranchExport = { kind: 'exported'; commit: string } | { kind: 'uncommitted'; files: string[] }
-
-/**
- * Exports the person's branch, as committed, into the empty folder `into`: what a publisher makes a base from. Refuses
- * while tracked files have uncommitted changes, which the base would silently leave out.
- */
-export function exportPersonBranch(root: string, into: string): BranchExport {
-  const files = git(root, 'diff', '--name-only', 'HEAD').split('\n').filter(Boolean)
-  if (files.length > 0) return { kind: 'uncommitted', files }
-  const archive = join(into, '..', `${basename(into)}.tar`)
-  const commit = git(root, 'rev-parse', personBranchOf(root))
-  try {
-    git(root, 'archive', '--format=tar', '-o', archive, commit)
-    const extracted = spawnSync('tar', ['-xf', archive, '-C', into], { encoding: 'utf8' })
-    if (extracted.status !== 0) throw new Error(`couldn't unpack ${archive}: ${lastLines(extracted.stderr)}`)
-  } finally {
-    rmSync(archive, { force: true })
-  }
-  return { kind: 'exported', commit }
+/** Moves `ouro-base` to base `n`'s commit, once its tag is fetched. The person's branch isn't touched. */
+export function trackBase(root: string, n: number): void {
+  const commit = gitTry(root, 'rev-parse', '--verify', `refs/tags/base-${n}^{commit}`)
+  if (!commit.ok) throw new Error(`base ${n}'s tag isn't in ${root}`)
+  git(root, 'update-ref', `refs/heads/${BASE_BRANCH}`, commit.output)
 }
 
 export type BaseMerge = { kind: 'merged' } | { kind: 'conflicted'; files: string[] }

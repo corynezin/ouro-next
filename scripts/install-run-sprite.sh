@@ -14,15 +14,7 @@
 #   OURO_NEXT_LISTEN_PORT    the guardian's public port (default 8080, the port the Sprite's URL reaches)
 #   OURO_NEXT_HTTP_PORT      the port the Sprite's URL routes to; empty to leave the Sprite's routing alone (default 8080)
 #   OURO_NEXT_APNS_TEAM_ID   the Apple team of the APNs key (default U2Q2D6ZQP2, the app's team)
-#   OURO_NEXT_HUB_URL        the hub this server asks for bases, and publishes to when it is the publisher (default: none)
-#   OURO_NEXT_BASE_REPO      a public git repository of bases, taken instead of the hub's (default: none; not with OURO_NEXT_HUB_URL)
-#
-# Publishing bases to the base repository (the publisher only, with OURO_NEXT_BASE_REPO): put the ssh URL to push to in
-# <root>/hub/base-repo-push-url and the ssh key that may push there in the publisher's ~/.ssh as usual, and the private
-# names, one to a line, in <root>/hub/private-names (mode 600). No hub token is needed.
-#
-# Publishing bases to the hub (the publisher only, with OURO_NEXT_HUB_URL): put the hub account's token in <root>/hub/token and the
-# private names, one to a line, in <root>/hub/private-names (both mode 600). Only their paths reach the configuration.
+#   OURO_NEXT_BASE_REPO      a public git repository of bases, which this server takes bases from (default: none)
 #
 # Push notifications: put the team's APNs key in <root>/apns/AuthKey_<key id>.p8 (mode 600), as Apple names it. The key
 # id comes from that name; only the path reaches the server's configuration, never the key.
@@ -109,35 +101,17 @@ if [ -e "${apns_keys[0]}" ]; then
 else
   say "push notifications: off (no APNs key in $root/apns)"
 fi
-hub_url=${OURO_NEXT_HUB_URL:-}
 base_repo=${OURO_NEXT_BASE_REPO:-}
-[ -z "$hub_url" ] || [ -z "$base_repo" ] || fail "set OURO_NEXT_HUB_URL or OURO_NEXT_BASE_REPO, not both"
-hub_token_file= private_names_file= base_repo_push_url=
-if [ -n "$base_repo" ] && [ -e "$root/hub/base-repo-push-url" ]; then
-  [ -e "$root/hub/private-names" ] || fail "$root/hub/base-repo-push-url is there but $root/hub/private-names isn't: a publisher needs both"
-  base_repo_push_url=$(tr -d '\n' < "$root/hub/base-repo-push-url") private_names_file=$root/hub/private-names
-  say "bases: publishes to $base_repo_push_url and takes from $base_repo"
-elif [ -n "$base_repo" ]; then
-  say "bases: taken from $base_repo"
-elif [ -n "$hub_url" ] && [ -e "$root/hub/token" ]; then
-  [ -e "$root/hub/private-names" ] || fail "$root/hub/token is there but $root/hub/private-names isn't: a publisher needs both"
-  hub_token_file=$root/hub/token private_names_file=$root/hub/private-names
-  say "bases: publishes to and takes from $hub_url"
-elif [ -n "$hub_url" ]; then
-  say "bases: taken from $hub_url"
-fi
+if [ -n "$base_repo" ]; then say "bases: taken from $base_repo"; fi
 OURO_NEXT_CONFIG_JSON=$(
-  HUB_URL=$hub_url BASE_REPO=$base_repo BASE_REPO_PUSH_URL=$base_repo_push_url HUB_TOKEN_FILE=$hub_token_file PRIVATE_NAMES_FILE=$private_names_file \
+  BASE_REPO=$base_repo \
   ROOT_HOME=$home_dir SOURCE=$source_dir PORT=$listen_port URL=$public_url SOCKET=$host_socket MODEL=${OURO_NEXT_DEFAULT_MODEL:-} \
     APNS_KEY_FILE=$apns_key_file APNS_KEY_ID=${apns_key_id:-} APNS_TEAM_ID=${OURO_NEXT_APNS_TEAM_ID:-U2Q2D6ZQP2} \
     MACHINE=$(hostname) "$node_bin" -e '
       const env = process.env
       const ourodEnv = { OURO_RUNNER_HOST_SOCKET: env.SOCKET, OURO_TAILSCALE: "sprite" }
       if (env.MODEL) ourodEnv.OURO_DEFAULT_MODEL = env.MODEL
-      if (env.HUB_URL) ourodEnv.OURO_HUB_URL = env.HUB_URL
       if (env.BASE_REPO) ourodEnv.OURO_BASE_REPO = env.BASE_REPO
-      if (env.BASE_REPO_PUSH_URL) Object.assign(ourodEnv, { OURO_BASE_REPO_PUSH_URL: env.BASE_REPO_PUSH_URL, OURO_PRIVATE_NAMES_FILE: env.PRIVATE_NAMES_FILE })
-      if (env.HUB_TOKEN_FILE) Object.assign(ourodEnv, { OURO_HUB_TOKEN_FILE: env.HUB_TOKEN_FILE, OURO_PRIVATE_NAMES_FILE: env.PRIVATE_NAMES_FILE })
       if (env.APNS_KEY_FILE) Object.assign(ourodEnv, { OURO_APNS_KEY_FILE: env.APNS_KEY_FILE, OURO_APNS_KEY_ID: env.APNS_KEY_ID, OURO_APNS_TEAM_ID: env.APNS_TEAM_ID })
       process.stdout.write(JSON.stringify({ home: env.ROOT_HOME, listenPort: Number(env.PORT), sourceDir: env.SOURCE, sourceBranch: "main",
         machineName: env.MACHINE, publicUrl: env.URL, ourodEnv }, null, 2) + "\n")'

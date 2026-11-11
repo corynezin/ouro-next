@@ -13,6 +13,7 @@ export function snapshotOf(partial: Partial<Snapshot> = {}): Snapshot {
       id: 'server',
       machineName: 'alpha',
       release: { id: 'r1', base: { kind: 'not_taking' } },
+      sourceBackup: { state: 'not_applicable' },
       defaultModel: 'sonnet',
       models: [],
       limits: { agentLimit: 8, idleFoldMinutes: 30, budgetUsd: null, autoArchiveAfterHours: null, replyReminders: true },

@@ -1,6 +1,6 @@
 // Taking bases (J-34, server side): an offered base is merged beside the person's live source and goes live through the
 // guardian's release path, then into their branch; a conflict goes to the master agent and nothing live changes until it
-// is resolved; a base that doesn't build changes nothing. A folder stands in for the hub that offers bases.
+// is resolved; a base that doesn't build changes nothing. A local bare repository stands in for the public base repository.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -9,8 +9,7 @@ import { promisify } from 'node:util'
 import { after, before, test } from 'node:test'
 import { MASTER_AGENT_NAME } from '@ouro/contract'
 import type { BaseStatus, LogRecord, MessageEntity } from '@ouro/contract'
-import { treeHashOf } from '../server/src/adapters/base-checkout.ts'
-import { folderBases } from '../server/src/adapters/base-source.ts'
+import { BaseRepo } from '../server/src/adapters/base-repo-fixture.ts'
 import { GuardianRun } from './guardian-harness.ts'
 import { standInScript, waitFor } from './harness.ts'
 import type { AppClient } from './harness.ts'
@@ -18,7 +17,7 @@ import type { AppClient } from './harness.ts'
 const execFileAsync = promisify(execFile)
 const run = new GuardianRun()
 let phone: AppClient
-const offeredDir = join(run.dir, 'offered-bases')
+const baseRepo = new BaseRepo(join(run.dir, 'bases.git'))
 const treesDir = join(run.dir, 'base-trees')
 
 const DEFAULT_PROTOCOL = 'server/protocols/default.md'
@@ -37,7 +36,7 @@ function editTree(n: number, path: string, from: string, to: string): void {
   writeFileSync(file, text.replace(from, to))
 }
 
-/** Each base is the whole tree of the one before with its own change, as the hub would serve it. */
+/** Each base is the whole tree of the one before with its own change, as the repository holds it. */
 async function makeBaseTrees(): Promise<void> {
   const archive = join(run.dir, 'base-0.tar')
   mkdirSync(treeOf(0), { recursive: true })
@@ -56,23 +55,23 @@ async function makeBaseTrees(): Promise<void> {
   editTree(3, 'server/src/app/render.ts', 'const STOP_WORDS', 'const typeError: number = "not a number"\nconst STOP_WORDS')
 }
 
-/** The publisher publishing base `n`, which the hub then offers. */
-async function offer(n: number, notes: string): Promise<void> {
-  const published = await folderBases(offeredDir).publish({ notes, treeHash: treeHashOf(run.source, treeOf(n)), treeDir: treeOf(n) })
-  assert.equal(published.base.n, n)
+/** Releasing base `n` in the repository, which servers then offer. */
+const offer = async (n: number, notes: string): Promise<void> => {
+  await baseRepo.release(n, notes, treeOf(n))
 }
 
 before(async () => {
   await run.createSource()
-  // The person's copy took base 0 as it was installed, then changed something of their own.
-  await run.git('commit', '-q', '--amend', '-m', 'the starting point', '-m', 'Ouro-Base: 0')
+  // The person's copy took base 0 as it was installed, then changed something of their own. The base repository's history
+  // grows from that commit, as the real one's does from the commits people's copies start at.
   await run.git('branch', 'ouro-base')
+  await baseRepo.create({ repo: run.source, commit: (await run.git('rev-parse', 'ouro-base')).trim() })
   run.editSource(DEFAULT_PROTOCOL, FOLDER_LINE, PERSON_LINE)
   await run.commitAll('my own wording')
   await makeBaseTrees()
   await offer(1, 'the master protocol gains a line, and the app a file')
 
-  run.extraOurodEnv = { OURO_BASE_SOURCE_DIR: offeredDir }
+  run.extraOurodEnv = { OURO_BASE_REPO: baseRepo.url }
   await run.start()
   const first = await run.waitForFirstRelease()
   assert.equal(first.phase, 'live', `the first release didn't go live: ${first.reason}`)

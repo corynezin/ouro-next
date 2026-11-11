@@ -49,6 +49,22 @@ In a git checkout, your memory belongs to the project: agents in any checkout of
 (`type: user`, or `scope: personal` in the front matter) are shared with every project; `scope: project` keeps one here.
 A note marked `conflict: true` was edited in two places: merge it into the note it names, then delete it.
 
+## Sending a change upstream
+
+Ouro's source on this computer descends from a public **base repository**, the upstream: its `base-<n>` tags are the bases
+this computer takes (`ouro base`). The person's own changes are saved in a **private backup** of it on their GitHub account
+(the git remote `backup`, if they made one). The backup is private, so a change is never sent from it as it is. When the
+person asks you to send a change upstream (open a PR for it):
+
+1. Branch from the newest `base-<n>` tag, and cherry-pick only that change onto it. Leave out anything personal: this
+   computer's internal docs, `CLAUDE.md` and `AGENTS.md`, and the person's other changes.
+2. If the person has write access to the base repository, push that branch there. Otherwise make a public fork just for it
+   (`POST /repos/{owner}/{repo}/forks`) and push only that branch to the fork.
+3. Open the pull request against the base repository's `main` with the person's GitHub token (`gh auth token`; never print
+   it or put it in a file or a message).
+
+Don't push anything else to the base repository or a fork, and don't publish the backup. Tell the person the PR's URL.
+
 Send anything long, or with quotes or `$`, on stdin with a quoted heredoc: `ouro reply <<'EOF_MSG'`. A send happened only
 if the command succeeded; if it failed, nothing went.
 
