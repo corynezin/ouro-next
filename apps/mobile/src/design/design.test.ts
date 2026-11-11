@@ -190,3 +190,33 @@ test("a failed bubble's words take its long-press as well as its tap, so the lon
   assert.deepEqual(wordsPresses(true, undefined, longPress), { onPress: undefined, onLongPress: undefined }, 'otherwise the Pressable has both')
   assert.deepEqual(wordsPresses(false, undefined, longPress), { onPress: undefined, onLongPress: longPress }, 'outside a Pressable the words take it')
 })
+
+test('identicons are deterministic, left-right symmetric, and differ per seed', async () => {
+  const { identiconCells, identiconColor } = await import('./identicon.ts')
+  const cells = identiconCells('agent-a')
+  assert.equal(cells.length, 5)
+  for (const row of cells) {
+    assert.equal(row.length, 5)
+    assert.deepEqual(row, [...row].reverse(), 'mirrored left to right')
+  }
+  assert.deepEqual(identiconCells('agent-a'), cells)
+  assert.equal(identiconColor('agent-a'), identiconColor('agent-a'))
+  const seeds = Array.from({ length: 200 }, (_, i) => `agent-${i}`)
+  const patterns = new Set(seeds.map((seed) => JSON.stringify(identiconCells(seed))))
+  const hues = new Set(seeds.map(identiconColor))
+  assert.ok(patterns.size > 190, `patterns rarely collide (${patterns.size} of 200)`)
+  assert.ok(hues.size > 150, `hues spread out (${hues.size} of 200)`)
+  const filled = seeds.flatMap((seed) => identiconCells(seed).flat()).filter(Boolean).length / (seeds.length * 25)
+  assert.ok(filled > 0.65 && filled < 0.85, `about three cells in four are on (${filled})`)
+})
+
+test('an identicon SVG draws one pastel square per lit cell, on an optional background', async () => {
+  const { identiconCells, identiconSvg } = await import('./identicon.ts')
+  const svg = identiconSvg('agent-a', 'f0f0f0')
+  assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 7 7"/)
+  assert.match(svg, /<rect width="7" height="7" fill="#f0f0f0"\/>/)
+  assert.match(svg, /<g fill="hsl\(\d+, 55%, 72%\)">/)
+  const lit = identiconCells('agent-a').flat().filter(Boolean).length
+  assert.equal(svg.match(/width="1" height="1"/g)?.length ?? 0, lit)
+  assert.doesNotMatch(identiconSvg('agent-a'), /width="7"/, 'transparent without a background')
+})
