@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, linkSync } from 'no
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative } from 'node:path'
 import {
-  AGENT_NAME_PATTERN, Change, turnFailureText, chatHandle, commands, SEARCH_MAX_LIMIT, WATCH_LEASE_MS, DEFAULT_GOAL_INTERVAL_SECONDS, MASTER_AGENT_NAME, MAX_ASK_SNOOZE_MS, OWNER_ADDRESS, parseAddress, PEER_ASK_SNOOZE_PROTOCOL, PEER_OWNER_ASKS_PROTOCOL, PEER_OWNER_MESSAGES_PROTOCOL, personAddress, RESERVED_AGENT_NAMES,
+  AGENT_NAME_PATTERN, Change, turnFailureText, chatHandle, commands, SEARCH_MAX_LIMIT, WATCH_LEASE_MS, DEFAULT_GOAL_INTERVAL_SECONDS, MASTER_AGENT_NAME, MAX_ASK_SNOOZE_MS, OWNER_ADDRESS, parseAddress, PEER_ASK_SNOOZE_PROTOCOL, PEER_OWNER_ASKS_PROTOCOL, PEER_OWNER_MESSAGES_PROTOCOL, personAddress, RESERVED_AGENT_NAMES, updateMarkOf,
 } from '@ouro/contract'
 import type {
   AgentEntity, AskEntity, AskSnooze, AttachmentRef, ChatEntity, CommandName, GoalEntity, CommandOutput, DeliveryWake, EntityKind, LogPage, LogRecord, MessageEntity, MessagePurpose, PairResponse, PlanUsage, PlanWindow,
@@ -1342,10 +1342,10 @@ export class OuroCore {
   }
 
   /** Asked by `ouro publish` on this machine, after it has exported the app. */
-  registerAppUpdate(input: RegisterUpdateInput): { updateNumber: number; runtimeVersion: string } {
+  registerAppUpdate(input: RegisterUpdateInput): { updateNumber: number; runtimeVersion: string; mark: string } {
     const row = this.appUpdates.register(input)
     this.notifier.updatePublished(row.updateNumber)
-    return { updateNumber: row.updateNumber, runtimeVersion: row.runtimeVersion }
+    return { updateNumber: row.updateNumber, runtimeVersion: row.runtimeVersion, mark: updateMarkOf(row.updateNumber, this.appUpdates.machineId()) }
   }
 
   /** Publishes the app in the person's source as `ouro publish` does, registering it here directly. */

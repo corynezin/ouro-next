@@ -44,6 +44,13 @@ export class AppUpdates {
     mkdirSync(updatesDir, { recursive: true })
   }
 
+  /** The computer this server is: update numbers count per computer. */
+  machineId(): string {
+    const id = this.store.getMeta('machine_id')
+    if (!id) throw new Error('this machine has no id yet')
+    return id
+  }
+
   private updateDir(updateNumber: number): string {
     return join(this.updatesDir, String(updateNumber))
   }
@@ -107,6 +114,7 @@ export class AppUpdates {
       runtimeVersion: row.runtimeVersion,
       updateNumber: row.updateNumber,
       commit: row.commit,
+      machineId: this.machineId(),
       launchAsset: { hash: row.launchAsset.hash, url: assetUrl(row.launchAsset.fileName) },
       assets: row.assets.map((asset) => ({ contentType: asset.contentType, fileExtension: asset.fileExtension, hash: asset.hash, url: assetUrl(asset.fileName) })),
     })

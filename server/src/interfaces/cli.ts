@@ -490,7 +490,10 @@ async function runPublish(client: Client, args: string[], environment: NodeJS.Pr
     await client.call('POST', '/v2/internal/updates', Buffer.from(JSON.stringify(input)), { 'content-type': 'application/json' }) as PublishedApp
   try {
     const published = await publishCommittedApp(appDir, environment.OURO_APP_EXPORT_COMMAND ?? DEFAULT_EXPORT_COMMAND, register, print)
-    print(`published update ${published.updateNumber} for app version ${published.runtimeVersion}. Tell the person to tap the banner at the top of the app.\n`)
+    print(`published update ${published.updateNumber} for app version ${published.runtimeVersion}. `)
+    // An older server doesn't return a mark.
+    if (published.mark) print(`End the message that tells the person with this mark, on a line of its own, exactly as written. The app shows it as a sentence saying whether the update is in the app they're running, and how to get it, so don't name the update or tell them to tap the banner around it:\n${published.mark}\n`)
+    else print('Tell the person to tap the banner at the top of the app.\n')
   } catch (error) {
     if (error instanceof NotPublished) throw notShipped(error.message)
     throw error

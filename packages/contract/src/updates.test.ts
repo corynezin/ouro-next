@@ -8,6 +8,7 @@ const update = {
   runtimeVersion: '0.1.0',
   updateNumber: 3,
   commit: 'abc123',
+  machineId: 'machine-1',
   launchAsset: { hash: 'A'.repeat(43), url: 'http://example.invalid/updates/assets/3/bundle.js' },
   assets: [],
 }
@@ -37,4 +38,18 @@ test("a key is its content hash, so expo-updates can never mistake one update's 
   assert.equal(first.launchAsset.key, first.launchAsset.hash)
   assert.notEqual(second.launchAsset.key, first.launchAsset.key)
   assert.equal(UpdateManifest.safeParse({ ...first, launchAsset: { ...first.launchAsset, key: 'bundle' } }).success, false)
+})
+
+test('an update mark round-trips, and other links are not marks', async () => {
+  const { updateMarkOf, parseUpdateMarkUrl } = await import('./updates.ts')
+  const mark = updateMarkOf(12, 'm a/b')
+  const url = /\]\((.*)\)$/.exec(mark)![1]!
+  assert.match(mark, /^\[update 12\]\(ouro:\/\/update\/12\?computer=/)
+  assert.deepEqual(parseUpdateMarkUrl(url), { updateNumber: 12, machineId: 'm a/b' })
+  assert.equal(parseUpdateMarkUrl('https://example.com'), null)
+  assert.equal(parseUpdateMarkUrl('ouro://update/0?computer=x'), null)
+})
+
+test('a manifest names the computer that published it', () => {
+  assert.equal(buildUpdateManifest(update).extra.ouro.machineId, 'machine-1')
 })

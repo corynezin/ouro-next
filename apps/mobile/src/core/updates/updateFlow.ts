@@ -288,8 +288,11 @@ function parseSavedPlace(raw: string): SavedPlace | null {
 export type RunningCode =
   | { kind: 'development' }
   | { kind: 'embedded'; runtimeVersion: string | null }
-  /** `updateNumber` is the server's count from the manifest's extra.ouro; null when the manifest doesn't carry it. */
-  | { kind: 'update'; updateId: string; createdAt: Date | null; updateNumber: number | null }
+  /**
+   * `updateNumber` is the server's count from the manifest's extra.ouro; null when the manifest doesn't carry it.
+   * `machineId` is the computer that published it, which numbers count on; null in manifests made before it was added.
+   */
+  | { kind: 'update'; updateId: string; createdAt: Date | null; updateNumber: number | null; machineId: string | null }
 
 export function runningCodeText(code: RunningCode) {
   switch (code.kind) {
@@ -299,5 +302,42 @@ export function runningCodeText(code: RunningCode) {
       const which = code.updateNumber !== null ? `update ${code.updateNumber}` : `update ${code.updateId.slice(0, 8)}`
       return code.createdAt ? `${which} · ${code.createdAt.toLocaleString()}` : which
     }
+  }
+}
+
+/** Whether an update an agent marked in a message (`ouro publish` prints the mark) is in the app that's running. */
+export type UpdateMarkStatus = 'in_app' | 'not_yet' | 'elsewhere' | 'unknown'
+
+export function updateMarkStatus(mark: { updateNumber: number; machineId: string }, code: RunningCode): UpdateMarkStatus {
+  switch (code.kind) {
+    case 'development': return 'unknown'
+    // No update has been taken since the app was installed.
+    case 'embedded': return 'not_yet'
+    case 'update':
+      if (code.updateNumber === null || code.machineId === null) return 'unknown'
+      // Numbers count per computer: another computer's update 12 says nothing about this one's.
+      if (code.machineId !== mark.machineId) return 'elsewhere'
+      // Every update is built from the same source and numbers only rise, so a later one includes it.
+      return code.updateNumber >= mark.updateNumber ? 'in_app' : 'not_yet'
+  }
+}
+
+/** A mark on a line of its own: a sentence. */
+export function updateMarkText(updateNumber: number, status: UpdateMarkStatus) {
+  switch (status) {
+    case 'in_app': return `Update ${updateNumber} is in your app`
+    case 'not_yet': return `Update ${updateNumber} isn't in your app yet. Tap the banner to get it.`
+    case 'elsewhere': return `Update ${updateNumber} comes from a computer this app doesn't update from`
+    case 'unknown': return `Update ${updateNumber}: this app can't tell whether it has it`
+  }
+}
+
+/** A mark inside a sentence: still reads as "update N", with its status after it. */
+export function updateMarkInlineText(updateNumber: number, status: UpdateMarkStatus) {
+  switch (status) {
+    case 'in_app': return `update ${updateNumber} (in your app)`
+    case 'not_yet': return `update ${updateNumber} (not in your app yet)`
+    case 'elsewhere': return `update ${updateNumber} (from another computer)`
+    case 'unknown': return `update ${updateNumber}`
   }
 }
