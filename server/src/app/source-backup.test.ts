@@ -84,7 +84,7 @@ test('the source is not backed up only when it has commits on no base', () => {
   f.keeper.refresh()
   assert.deepEqual(statusOf(f), { state: 'not_backed_up', github: 'not_connected' })
   // A commit that is in a base's history is on that base: merged base commits don't count as the person's.
-  git(f.root, 'tag', '-a', '-m', 'two', 'base-2', 'HEAD', '-f')
+  git(f.root, '-c', 'user.name=T', '-c', 'user.email=t@example.com', 'tag', '-a', '-m', 'two', 'base-2', 'HEAD', '-f')
   f.keeper.refresh()
   assert.deepEqual(statusOf(f), { state: 'nothing_to_back_up' })
 })
