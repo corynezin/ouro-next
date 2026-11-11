@@ -3,7 +3,7 @@
 // socket already runs as the owner's user.
 import { createReadStream, statSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { CHANGES_HEARTBEAT_MS, ClaudeLoginFinishBody, GithubTokenBody, IdempotencyKey, MAX_ATTACHMENT_BYTES, PairRequest, SEARCH_DEFAULT_LIMIT, SecretKeyBody, UPDATE_ASSETS_PATH, UPDATE_MANIFEST_PATH, UPDATE_PROTOCOL_VERSION } from '@ouro/contract'
+import { AwsCredentialsBody, CHANGES_HEARTBEAT_MS, ClaudeLoginFinishBody, GithubTokenBody, IdempotencyKey, MAX_ATTACHMENT_BYTES, PairRequest, SEARCH_DEFAULT_LIMIT, SecretKeyBody, UPDATE_ASSETS_PATH, UPDATE_MANIFEST_PATH, UPDATE_PROTOCOL_VERSION } from '@ouro/contract'
 import { UPDATE_PLATFORM } from '../app/app-updates.ts'
 import { fileTypeOf } from '../domain/file-type.ts'
 import type { SyncFrame, Viewer } from '@ouro/contract'
@@ -320,6 +320,9 @@ async function integrationAction(integrations: Integrations, method: string, act
     case 'DELETE openrouter/key': return await integrations.openrouterClearKey()
     case 'POST github/token': return await integrations.githubSetToken((await body(GithubTokenBody)()).token)
     case 'POST github/disconnect': return await integrations.githubDisconnect()
+    case 'GET aws': return await integrations.awsStatus()
+    case 'POST aws/credentials': return await integrations.awsSetCredentials(await body(AwsCredentialsBody)())
+    case 'POST aws/disconnect': return await integrations.awsDisconnect()
     default: throw new CommandRefused('not_found', `no such account action: ${method} ${action}`)
   }
 }

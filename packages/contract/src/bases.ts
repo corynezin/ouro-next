@@ -6,14 +6,15 @@ export const BaseOffer = z.object({ n: z.number().int().positive(), notes: z.str
 export type BaseOffer = z.infer<typeof BaseOffer>
 
 /**
- * Taking a base. `conflict`: the base and the person's changes touch the same files; the master agent is resolving them
- * beside the live source, and nothing live has changed. `failed`: the base didn't go in; `why` says what, if anything,
+ * Taking a base. `conflict`: the base and the person's changes touch the same files, and nothing live has changed. The merge
+ * waits beside the live source until the owner starts an agent to resolve it, named `resolver` (null until then; absent
+ * from an older server, which starts one at once), or drops it. `failed`: the base didn't go in; `why` says what, if anything,
  * changed.
  */
 export const BaseUpdate = z.discriminatedUnion('state', [
   z.object({ state: z.literal('idle') }),
   z.object({ state: z.literal('updating'), n: z.number().int().positive() }),
-  z.object({ state: z.literal('conflict'), n: z.number().int().positive(), files: z.array(z.string()) }),
+  z.object({ state: z.literal('conflict'), n: z.number().int().positive(), files: z.array(z.string()), resolver: z.string().nullable().optional() }),
   z.object({ state: z.literal('failed'), n: z.number().int().positive(), why: z.string() }),
 ])
 export type BaseUpdate = z.infer<typeof BaseUpdate>

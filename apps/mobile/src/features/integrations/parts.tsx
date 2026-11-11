@@ -1,5 +1,6 @@
 // Pieces the account screens share: the provider's entity as the server last checked it, and a field for a pasted secret.
 import { StyleSheet, TextInput } from 'react-native'
+import { RNHostView } from '@expo/ui/swift-ui'
 import type { IntegrationEntity, IntegrationProvider } from '@ouro/contract'
 import { C } from '../../design/colors.ts'
 import { useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
@@ -11,10 +12,13 @@ export function useIntegration<P extends IntegrationProvider>(provider: P): Extr
   return session.store.integration(provider)
 }
 
-export function SecretField({ value, onChange, placeholder, onSubmit }: { value: string; onChange: (text: string) => void; placeholder: string; onSubmit: () => void }) {
+/** Hosted so its width comes from the form row; a bare TextInput there grows with its text and runs off screen. `shown`: not hidden as it is typed, for the parts of a key that aren't secret, like an id. */
+export function SecretField({ value, onChange, placeholder, onSubmit, shown }: { value: string; onChange: (text: string) => void; placeholder: string; onSubmit: () => void; shown?: boolean }) {
   return (
-    <TextInput style={s.input} placeholder={placeholder} value={value} onChangeText={onChange} autoCapitalize="none" autoCorrect={false}
-      secureTextEntry returnKeyType="done" onSubmitEditing={onSubmit} placeholderTextColor={C.tertiary} />
+    <RNHostView matchContents={{ vertical: true }}>
+      <TextInput style={s.input} placeholder={placeholder} value={value} onChangeText={onChange} autoCapitalize="none" autoCorrect={false}
+        secureTextEntry={!shown} returnKeyType="done" onSubmitEditing={onSubmit} placeholderTextColor={C.tertiary} />
+    </RNHostView>
   )
 }
 

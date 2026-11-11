@@ -1,9 +1,9 @@
 // One server's HTTP API, typed from `contract`. Never throws: every outcome is a value, and every answer is validated.
 import {
-  AttachmentRef, ChatgptLoginStart, ClaudeLoginStart, CommandRequest, commands, ErrorResponse, HistoryPage,
+  AttachmentRef, AwsActionResult, AwsIntegrationState, ChatgptLoginStart, ClaudeLoginStart, CommandRequest, commands, ErrorResponse, HistoryPage,
   IntegrationActionResult, LogPage, SearchPage, Snapshot, SummaryPage, SyncFrame,
 } from '@ouro/contract'
-import type { ApiError, CommandInput, CommandName, CommandOutput } from '@ouro/contract'
+import type { ApiError, AwsCredentialsBody, CommandInput, CommandName, CommandOutput } from '@ouro/contract'
 import type { z } from 'zod'
 import { TailscaleStatus } from '@ouro/contract'
 import type { Clock, HttpRequest, HttpResponse, HttpStream, IdSource, Network } from '../platform/ports.ts'
@@ -148,6 +148,9 @@ export class ServerApi {
   openrouterClearKey() { return this.integrationRoute('DELETE', 'openrouter/key', null, IntegrationActionResult) }
   githubSetToken(token: string) { return this.integrationRoute('POST', 'github/token', { token }, IntegrationActionResult) }
   githubDisconnect() { return this.integrationRoute('POST', 'github/disconnect', null, IntegrationActionResult) }
+  awsStatus() { return this.integrationRoute('GET', 'aws', null, AwsIntegrationState) }
+  awsSetCredentials(credentials: AwsCredentialsBody) { return this.integrationRoute('POST', 'aws/credentials', credentials, AwsActionResult) }
+  awsDisconnect() { return this.integrationRoute('POST', 'aws/disconnect', null, AwsActionResult) }
 
   /** Reissuing with the same key returns the first result and repeats nothing. */
   command<N extends CommandName>(name: N, input: CommandInput<N>, idempotencyKey: string): Promise<ApiResult<CommandOutput<N>>> {

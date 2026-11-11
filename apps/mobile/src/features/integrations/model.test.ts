@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  actionOutcome, chatgptAccountText, chatgptSection, claudeButtonLabel, claudeStatusText, GITHUB_TOKEN_PAGE, gitHubConnectedToast, gitHubMissingScopesNote,
+  actionOutcome, awsCredentialsOf, awsIdentityText, awsName, awsOutcome, chatgptAccountText, chatgptSection, claudeButtonLabel, claudeStatusText, GITHUB_TOKEN_PAGE, gitHubConnectedToast, gitHubMissingScopesNote,
   gitHubName, KEY_REMOVAL_FAILED, keyRemovalOutcome, OPENROUTER_CREDITS_FOOTER, openRouterCreditsText, openRouterSpentText, pasted, usageFooter, usageRows, usageWindowLabel, usageWindowValue,
 } from './model.ts'
 
@@ -82,4 +82,19 @@ test('ChatGPT signed in without an email reads "Signed in"; usage says "Checking
   assert.deepEqual(usageRows(null, false, 0), [])
   const windows = [300, 10_080, 43_200].map((windowMinutes) => ({ windowMinutes, usedFraction: 0.5, resetsAt: null, status: 'allowed' as const }))
   assert.deepEqual(usageRows({ windows, observedAt: 0 }, true, 0).map((row) => row.label), ['5-hour window', '7-day window'])
+})
+
+test('AWS: refusals in the server\'s words, named by account, and sent only when all three are given', () => {
+  const state = { status: 'connected', accessKeyId: 'AKIA…WXYZ', region: 'us-east-1', accountId: '111122223333', arn: 'arn:aws:iam::111122223333:user/agents', problem: null } as const
+  assert.deepEqual(awsOutcome({ ok: true, value: { accepted: true, state } }, 'no'), { kind: 'accepted', state })
+  assert.deepEqual(awsOutcome({ ok: true, value: { accepted: false, why: "that isn't an AWS region (like us-east-1)" } }, 'no'), { kind: 'failed', text: "that isn't an AWS region (like us-east-1)" })
+  assert.deepEqual(awsOutcome({ ok: false, failure: { kind: 'timed_out' } }, 'no'), { kind: 'failed', text: 'request timed out' })
+  assert.equal(awsName(state), 'AWS account 111122223333')
+  assert.equal(awsName({ ...state, accountId: null }), 'AWS key AKIA…WXYZ')
+  assert.equal(awsName({ status: 'not_connected' }), 'AWS')
+  assert.equal(awsIdentityText(state.arn), 'agents')
+  assert.equal(awsIdentityText('arn:aws:iam::111122223333:root'), 'root')
+  assert.equal(awsIdentityText(null), null)
+  assert.deepEqual(awsCredentialsOf(' AKIAX ', 'secret\n', 'US-EAST-1'), { accessKeyId: 'AKIAX', secretAccessKey: 'secret', region: 'us-east-1' })
+  assert.equal(awsCredentialsOf('AKIAX', ' ', 'us-east-1'), null)
 })

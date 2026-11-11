@@ -1,14 +1,18 @@
 // Taking a base: where an update stands, as stored, and what may start or continue one. Pure.
+import { MASTER_AGENT_NAME } from '@ouro/contract'
 import type { BaseOffer, BaseUpdate } from '@ouro/contract'
 
 /**
  * Where a base update stands. `merging`: fetching base `n` and merging it beside the live source, or carrying on after a
- * conflict. `deploying`: the guardian is building, checking and switching to `commit`, the merge, as `deploymentId`.
+ * conflict. `conflict`: the base and the person's changes touch the same `files`; the merge waits beside the live source
+ * until the person has an agent resolve it, `resolver` (null until then; absent in records from before the choice, which
+ * went to the master agent at once), or drops it. `deploying`: the guardian is building, checking and switching to
+ * `commit`, the merge, as `deploymentId`.
  */
 export type BaseUpdateRecord =
   | { state: 'idle' }
   | { state: 'merging'; n: number }
-  | { state: 'conflict'; n: number; files: string[] }
+  | { state: 'conflict'; n: number; files: string[]; notes?: string; resolver?: string | null }
   | { state: 'deploying'; n: number; deploymentId: string; commit: string }
   | { state: 'failed'; n: number; why: string }
 
@@ -19,10 +23,14 @@ export function baseUpdateOf(record: BaseUpdateRecord): BaseUpdate {
     case 'idle': return { state: 'idle' }
     case 'merging':
     case 'deploying': return { state: 'updating', n: record.n }
-    case 'conflict': return { state: 'conflict', n: record.n, files: record.files }
+    case 'conflict': return { state: 'conflict', n: record.n, files: record.files, resolver: resolverOf(record) }
     case 'failed': return { state: 'failed', n: record.n, why: record.why }
   }
 }
+
+/** The agent resolving a conflict, or null while the person hasn't chosen. Older records went to the master agent at once. */
+const resolverOf = (record: Extract<BaseUpdateRecord, { state: 'conflict' }>): string | null =>
+  record.resolver === undefined ? MASTER_AGENT_NAME : record.resolver
 
 export type BaseUpdateRefusal =
   | { code: 'base_not_offered'; message: string }
@@ -32,7 +40,11 @@ export type BaseUpdateRefusal =
 /** Why base `n` can't be taken now, or null. A failed update can be taken again; the merge beside it is kept. */
 export function takeRefusal(record: BaseUpdateRecord, offered: BaseOffer | null, n: number): BaseUpdateRefusal | null {
   if (record.state === 'merging' || record.state === 'deploying') return { code: 'base_update_in_progress', message: `base ${record.n} is being taken now` }
-  if (record.state === 'conflict') return { code: 'base_update_in_progress', message: `base ${record.n} is waiting on its conflicts: resolve them, then ouro base continue` }
+  if (record.state === 'conflict') {
+    return { code: 'base_update_in_progress', message: resolverOf(record) === null
+      ? `base ${record.n} is waiting on its conflicts: start an agent to merge them (ouro base resolve) or drop it (ouro base drop)`
+      : `base ${record.n} is waiting on its conflicts: resolve them, then ouro base continue` }
+  }
   if (offered === null) return { code: 'base_not_offered', message: 'no newer base is offered to this machine' }
   if (offered.n !== n) return { code: 'base_not_offered', message: `base ${offered.n} is the one offered, not ${n}` }
   return null
@@ -51,7 +63,25 @@ export function continueDecision(record: BaseUpdateRecord, unresolvedIn: (n: num
   return { kind: 'continues', n: record.n }
 }
 
-/** What the master agent is told when a base and the person's changes touch the same files. */
+export type ConflictDecision = { kind: 'goes_ahead'; n: number; files: string[]; notes: string } | { kind: 'refused'; refusal: BaseUpdateRefusal }
+
+/** Whether an agent can be started to resolve a conflicted update: only while none has been. */
+export function resolveDecision(record: BaseUpdateRecord): ConflictDecision {
+  if (record.state !== 'conflict') return { kind: 'refused', refusal: { code: 'base_conflict_unresolved', message: 'no base update is waiting on conflicts' } }
+  const resolver = resolverOf(record)
+  if (resolver !== null) return { kind: 'refused', refusal: { code: 'base_update_in_progress', message: `an agent, ${resolver}, is resolving base ${record.n} already` } }
+  return { kind: 'goes_ahead', n: record.n, files: record.files, notes: record.notes ?? '' }
+}
+
+/** Whether a conflicted update can be dropped, its merge thrown away: only while no agent is working on it. */
+export function dropDecision(record: BaseUpdateRecord): ConflictDecision {
+  if (record.state !== 'conflict') return { kind: 'refused', refusal: { code: 'base_conflict_unresolved', message: 'no base update is waiting on conflicts' } }
+  const resolver = resolverOf(record)
+  if (resolver !== null) return { kind: 'refused', refusal: { code: 'base_update_in_progress', message: `an agent, ${resolver}, is resolving base ${record.n}; ask it to stop first` } }
+  return { kind: 'goes_ahead', n: record.n, files: record.files, notes: record.notes ?? '' }
+}
+
+/** What the master agent is told, once the person asks it to merge, when a base and their changes touch the same files. */
 export function conflictBrief(n: number, notes: string, files: string[], besideDir: string): string {
   return `Ouro base ${n} conflicts with this computer's own changes in: ${files.join(', ')}. Nothing live has changed. What the base changes: ${notes}\n`
     + `Resolve it in ${besideDir}, a worktree with the merge in progress. Rule: keep what the person's change was for, and take the base's change. `

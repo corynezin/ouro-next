@@ -909,6 +909,18 @@ export class OuroCore {
     return { server: this.serverEntity() }
   }
 
+  private commandResolveBaseUpdate(caller: Caller): CommandOutput<'resolve_base_update'> {
+    if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner takes base updates')
+    this.baseUpdates.resolve()
+    return { server: this.serverEntity() }
+  }
+
+  private commandDropBaseUpdate(caller: Caller): CommandOutput<'drop_base_update'> {
+    if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner takes base updates')
+    this.baseUpdates.drop()
+    return { server: this.serverEntity() }
+  }
+
   private commandSetLimits(caller: Caller, input: { agentLimit: number; budgetUsd: number | null }): CommandOutput<'set_limits'> {
     if (caller.kind !== 'person' || !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner sets limits')
     this.store.setMeta('agent_limit', String(input.agentLimit))
@@ -1793,6 +1805,8 @@ export class OuroCore {
       case 'refresh_plan_usage': return this.commandRefreshPlanUsage(prepared)
       case 'take_base_update': return this.commandTakeBaseUpdate(caller, input as never)
       case 'continue_base_update': return this.commandContinueBaseUpdate()
+      case 'resolve_base_update': return this.commandResolveBaseUpdate(caller)
+      case 'drop_base_update': return this.commandDropBaseUpdate(caller)
       case 'create_source_backup':
       case 'push_source_backup': return { server: this.serverEntity() }
       case 'ask': return this.commandAsk(caller, input as never, idempotencyKey)

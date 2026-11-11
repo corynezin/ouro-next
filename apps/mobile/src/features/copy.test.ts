@@ -32,7 +32,6 @@ test('Connect Claude says what the reference says (ONB-20, ONB-26, ONB-28, ONB-3
 test('Settings footers and outcomes say what the reference says (SET-08, SET-13, SET-19, SET-22, SET-24)', () => {
   assert.equal(SETTINGS_COPY.inviteFooter, 'A one-time code they paste in the Ouro app (or a link they tap). The code lasts 10 minutes and gives them full access to this server.')
   assert.equal(planUsageFooter('mac'), "The subscription's 5-hour and weekly limits as mac last saw them (it learns them from agents' turns).")
-  assert.equal(SETTINGS_COPY.foldFooter, 'Agents quiet that long (not busy, nothing unread or waiting) go into an Idle section at the bottom.')
   assert.equal(checkOutcomeText('checking'), 'Checking…')
   assert.equal(checkOutcomeText({ kind: 'disabled' }), 'Updates are off in development builds.')
   assert.equal(checkOutcomeText({ kind: 'up_to_date' }), 'Up to date.')

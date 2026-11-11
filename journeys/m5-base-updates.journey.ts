@@ -140,7 +140,7 @@ test('an offered base is merged beside the live source, goes live through the gu
   assert.equal(done.offered?.n, 2, 'the next base is offered once this one is in')
 })
 
-test('a base that conflicts with the person\'s changes goes to the master agent, who resolves it and carries on', async () => {
+test('a base that conflicts with the person\'s changes waits for them; the master agent resolves it once asked and carries on', async () => {
   await waitFor('base 2 to be offered', async () => (await base())?.offered?.n === 2)
   const releaseBefore = (await run.status()).active
   const headBefore = await head()
@@ -150,9 +150,12 @@ test('a base that conflicts with the person\'s changes goes to the master agent,
     const status = await base()
     return status?.update.state === 'conflict' && status.update
   }, 60_000)
-  assert.deepEqual(conflicted, { state: 'conflict', n: 2, files: [DEFAULT_PROTOCOL] })
+  assert.deepEqual(conflicted, { state: 'conflict', n: 2, files: [DEFAULT_PROTOCOL], resolver: null })
   assert.equal((await run.status()).active, releaseBefore, 'nothing live changed')
   assert.equal(await head(), headBefore)
+  assert.ok(!(await masterNotices()).some((text) => text.startsWith('Ouro base 2 conflicts')), 'nothing goes to the master agent until the person chooses')
+  const resolving = await phone.command('resolve_base_update', {})
+  assert.deepEqual(resolving.server.release.base.kind === 'taker' && resolving.server.release.base.update, { state: 'conflict', n: 2, files: [DEFAULT_PROTOCOL], resolver: MASTER_AGENT_NAME })
   const brief = await waitFor('the master agent\'s brief', async () => (await masterNotices()).find((text) => text.startsWith('Ouro base 2 conflicts')))
   assert.ok(brief.includes(DEFAULT_PROTOCOL) && brief.includes(besideDirOf(2)) && brief.includes('ouro base continue'))
 

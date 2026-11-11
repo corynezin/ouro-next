@@ -1,7 +1,9 @@
-// Taking bases: which one is offered, and taking it. The base is merged beside the live source; a conflict goes to the
-// master agent, and nothing live changes. The merge goes live through the guardian, which builds, checks and switches to
+// Taking bases: which one is offered, and taking it. The base is merged beside the live source; on a conflict nothing live
+// changes, and the person chooses to have the master agent resolve it or to drop it. The merge goes live through the
+// guardian, which builds, checks and switches to
 // it, rolling back if it turns out unhealthy; only then does the person's branch move to it. The ourod that starts a deploy
 // is replaced by it, so the update's state is stored and the next ourod follows the deployment to its end.
+import { MASTER_AGENT_NAME } from '@ouro/contract'
 import type { BaseStatus } from '@ouro/contract'
 import {
   besideDirOf, branchHas, changedBetween, commitToDeploy, integratedBase, isMergedBeside, mergeBeside, mergeIntoPersonBranch,
@@ -10,7 +12,7 @@ import {
 import type { BaseRelease, BaseSource } from '../adapters/base-source.ts'
 import { deploymentOutcome } from '../adapters/guardian-client.ts'
 import type { GuardianClient } from '../adapters/guardian-client.ts'
-import { baseUpdateOf, conflictBrief, continueDecision, takeRefusal } from '../domain/base-update.ts'
+import { baseUpdateOf, conflictBrief, continueDecision, dropDecision, resolveDecision, takeRefusal } from '../domain/base-update.ts'
 import type { BaseUpdateRecord } from '../domain/base-update.ts'
 import { NotPublished } from './app-publishing.ts'
 import type { PublishedApp } from './app-publishing.ts'
@@ -119,6 +121,24 @@ export class BaseUpdates {
     setImmediate(() => void this.failingOnError(n, () => this.deploy(n)))
   }
 
+  /** After a conflict, the person's choice: the master agent resolves it beside the live source. Called inside a transaction. */
+  resolve(): void {
+    const decision = resolveDecision(this.config.readRecord())
+    if (decision.kind === 'refused') throw new CommandRefused(decision.refusal.code, decision.refusal.message)
+    const { n, files, notes } = decision
+    this.config.saveRecord({ state: 'conflict', n, files, notes, resolver: MASTER_AGENT_NAME })
+    this.config.tellMasterAgent(conflictBrief(n, notes, files, besideDirOf(this.config.sourceRoot!, n)))
+  }
+
+  /** After a conflict, the person's other choice: the merge is thrown away and the base stays offered. Called inside a transaction. */
+  drop(): void {
+    const decision = dropDecision(this.config.readRecord())
+    if (decision.kind === 'refused') throw new CommandRefused(decision.refusal.code, decision.refusal.message)
+    removeBeside(this.config.sourceRoot!, decision.n)
+    this.config.saveRecord({ state: 'idle' })
+    this.config.log('base_update_dropped', { n: decision.n })
+  }
+
   private async failingOnError(n: number, step: () => Promise<void>): Promise<void> {
     try {
       await step()
@@ -138,10 +158,8 @@ export class BaseUpdates {
       removeBeside(root, n)
       const merged = mergeBeside(root, n)
       if (merged.kind === 'conflicted') {
-        this.config.commit(() => {
-          this.config.saveRecord({ state: 'conflict', n, files: merged.files })
-          this.config.tellMasterAgent(conflictBrief(n, notes, merged.files, besideDirOf(root, n)))
-        })
+        // The person chooses whether an agent resolves it.
+        this.config.commit(() => this.config.saveRecord({ state: 'conflict', n, files: merged.files, notes, resolver: null }))
         return
       }
     }

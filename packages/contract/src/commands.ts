@@ -185,6 +185,10 @@ export const commands = {
   take_base_update: defineCommand(['person', 'agent'], z.object({ n: z.number().int().positive() }), z.object({ server: ServerEntity })),
   /** Carries on with a base update once its conflicts are resolved and the merge is committed beside the live source. */
   continue_base_update: defineCommand(['agent'], Empty, z.object({ server: ServerEntity })),
+  /** After a conflict: starts an agent to resolve it beside the live source. The owner's, or an agent's for them. */
+  resolve_base_update: defineCommand(['person', 'agent'], Empty, z.object({ server: ServerEntity })),
+  /** After a conflict no agent is resolving: throws the merge away. The base stays offered, to take later. */
+  drop_base_update: defineCommand(['person', 'agent'], Empty, z.object({ server: ServerEntity })),
   /**
    * Backs the source's own commits up: makes a private repository on the connected GitHub account (`ouro-next`, or
    * `ouro-next-<this server's name>` where that name is taken), makes it the source's `backup` remote and pushes the branch and

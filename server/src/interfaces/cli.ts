@@ -55,6 +55,8 @@ const HELP = `ouro: talk to your agents, and to the other agents if you are one
   ouro publish [--app <folder>]                                  export the committed app and send it to the person's phone
   ouro base                                                      the base this machine has, the one offered, and how an update stands
   ouro base take <n>                                             take the offered base n, for the owner
+  ouro base resolve                                              after a conflict, start an agent to merge it
+  ouro base drop                                                 after a conflict, throw the merge away; the base stays offered
   ouro base continue                                             carry on with a base update once its conflicts are resolved and committed
 `
 
@@ -502,7 +504,7 @@ function describeBase(base: BaseStatus): string {
   const offered = base.offered === null ? 'no newer base is offered' : `base ${base.offered.n} is offered: ${base.offered.notes}`
   const update = base.update.state === 'idle' ? ''
     : base.update.state === 'updating' ? `updating to base ${base.update.n}\n`
-      : base.update.state === 'conflict' ? `base ${base.update.n} conflicts in ${base.update.files.join(', ')}\n`
+      : base.update.state === 'conflict' ? `base ${base.update.n} conflicts in ${base.update.files.join(', ')}${base.update.resolver ? `; ${base.update.resolver} is resolving it` : '; start an agent to merge it with ouro base resolve, or drop it with ouro base drop'}\n`
         : `base ${base.update.n} didn't go in: ${base.update.why}\n`
   return `on base ${base.integrated}; ${offered}\n${update}`
 }
@@ -512,7 +514,9 @@ async function runBase(client: Client, args: string[], print: (text: string) => 
   if (verb === undefined) return print(describeBase((await client.snapshot()).server.release.base))
   if (verb === 'take' && n !== undefined && /^[1-9][0-9]*$/.test(n)) return print(describeBase((await client.command('take_base_update', { n: Number(n) })).server.release.base))
   if (verb === 'continue') return print(describeBase((await client.command('continue_base_update', {})).server.release.base))
-  throw new CliFailure('usage: ouro base [take <n> | continue]')
+  if (verb === 'resolve') return print(describeBase((await client.command('resolve_base_update', {})).server.release.base))
+  if (verb === 'drop') return print(describeBase((await client.command('drop_base_update', {})).server.release.base))
+  throw new CliFailure('usage: ouro base [take <n> | resolve | drop | continue]')
 }
 
 export async function runCli(args: string[], environment: NodeJS.ProcessEnv, stdin: () => string, print: (text: string) => void): Promise<void> {

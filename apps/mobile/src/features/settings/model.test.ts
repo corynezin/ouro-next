@@ -3,26 +3,10 @@ import { test } from 'node:test'
 import { DEFAULT_NOTIFICATION_SETTINGS } from '@ouro/contract'
 import type { NotificationSettings } from '@ouro/contract'
 import {
-  backupSection, BACKUP_WARNING, baseSection, BASE_FOOTER, binaryVersionText, changedNotificationSettings, channelText, connectedText, faceIdNote, foldKey, foldOptions, leaveAction, notificationSettingsOf, peopleRows, unpairFooter, NOTIFY_MODE_OPTIONS, QUIET_HOURS_TIMES, updateHomeIndex, updateHomeOptions,
+  backupSection, BACKUP_WARNING, baseSection, BASE_FOOTER, changedNotificationSettings, leaveAction, notificationSettingsOf, peopleRows, updateHomeIndex, updateHomeOptions,
 } from './model.ts'
 import type { NotificationChange } from './model.ts'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
-
-test('fold choices say what Default means on this server', () => {
-  assert.equal(foldOptions(30)[0]!.label, 'Default (30 min)')
-  assert.equal(foldOptions(null)[0]!.label, 'Default (off)')
-  assert.equal(foldOptions(undefined)[0]!.label, 'Default')
-  assert.deepEqual(foldOptions(30).map((o) => o.label).slice(1), ['Off', 'After 15 min', 'After 30 min', 'After 1 h', 'After 2 h', 'After 4 h', 'After 8 h'])
-})
-
-test('each fold has one key, and the key finds its option back', () => {
-  for (const option of foldOptions(30)) assert.equal(foldKey(option.fold), option.key)
-})
-
-test('Face ID turned on without hardware says why', () => {
-  assert.equal(faceIdNote({ kind: 'unavailable' }), 'Face ID is not set up on this phone.')
-  assert.equal(faceIdNote({ kind: 'refused' }), null)
-})
 
 test('Updates from lists each saved server and then None, and finds the home by id', () => {
   const server = (id: string, label: string): SavedServer => ({ id, label, url: `https://${id}.test`, deviceName: 'phone', deviceId: 'd', personName: null, hostedServerId: null })
@@ -39,42 +23,12 @@ const change = (c: NotificationChange) => changedNotificationSettings(settings, 
 test('a notification change saves every other setting as it was', () => {
   assert.deepEqual(change({ kind: 'mode', mode: 'needs_me' }), { ...settings, mode: 'needs_me', quietHours: { start: '23:00', end: '06:30', timeZone: 'America/New_York' } })
   assert.equal(change({ kind: 'urgent_breaks_through', on: false }).urgentBreaksThrough, false)
-  assert.deepEqual(NOTIFY_MODE_OPTIONS.map((o) => o.label), ['What needs me', 'Every message', 'Nothing'])
-})
-
-test('one banner per burst is 60 seconds or off', () => {
-  assert.equal(change({ kind: 'one_banner_per_burst', on: false }).burstSeconds, 0)
-  assert.equal(changedNotificationSettings({ ...settings, burstSeconds: 0 }, { kind: 'one_banner_per_burst', on: true }, 'UTC').burstSeconds, 60)
-})
-
-test('muting adds an agent once, and unmuting removes it', () => {
-  assert.deepEqual(change({ kind: 'agent_muted', agentId: 'a2', muted: true }).mutedAgentIds, ['a1', 'a2'])
-  assert.deepEqual(change({ kind: 'agent_muted', agentId: 'a1', muted: true }).mutedAgentIds, ['a1'])
-  assert.deepEqual(change({ kind: 'agent_muted', agentId: 'a1', muted: false }).mutedAgentIds, [])
-})
-
-test('quiet hours start at 22:00 to 07:00 in the phone’s zone, keep their times when edited, and turn off', () => {
-  const none = { ...settings, quietHours: null }
-  assert.deepEqual(changedNotificationSettings(none, { kind: 'quiet_hours', on: true }, 'Asia/Tokyo').quietHours, { start: '22:00', end: '07:00', timeZone: 'Asia/Tokyo' })
-  assert.deepEqual(change({ kind: 'quiet_hours_start', at: '21:30' }).quietHours, { start: '21:30', end: '06:30', timeZone: 'America/New_York' })
-  assert.equal(change({ kind: 'quiet_hours', on: false }).quietHours, null)
-  assert.equal(changedNotificationSettings(none, { kind: 'quiet_hours_end', at: '08:00' }, 'UTC').quietHours, null)
-  assert.equal(QUIET_HOURS_TIMES.length, 48)
-  assert.deepEqual([QUIET_HOURS_TIMES[0], QUIET_HOURS_TIMES[15], QUIET_HOURS_TIMES[47]], ['00:00', '07:30', '23:30'])
+  assert.deepEqual(change({ kind: 'mode', mode: 'nothing' }).mutedAgentIds, ['a1'], 'what Settings no longer offers is kept')
+  assert.equal(changedNotificationSettings({ ...settings, quietHours: null }, { kind: 'mode', mode: 'nothing' }, 'UTC').quietHours, null)
 })
 
 test('the command gets the settings without the entity id', () => {
   assert.deepEqual(notificationSettingsOf({ ...settings, id: 'p1' }), settings)
-})
-
-test('Settings names the server software, the binary version and the update channel', () => {
-  assert.equal(connectedText({ id: 'r42', base: { kind: 'not_taking' } }), 'Connected: ouro r42, API v2')
-  assert.equal(binaryVersionText('1.4.0', '57'), '1.4.0 (57)')
-  assert.equal(binaryVersionText('1.4.0', null), '1.4.0')
-  assert.equal(binaryVersionText(null, '57'), null)
-  assert.equal(channelText(null), 'production')
-  assert.equal(channelText(''), 'production')
-  assert.equal(channelText('preview'), 'preview')
 })
 
 test('People lists the invited, oldest first, with their phones counted and the owner left out', () => {
@@ -101,11 +55,6 @@ test('the last button signs out with a hosted account, and removes this server w
   assert.equal(selfHosted.confirmLabel, 'Remove')
 })
 
-test('the Unpair footer names this phone in the command that revokes its token on the computer', () => {
-  assert.equal(unpairFooter('Alex’s iPhone'), 'On the computer, `ouro devices revoke Alex’s iPhone` also revokes the token.')
-  assert.equal(unpairFooter(undefined), 'On the computer, `ouro devices revoke <device>` also revokes the token.')
-})
-
 test('the Ouro section shows the merged base, the update under way, a conflict or failure, and offers a newer base to the owner', () => {
   assert.equal(baseSection({ kind: 'not_taking' }, true), null, 'none on the publishing server')
   const offered = { n: 4, notes: 'Faster lists.' }
@@ -126,6 +75,17 @@ test('the Ouro section shows the merged base, the update under way, a conflict o
   const conflict = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts', 'b.ts'] } }, true)!
   assert.deepEqual(conflict.note, { text: 'Base 4 touches files you changed (a.ts, b.ts). Your master agent is working it out; nothing has changed yet.', color: 'orange' })
   assert.equal(conflict.take, null)
+  assert.equal(conflict.conflict, null, 'an agent from an older server is on it already')
+
+  const waiting = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts'], resolver: null } }, true)!
+  assert.deepEqual(waiting.note, { text: 'Base 4 touches files you changed (a.ts). Nothing has changed yet. Your master agent can merge it, keeping what your changes were for.', color: 'orange' })
+  assert.equal(waiting.conflict?.resolveLabel, 'Have your master agent merge it')
+  assert.equal(waiting.conflict?.dropLabel, 'Not now')
+  assert.equal(baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts'], resolver: null } }, false)!.conflict, null, 'only the owner chooses')
+  const resolving = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts'], resolver: 'master' } }, true)!
+  assert.match(resolving.note!.text, /Your master agent is working it out/)
+  assert.match(baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts'], resolver: 'base-4' } }, true)!.note!.text, /An agent, base-4, is working it out/)
+  assert.equal(resolving.conflict, null)
 
   const failed = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'failed', n: 4, why: 'the build broke' } }, true)!
   assert.deepEqual(failed.note, { text: "Base 4 didn't go in: the build broke. Nothing live changed unless it says so.", color: 'red' })
@@ -169,4 +129,42 @@ test('a private copy shows where it is, opening on GitHub, when it was last push
   assert.equal(failed.failure, 'GitHub didn\'t accept the push.')
   assert.equal(failed.copy!.pendingText, null, 'a failure is shown instead of a pending push')
   assert.equal(failed.action, null)
+})
+
+test('integrations read Connected or Not set up, whatever kind of not', async () => {
+  const { integrationRows } = await import('./model.ts')
+  const rows = integrationRows({
+    claude: { status: 'signed_in', account: { method: 'plan', email: null } } as never,
+    chatgpt: { status: 'not_installed' },
+    openrouter: { status: 'not_configured' },
+    github: { status: 'connected', user: 'octocat', scopes: [] },
+  })
+  assert.deepEqual(rows.map((row) => row.status), ['Connected', 'Not set up', 'Not set up', 'Connected'])
+  assert.equal(integrationRows({ claude: null, chatgpt: { status: 'signed_out' }, openrouter: null, github: null })[1]!.status, 'Not set up')
+  assert.ok(integrationRows({ claude: null, chatgpt: null, openrouter: null, github: null }).every((row) => row.status === 'Checking…'))
+})
+
+test('a server goes by its label on this phone, else its machine name', async () => {
+  const { serverShortName } = await import('./model.ts')
+  const saved = [{ id: 's1', label: 'Home', url: 'https://a.test', deviceName: 'phone', deviceId: 'd', personName: null, hostedServerId: null }]
+  assert.equal(serverShortName(saved, 's1', 'ip-10-0-0-1'), 'Home')
+  assert.equal(serverShortName(saved, 's2', 'ip-10-0-0-1'), 'ip-10-0-0-1')
+  assert.equal(serverShortName([], 's2', null), 'This server')
+})
+
+test('AWS reads like the others, and shows nothing when its route failed', async () => {
+  const { awsStatusText } = await import('./model.ts')
+  assert.equal(awsStatusText({ status: 'connected' }, false), 'Connected')
+  assert.equal(awsStatusText({ status: 'not_connected' }, false), 'Not set up')
+  assert.equal(awsStatusText(null, false), 'Checking…')
+  assert.equal(awsStatusText(null, true), null)
+})
+
+test('Tailscale reads Connected or Not set up, or what it is doing', async () => {
+  const { tailscaleStatusText } = await import('./model.ts')
+  assert.equal(tailscaleStatusText({ state: 'connected', ip: '100.1.2.3' }, false), 'Connected')
+  assert.equal(tailscaleStatusText({ state: 'not_connected' }, false), 'Not set up')
+  assert.equal(tailscaleStatusText({ state: 'logging_in', loginUrl: 'https://x' }, false), 'Waiting for approval')
+  assert.equal(tailscaleStatusText(null, false), 'Checking…')
+  assert.equal(tailscaleStatusText(null, true), null)
 })
