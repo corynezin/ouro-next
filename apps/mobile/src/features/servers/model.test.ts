@@ -347,3 +347,12 @@ test('a ready machine an agent made and linked is listed once, as its computer, 
   assert.equal(readyMachineAt('https://pr1.example/', [ready] as never)?.id, 'm1')
   assert.equal(readyMachineAt(null, [ready] as never), null)
 })
+
+test('only a network the open server visits offers Leave: a home key is replaced, not removed, and one held elsewhere is not its to drop', () => {
+  const places = new Map([
+    ['a', { networks: [network('p', 'private', 'private', 'home'), network('t', 'team', 'shared', 'extra')], computers: [] }],
+    ['w', { networks: [network('k', 'work', 'shared', 'home')], computers: [] }],
+  ])
+  const rows = serverRows([server('a'), server('w')], 'a', { counts: new Map(), checking: false })
+  assert.deepEqual(networkSections(rows, [], places).map((section) => [section.title, section.leave?.id ?? null]), [['private', null], ['team', 't'], ['work', null]])
+})
