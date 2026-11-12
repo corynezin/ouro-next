@@ -94,6 +94,8 @@ export interface CoreConfig {
   clock: Clock
   policy: AgentPolicy
   releaseId: string
+  /** The Ouro version this server runs (`0.5.0`), from its package.json; null before versions. */
+  version: string | null
   machineName: string
   /** Where the person's other computers reach this one's API; null: they can't. */
   peerAddress: string | null
@@ -1361,7 +1363,7 @@ export class OuroCore {
     return {
       id: 'server',
       machineName: this.config.machineName,
-      release: { id: this.config.releaseId, base: this.baseUpdates.status() },
+      release: { id: this.config.releaseId, base: this.baseUpdates.status(), version: this.config.version },
       sourceBackup: this.sourceBackup.status(),
       defaultModel: this.config.defaultModel,
       models: this.modelOptions(),

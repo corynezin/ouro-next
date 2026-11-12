@@ -20,6 +20,7 @@ import type { SendPush } from '../adapters/apns.ts'
 import { claudeSummarize } from '../adapters/summarizer.ts'
 import { neverSleeps, spriteTasksHold } from '../adapters/host-hold.ts'
 import type { HostHold } from '../adapters/host-hold.ts'
+import { versionOf } from '../adapters/base-source.ts'
 import type { BaseSource } from '../adapters/base-source.ts'
 import { gitBaseSource } from '../adapters/git-bases.ts'
 import { httpGitHubApi } from '../adapters/github-api.ts'
@@ -133,6 +134,7 @@ const core = new OuroCore({
   clock: environment.OURO_CLOCK_FILE ? fileClock(environment.OURO_CLOCK_FILE) : systemClock,
   policy,
   releaseId,
+  version: versionOf(readFileSync(join(serverRoot, 'package.json'), 'utf8')),
   machineName: environment.OURO_MACHINE_NAME ?? 'this-machine',
   peerAddress: ownPeerAddress({ peerAddress: environment.OURO_PEER_ADDRESS, publicUrl: environment.OURO_PUBLIC_URL }),
   defaultModel: environment.OURO_DEFAULT_MODEL ?? 'opus',
