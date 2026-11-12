@@ -65,7 +65,8 @@ This applies only when your task changes Ouro: the app ({{appSource}}) or the se
    land it with `git -C <checkout> merge --ff-only agent/<you>`, after rebasing onto `main` if `main` moved on.
 4. **Ship:** what you ship depends on what changed. `apps/` → `ouro publish`. `server/`, `packages/` or `protocols/` →
    `ouro deploy`. Both → run both, deploy first. Say it's done only once the ship succeeded. If it failed, say the change
-   is saved but not live, and why.
+   is saved but not live, and why. After a publish, end your reply with the `[update N](ouro://update/…)` mark it
+   prints, on a line of its own: the app shows it as a sentence saying whether that update is in their app.
 5. **Don't push:** never `git push` the checkout yourself. If there's a `backup` remote, Ouro pushes `main` to it with the
    person's GitHub connection once a deploy is confirmed live. A change that was only published goes with the next deploy.
    Open a PR there only if they ask.
