@@ -60,7 +60,8 @@ export class BaseUpdates {
   private integrated: number | null
   private offered: BaseRelease | null = null
   private lastOfferCheckAt = 0
-  private checkingOffer = false
+  /** The check under way: one at a time, since each fetches tags into the same repository. It resolves to why it failed, or null. */
+  private offerCheck: Promise<string | null> | null = null
 
   constructor(config: BaseUpdatesConfig) {
     this.config = config
@@ -98,14 +99,30 @@ export class BaseUpdates {
 
   /** From the server's tick. */
   tick(): void {
-    if (this.integrated === null || this.config.baseSource === null || this.checkingOffer) return
+    if (this.integrated === null || this.config.baseSource === null || this.offerCheck !== null) return
     if (this.config.now() - this.lastOfferCheckAt < OFFER_CHECK_INTERVAL_MS) return
-    this.lastOfferCheckAt = this.config.now()
-    this.checkingOffer = true
-    void this.checkOffer().finally(() => { this.checkingOffer = false })
+    void this.startOfferCheck()
   }
 
-  private async checkOffer(): Promise<void> {
+  /** `ouro base check`: asks the base repository now rather than at the next half-hourly check, and says if it can't be read. */
+  async checkNow(): Promise<void> {
+    if (this.integrated === null) throw new CommandRefused('base_not_offered', 'this machine takes no bases')
+    if (this.config.baseSource === null) throw new CommandRefused('base_not_offered', 'this machine has no base repository to check')
+    // A check already under way may have asked before the base was released, so this one waits for it and asks again. Checks
+    // asked for meanwhile share that second one.
+    if (this.offerCheck !== null) await this.offerCheck
+    const failure = await (this.offerCheck ?? this.startOfferCheck())
+    if (failure !== null) throw new CommandRefused('provider_unreachable', `couldn't read the base repository: ${failure}`)
+  }
+
+  private startOfferCheck(): Promise<string | null> {
+    this.lastOfferCheckAt = this.config.now()
+    this.offerCheck = this.checkOffer().finally(() => { this.offerCheck = null })
+    return this.offerCheck
+  }
+
+  /** Null when the repository was read; otherwise why it couldn't be. */
+  private async checkOffer(): Promise<string | null> {
     let latest: BaseRelease | null
     try {
       latest = await this.config.baseSource!.latest()
@@ -117,12 +134,13 @@ export class BaseUpdates {
       }
     } catch (error) {
       this.config.log('base_offer_check_failed', { error: (error as Error).message })
-      return
+      return (error as Error).message
     }
     const offered = latest !== null && this.integrated !== null && latest.n > this.integrated && !branchHas(this.config.sourceRoot!, latest.commit) ? latest : null
-    if (offered?.n === this.offered?.n && offered?.notes === this.offered?.notes && offered?.version === this.offered?.version && offered?.commit === this.offered?.commit) return
+    if (offered?.n === this.offered?.n && offered?.notes === this.offered?.notes && offered?.version === this.offered?.version && offered?.commit === this.offered?.commit) return null
     this.offered = offered
     this.config.commit(() => this.config.offerChanged())
+    return null
   }
 
   /** The command's synchronous part: refuses, or records the update as begun. The work runs once the command commits. */

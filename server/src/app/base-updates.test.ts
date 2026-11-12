@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
 import { besideDirOf } from '../adapters/base-checkout.ts'
+import type { BaseRelease, BaseSource } from '../adapters/base-source.ts'
 import type { BaseUpdateRecord } from '../domain/base-update.ts'
 import { BaseUpdates } from './base-updates.ts'
 
@@ -37,16 +38,16 @@ function sourceOnBase(n: number): string {
   return root
 }
 
-function updates(root: string, record: BaseUpdateRecord, started: string | null = 'base-3') {
+function updates(root: string, record: BaseUpdateRecord, started: string | null = 'base-3', baseSource: BaseSource | null = null) {
   const logged: string[] = []
   const saved: BaseUpdateRecord[] = []
   const told: Array<{ name: string; text: string }> = []
   const handedOff: Array<{ name: string; task: string }> = []
   const baseUpdates = new BaseUpdates({
     sourceRoot: root,
-    baseSource: null,
+    baseSource,
     guardian: null,
-    now: () => 0,
+    now: () => Date.now(),
     commit: (body) => body(),
     readRecord: () => saved.at(-1) ?? record,
     saveRecord: (next) => { saved.push(next) },
@@ -129,4 +130,63 @@ test('at start, a conflict an agent is resolving, or a failure the source still 
   lacking.baseUpdates.resume()
   assert.deepEqual(lacking.saved, [])
   assert.ok(existsSync(besideDirOf(behind, 3)))
+})
+
+/** A source on base 1, as a computer taking bases has it. */
+function sourceOnBase1(): string {
+  const root = sourceWithMergeBeside()
+  git(root, 'tag', 'base-1')
+  git(root, 'branch', 'ouro-base')
+  return root
+}
+
+/** A repository whose answers the test hands out one at a time, counting the times it was asked. */
+function heldSource() {
+  const answers: Array<(answer: BaseRelease | Error) => void> = []
+  const source = {
+    asked: 0,
+    latest: () => new Promise<BaseRelease | null>((resolve, reject) => {
+      source.asked += 1
+      answers.push((answer) => (answer instanceof Error ? reject(answer) : resolve(answer)))
+    }),
+    fetchTagsInto: async () => {},
+    answer: async (answer: BaseRelease | Error) => {
+      while (answers.length === 0) await new Promise((done) => setImmediate(done))
+      answers.shift()!(answer)
+    },
+  }
+  return source
+}
+
+const BASE_2: BaseRelease = { n: 2, notes: 'faster', commit: '0'.repeat(40), version: '0.2.0' }
+
+test('a check asks the repository now, and a newer base is offered', async () => {
+  const source = heldSource()
+  const { baseUpdates } = updates(sourceOnBase1(), { state: 'idle' }, null, source)
+  const checked = baseUpdates.checkNow()
+  await source.answer(BASE_2)
+  await checked
+  assert.deepEqual(baseUpdates.status(), { kind: 'taker', integrated: 1, offered: { n: 2, notes: 'faster', version: '0.2.0' }, update: { state: 'idle' } })
+})
+
+test('a check under way when one is asked for may predate the base, so it is asked again; checks asked for meanwhile share that one', async () => {
+  const source = heldSource()
+  const { baseUpdates } = updates(sourceOnBase1(), { state: 'idle' }, null, source)
+  baseUpdates.tick()
+  const checks = [baseUpdates.checkNow(), baseUpdates.checkNow()]
+  await source.answer(new Error('git ls-remote failed: timed out'))
+  await source.answer(BASE_2)
+  await Promise.all(checks)
+  assert.equal(source.asked, 2)
+  const status = baseUpdates.status()
+  assert.equal(status.kind === 'taker' && status.offered?.n, 2)
+})
+
+test("a check refuses when the repository can't be read, or there is none to read", async () => {
+  const source = heldSource()
+  const { baseUpdates } = updates(sourceOnBase1(), { state: 'idle' }, null, source)
+  const checked = baseUpdates.checkNow()
+  await source.answer(new Error('git ls-remote failed: could not resolve host'))
+  await assert.rejects(checked, { code: 'provider_unreachable', message: /could not resolve host/ })
+  await assert.rejects(updates(sourceOnBase1(), { state: 'idle' }).baseUpdates.checkNow(), { code: 'base_not_offered' })
 })

@@ -68,6 +68,7 @@ const HELP = `ouro: talk to your agents, and to the other agents if you are one
   ouro update follow <branch> [<remote>] | off                   (a person only) follow a branch of a remote, default origin
   ouro publish [--app <folder>]                                  export the committed app and send it to the person's phone
   ouro base                                                      the base this machine has, the one offered, and how an update stands
+  ouro base check                                                ask the base repository for a newer base now
   ouro base take <n>                                             take the offered base n, for the owner
   ouro base resolve                                              after a conflict, have an agent started to merge it
   ouro base drop                                                 after a conflict, throw the merge away (an agent on it stops); the base stays offered
@@ -616,10 +617,11 @@ async function runBase(client: Client, args: string[], print: (text: string) => 
   const [verb, n] = args
   if (verb === undefined) return print(describeBase((await client.snapshot()).server.release.base))
   if (verb === 'take' && n !== undefined && /^[1-9][0-9]*$/.test(n)) return print(describeBase((await client.command('take_base_update', { n: Number(n) })).server.release.base))
+  if (verb === 'check') return print(describeBase((await client.command('check_base_offer', {})).server.release.base))
   if (verb === 'continue') return print(describeBase((await client.command('continue_base_update', {})).server.release.base))
   if (verb === 'resolve') return print(describeBase((await client.command('resolve_base_update', {})).server.release.base))
   if (verb === 'drop') return print(describeBase((await client.command('drop_base_update', {})).server.release.base))
-  throw new CliFailure('usage: ouro base [take <n> | resolve | drop | continue]')
+  throw new CliFailure('usage: ouro base [check | take <n> | resolve | drop | continue]')
 }
 
 export async function runCli(args: string[], environment: NodeJS.ProcessEnv, stdin: () => string, print: (text: string) => void): Promise<void> {
