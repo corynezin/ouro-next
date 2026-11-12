@@ -135,6 +135,8 @@ export function sharesMemoryWith(peer: { trust: 'full' | 'limited'; networkId: s
  * - `create_agent`: start an agent on it (/create-agent).
  * - `move`: hand it an agent to run, or ask whether it would take one (/move-check, /move).
  * - `read_log`: read its agents' logs (/log).
+ * - `sign_in`: sign its Claude Code in to the person's plan with a token their other computer made (/claude-token). Each
+ *   server sends the token only to the peers this allows from its own side too (Peers.shareClaudeToken).
  */
 export type PeerAction =
   | 'see_agents'
@@ -148,6 +150,7 @@ export type PeerAction =
   | 'create_agent'
   | 'move'
   | 'read_log'
+  | 'sign_in'
 
 export type PeerPermission = { kind: 'allowed' } | { kind: 'refused'; reason: string }
 
@@ -180,6 +183,7 @@ export function peerMay(action: PeerAction, peer: { trust: 'full' | 'limited'; n
       case 'create_agent':
       case 'move':
       case 'read_log':
+      case 'sign_in':
         return peer.trust === 'full' ? ALLOWED : { kind: 'refused', reason: 'this computer is trusted only to message its agents' }
     }
   }
@@ -197,6 +201,7 @@ export function peerMay(action: PeerAction, peer: { trust: 'full' | 'limited'; n
       case 'create_agent':
       case 'move':
       case 'read_log':
+      case 'sign_in':
         // A private network has no visitors (see holdingRefusal); one saying it visits is not one of the person's own.
         return peer.networkId === home.id && !peer.visiting ? ALLOWED : ownersOnly('this is done')
     }
@@ -220,6 +225,8 @@ export function peerMay(action: PeerAction, peer: { trust: 'full' | 'limited'; n
       return ownersOnly('agents are moved in')
     case 'read_log':
       return ownersOnly("agents' logs are shown")
+    case 'sign_in':
+      return ownersOnly('a plan signs in')
   }
 }
 

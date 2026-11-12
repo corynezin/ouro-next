@@ -75,16 +75,16 @@ test('memory is shared automatically only inside a private network, and trust is
 })
 
 // Who may do what, by where the peer stands: y allowed, n refused.
-const ACTIONS: PeerAction[] = ['see_agents', 'message', 'group', 'snooze_ask', 'pull_memory', 'pull', 'push_memory', 'control', 'create_agent', 'move', 'read_log']
+const ACTIONS: PeerAction[] = ['see_agents', 'message', 'group', 'snooze_ask', 'pull_memory', 'pull', 'push_memory', 'control', 'create_agent', 'move', 'read_log', 'sign_in']
 const MAY: Array<{ who: string; home: HeldNetwork | null; peer: { trust: 'full' | 'limited'; networkId: string | null; visiting: boolean }; may: string }> = [
-  //                                                                                                  see msg grp snz mem pul psh ctl crt mov log
-  { who: 'before networks, trusted fully', home: null, peer: { trust: 'full', networkId: null, visiting: false }, may: 'y y y y y n n y y y y' },
-  { who: 'before networks, trusted to message', home: null, peer: { trust: 'limited', networkId: null, visiting: false }, may: 'y y y y n n n n n n n' },
-  { who: 'a member of the private home', home: privateHome, peer: { trust: 'limited', networkId: 'p', visiting: false }, may: 'y y y y y n n y y y y' },
-  { who: 'one saying it visits the private home', home: privateHome, peer: { trust: 'full', networkId: 'p', visiting: true }, may: 'n n n n n n n n n n n' },
-  { who: 'a member of the shared home', home: sharedHome, peer: { trust: 'full', networkId: 's', visiting: false }, may: 'y y y n n y y n n n n' },
-  { who: 'a visitor of the shared home', home: sharedHome, peer: { trust: 'full', networkId: 's', visiting: true }, may: 'y y y n n y y n n n n' },
-  { who: 'outside the shared home', home: sharedHome, peer: { trust: 'full', networkId: null, visiting: false }, may: 'n n n n n n n n n n n' },
+  //                                                                                                  see msg grp snz mem pul psh ctl crt mov log sig
+  { who: 'before networks, trusted fully', home: null, peer: { trust: 'full', networkId: null, visiting: false }, may: 'y y y y y n n y y y y y' },
+  { who: 'before networks, trusted to message', home: null, peer: { trust: 'limited', networkId: null, visiting: false }, may: 'y y y y n n n n n n n n' },
+  { who: 'a member of the private home', home: privateHome, peer: { trust: 'limited', networkId: 'p', visiting: false }, may: 'y y y y y n n y y y y y' },
+  { who: 'one saying it visits the private home', home: privateHome, peer: { trust: 'full', networkId: 'p', visiting: true }, may: 'n n n n n n n n n n n n' },
+  { who: 'a member of the shared home', home: sharedHome, peer: { trust: 'full', networkId: 's', visiting: false }, may: 'y y y n n y y n n n n n' },
+  { who: 'a visitor of the shared home', home: sharedHome, peer: { trust: 'full', networkId: 's', visiting: true }, may: 'y y y n n y y n n n n n' },
+  { who: 'outside the shared home', home: sharedHome, peer: { trust: 'full', networkId: null, visiting: false }, may: 'n n n n n n n n n n n n' },
 ]
 
 test('what another server may do here: everything from the person\'s own, only talk, look, pull and push from another person\'s', () => {

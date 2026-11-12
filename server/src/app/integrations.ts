@@ -1,5 +1,5 @@
 // Keeps each account's entity in step with its provider's own tool, and runs sign-ins, keys and tokens through them.
-import type { AwsActionResult, AwsCredentialsBody, AwsIntegrationState, SpritesActionResult, SpritesIntegrationState, ChatgptLoginStart, ClaudeLoginStart, IntegrationActionResult, IntegrationEntity, IntegrationProvider } from '@ouro/contract'
+import type { AwsActionResult, AwsCredentialsBody, AwsIntegrationState, SpritesActionResult, SpritesIntegrationState, ChatgptLoginStart, ClaudeLoginStart, ClaudeShareComputer, ClaudeShareResult, IntegrationActionResult, IntegrationEntity, IntegrationProvider } from '@ouro/contract'
 import { ProviderUnreachable } from '../adapters/integrations.ts'
 import type { ActionOutcome, IntegrationTools } from '../adapters/integrations.ts'
 import { CommandRefused } from './failure.ts'
@@ -30,6 +30,8 @@ export interface IntegrationsConfig {
   integrationStored: (provider: IntegrationProvider) => void
   /** A plan's windows were read; called inside a transaction. */
   planUsageRead: (account: PlanAccount, windows: PlanWindowReading[]) => void
+  /** Sends a year-long Claude plan token to the person's other computers: what became of it at each. */
+  shareClaudeToken: (token: string) => Promise<ClaudeShareComputer[]>
   log: (event: string, fields: Record<string, unknown>) => void
 }
 
@@ -120,6 +122,43 @@ export class Integrations {
   async claudeClearApiKey(): Promise<IntegrationActionResult> {
     await reaching(() => this.config.tools.claudeClearApiKey())
     return this.settle('claude', { accepted: true })
+  }
+
+  /** A year-long token for the Claude plan, approved like a sign-in, to share with the person's other computers. Only the
+   * owner: the token signs in every one of their computers, so a guest's would put them all on the guest's plan. */
+  claudeShareStart(byOwner: boolean): Promise<ClaudeLoginStart> {
+    requireShareOwner(byOwner)
+    return reaching(() => this.config.tools.claudeTokenStart())
+  }
+
+  /** Makes the token with the approval's code, signs in here with it, and sends it to the person's other computers. */
+  async claudeShareFinish(code: string, byOwner: boolean): Promise<ClaudeShareResult> {
+    requireShareOwner(byOwner)
+    const made = await reaching(() => this.config.tools.claudeTokenFinish(code.trim()))
+    if (!made.accepted) return made
+    return this.shareClaudeToken(made.token)
+  }
+
+  /** Sends the token Claude Code here is signed in with to the person's other computers again, say to one joined since. */
+  async claudeShareAgain(byOwner: boolean): Promise<ClaudeShareResult> {
+    requireShareOwner(byOwner)
+    const token = await reaching(() => this.config.tools.claudeToken())
+    if (!token) return { accepted: false, why: "Claude Code here isn't signed in with a long-lived token: make one first" }
+    return this.shareClaudeToken(token)
+  }
+
+  private async shareClaudeToken(token: string): Promise<ClaudeShareResult> {
+    const settled = await this.settle('claude', { accepted: true })
+    if (!settled.accepted) return settled
+    return { ...settled, computers: await this.config.shareClaudeToken(token) }
+  }
+
+  /** A token from another of the person's computers: Claude Code here signs in with it. */
+  async claudeUseSharedToken(token: string): Promise<ActionOutcome> {
+    const outcome = await reaching(() => this.config.tools.claudeUseToken(token))
+    if (!outcome.accepted) return outcome
+    const settled = await this.settle('claude', outcome)
+    return settled.accepted ? { accepted: true } : settled
   }
 
   async chatgptLoginStart(): Promise<ChatgptLoginStart> {
@@ -216,6 +255,10 @@ export class Integrations {
     await reaching(() => this.config.tools.spritesDisconnect())
     return { accepted: true, state: await this.spritesStatus(byOwner) }
   }
+}
+
+function requireShareOwner(byOwner: boolean): void {
+  if (!byOwner) throw new CommandRefused('forbidden', "only the owner signs in all their computers with one Claude sign-in")
 }
 
 function requireOwner(byOwner: boolean): void {

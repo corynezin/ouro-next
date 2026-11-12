@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { ChatgptIntegrationState, ClaudeIntegrationState, GithubIntegrationState, OpenrouterIntegrationState } from '@ouro/contract'
+import type { ChatgptIntegrationState, ClaudeIntegrationState, ClaudeLoginStart, GithubIntegrationState, OpenrouterIntegrationState } from '@ouro/contract'
 import type { PlanWindowReading } from '../domain/usage.ts'
 import { CodexAppServer } from './codex-app-server.ts'
 import { ProviderUnreachable } from './integrations.ts'
@@ -16,6 +16,10 @@ import { fileSpritesTools } from './sprites-account.ts'
 import type { ActionOutcome, IntegrationTools } from './integrations.ts'
 
 const TOOL_TIMEOUT_MS = 20_000
+
+/** A year-long Claude plan token, as `claude setup-token` makes it. */
+const OAUTH_TOKEN = /sk-ant-oat01-[A-Za-z0-9_-]{20,500}/
+const OAUTH_TOKEN_WHOLE = /^sk-ant-oat01-[A-Za-z0-9_-]{20,500}$/
 
 type CodexWindow = { usedPercent?: unknown; windowDurationMins?: unknown; resetsAt?: unknown }
 type CodexRateLimits = { primary?: CodexWindow | null; secondary?: CodexWindow | null }
@@ -80,14 +84,34 @@ export function realIntegrationTools(options: { dataDir: string; anthropicKeyFil
   const endLogin = () => { try { tmux(['kill-server']) } catch { /* none running */ } }
 
   const readSettings = (): Record<string, unknown> => { try { return JSON.parse(readFileSync(claudeSettingsFile, 'utf8')) as Record<string, unknown> } catch { return {} } }
-  const setHelper = (helper: string | null) => {
+  // Only the owner reads it: it may hold the plan token.
+  const changeSettings = (change: (settings: Record<string, unknown>) => void) => {
     const settings = readSettings()
-    if (helper === null) delete settings.apiKeyHelper
-    else settings.apiKeyHelper = helper
+    change(settings)
     mkdirSync(dirname(claudeSettingsFile), { recursive: true })
-    writeFileSync(`${claudeSettingsFile}.partial`, `${JSON.stringify(settings, null, 2)}\n`)
+    writeFileSync(`${claudeSettingsFile}.partial`, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 })
+    chmodSync(`${claudeSettingsFile}.partial`, 0o600)
     renameSync(`${claudeSettingsFile}.partial`, claudeSettingsFile)
   }
+  const setHelper = (helper: string | null) => changeSettings((settings) => {
+    if (helper === null) delete settings.apiKeyHelper
+    else settings.apiKeyHelper = helper
+  })
+  // A plan token is given to every Claude Code run here through its settings' environment: agents, the summarizer and the
+  // status check alike, as `claude setup-token` intends.
+  const settingsEnv = (settings: Record<string, unknown>): Record<string, unknown> =>
+    typeof settings.env === 'object' && settings.env !== null && !Array.isArray(settings.env) ? settings.env as Record<string, unknown> : {}
+  const readToken = (): string | null => {
+    const token = settingsEnv(readSettings()).CLAUDE_CODE_OAUTH_TOKEN
+    return typeof token === 'string' && token !== '' ? token : null
+  }
+  const setToken = (token: string | null) => changeSettings((settings) => {
+    const env = { ...settingsEnv(settings) }
+    if (token === null) delete env.CLAUDE_CODE_OAUTH_TOKEN
+    else env.CLAUDE_CODE_OAUTH_TOKEN = token
+    if (Object.keys(env).length === 0) delete settings.env
+    else settings.env = env
+  })
   const apiKeyInUse = () => existsSync(claudeKeyFile) && readSettings().apiKeyHelper === apiKeyHelper
 
   const claudeStatus = async (): Promise<ClaudeIntegrationState> => {
@@ -95,14 +119,16 @@ export function realIntegrationTools(options: { dataDir: string; anthropicKeyFil
     const result = await runTool('claude', ['auth', 'status', '--json'])
     if (!result) throw new ProviderUnreachable("Claude Code didn't answer")
     // An answer it can't read says nothing: signed out holds every agent, so it needs a clear "not logged in".
-    let status: { loggedIn?: unknown; email?: unknown }
+    let status: { loggedIn?: unknown; email?: unknown; authMethod?: unknown }
     try {
       status = JSON.parse(result.output.slice(result.output.indexOf('{'))) as typeof status
     } catch {
       throw new ProviderUnreachable("Claude Code's sign-in status couldn't be read")
     }
     if (typeof status.loggedIn !== 'boolean') throw new ProviderUnreachable("Claude Code's sign-in status couldn't be read")
-    return status.loggedIn ? { status: 'signed_in', account: { method: 'plan', email: typeof status.email === 'string' ? status.email : null } } : { status: 'signed_out' }
+    if (!status.loggedIn) return { status: 'signed_out' }
+    if (status.authMethod === 'oauth_token') return { status: 'signed_in', account: { method: 'plan', email: null, longLived: true } }
+    return { status: 'signed_in', account: { method: 'plan', email: typeof status.email === 'string' ? status.email : null } }
   }
 
   const checkKey = async (url: string, headers: Record<string, string>, provider: string): Promise<ActionOutcome> => {
@@ -126,6 +152,68 @@ export function realIntegrationTools(options: { dataDir: string; anthropicKeyFil
     return { status: 'connected', user, scopes }
   }
 
+  /** Runs a Claude Code sign-in command in the login session: the address it shows to approve at. */
+  const startLogin = async (command: string): Promise<ClaudeLoginStart> => {
+    endLogin()
+    try {
+      tmux(['new-session', '-d', '-s', 'login', '-x', '1000', '-y', '50', command])
+    } catch (error) {
+      throw new ProviderUnreachable(`couldn't start ${command}: ${(error as Error).message.split('\n')[0]}`)
+    }
+    for (const deadline = Date.now() + 30_000; Date.now() < deadline; await sleep(250)) {
+      const url = /https:\/\/\S*oauth\/authorize\S*/.exec(loginScreen())?.[0]
+      if (url) return { url }
+      if (!loginAlive()) break
+    }
+    endLogin()
+    throw new ProviderUnreachable(`${command} showed no sign-in address`)
+  }
+
+  /** Types the approval's code into the login session and waits until it is `done`, ends, or refuses; then ends it. `screen`:
+   * what it showed after the code. */
+  const enterCode = async (code: string, done: (afterCode: string) => boolean): Promise<{ accepted: true; screen: string } | { accepted: false; why: string }> => {
+    if (/[\r\n\x00-\x1f]/.test(code)) return { accepted: false, why: "that isn't a sign-in code" }
+    if (!loginAlive()) return { accepted: false, why: 'no sign-in in progress: start it again' }
+    tmux(['load-buffer', '-b', 'code', '-'], code)
+    tmux(['paste-buffer', '-d', '-b', 'code', '-t', 'login'])
+    tmux(['send-keys', '-t', 'login', 'Enter'])
+    let afterCode = ''
+    for (const deadline = Date.now() + 30_000; Date.now() < deadline; await sleep(500)) {
+      afterCode = loginScreen().split(code).pop() ?? ''
+      if (done(afterCode)) {
+        // Once more after a moment, so what it shows is there in full.
+        await sleep(500)
+        afterCode = loginScreen().split(code).pop() ?? afterCode
+        break
+      }
+      if (!loginAlive()) break
+      const failure = /(error|invalid|failed)[^\n]*/i.exec(afterCode)
+      if (failure) {
+        endLogin()
+        return { accepted: false, why: `Claude refused it: ${failure[0].slice(0, 200)}` }
+      }
+    }
+    endLogin()
+    return { accepted: true, screen: afterCode }
+  }
+
+  /** Signs Claude Code in with a plan token in place of any API key; keeps the key if Claude Code doesn't take it. */
+  const useToken = async (token: string): Promise<ActionOutcome> => {
+    if (!OAUTH_TOKEN_WHOLE.test(token)) return { accepted: false, why: "that isn't a Claude plan token" }
+    const helperBefore = apiKeyInUse() ? apiKeyHelper : null
+    const tokenBefore = readToken()
+    if (helperBefore) setHelper(null)
+    setToken(token)
+    const status = await claudeStatus().catch(() => null)
+    if (status?.status !== 'signed_in') {
+      setToken(tokenBefore)
+      if (helperBefore) setHelper(helperBefore)
+      return { accepted: false, why: "Claude Code didn't take the token" }
+    }
+    rmSync(claudeKeyFile, { force: true })
+    return { accepted: true }
+  }
+
   let chatgptLogin: { codex: CodexAppServer; timer: NodeJS.Timeout } | null = null
   const endChatgptLogin = () => {
     if (!chatgptLogin) return
@@ -138,53 +226,43 @@ export function realIntegrationTools(options: { dataDir: string; anthropicKeyFil
     ...realAwsTools(options.awsFiles),
     ...fileSpritesTools(options.spritesTokenFile),
     claudeStatus,
-    async claudeLoginStart() {
-      endLogin()
-      try {
-        tmux(['new-session', '-d', '-s', 'login', '-x', '1000', '-y', '50', 'claude auth login --claudeai'])
-      } catch (error) {
-        throw new ProviderUnreachable(`couldn't start claude auth login: ${(error as Error).message.split('\n')[0]}`)
-      }
-      for (const deadline = Date.now() + 30_000; Date.now() < deadline; await sleep(250)) {
-        const url = /https:\/\/\S*oauth\/authorize\S*/.exec(loginScreen())?.[0]
-        if (url) return { url }
-        if (!loginAlive()) break
-      }
-      endLogin()
-      throw new ProviderUnreachable('claude auth login showed no sign-in address')
-    },
+    claudeLoginStart: () => startLogin('claude auth login --claudeai'),
     async claudeLoginFinish(code) {
-      if (/[\r\n\x00-\x1f]/.test(code)) return { accepted: false, why: "that isn't a sign-in code" }
-      if (!loginAlive()) return { accepted: false, why: 'no sign-in in progress: start it again' }
-      tmux(['load-buffer', '-b', 'code', '-'], code)
-      tmux(['paste-buffer', '-d', '-b', 'code', '-t', 'login'])
-      tmux(['send-keys', '-t', 'login', 'Enter'])
-      for (const deadline = Date.now() + 30_000; Date.now() < deadline; await sleep(500)) {
-        const afterCode = loginScreen().split(code).pop() ?? ''
-        if (!loginAlive() || /success|logged in/i.test(afterCode)) break
-        const failure = /(error|invalid|failed)[^\n]*/i.exec(afterCode)
-        if (failure) {
-          endLogin()
-          return { accepted: false, why: `Claude refused it: ${failure[0].slice(0, 200)}` }
-        }
-      }
-      endLogin()
-      // A key in use answers for itself, so look at the login without it; keep the key if the login didn't take.
+      const entered = await enterCode(code, (afterCode) => /success|logged in/i.test(afterCode))
+      if (!entered.accepted) return entered
+      // A key or token in use answers for itself, so look at the login without them; keep them if the login didn't take.
       const helperBefore = apiKeyInUse() ? apiKeyHelper : null
+      const tokenBefore = readToken()
       if (helperBefore) setHelper(null)
+      if (tokenBefore) setToken(null)
       const status = await claudeStatus()
       if (status.status !== 'signed_in') {
         if (helperBefore) setHelper(helperBefore)
+        if (tokenBefore) setToken(tokenBefore)
         return { accepted: false, why: 'Claude is still signed out: start again and use the newest code' }
       }
       rmSync(claudeKeyFile, { force: true })
       return { accepted: true }
     },
+    claudeTokenStart: () => startLogin('claude setup-token'),
+    async claudeTokenFinish(code) {
+      const entered = await enterCode(code, (afterCode) => OAUTH_TOKEN.test(afterCode))
+      if (!entered.accepted) return entered
+      // The token is the whole of what setup-token shows, so it is read off the screen once it is there in full.
+      const token = OAUTH_TOKEN.exec(entered.screen)?.[0]
+      if (!token) return { accepted: false, why: 'Claude made no token: start again and use the newest code' }
+      const used = await useToken(token)
+      return used.accepted ? { accepted: true, token } : used
+    },
+    claudeUseToken: (token) => useToken(token),
+    claudeToken: async () => readToken(),
     async claudeSetApiKey(key) {
       if (!/^sk-ant-[A-Za-z0-9_-]{20,300}$/.test(key)) return { accepted: false, why: "that isn't an Anthropic API key (it starts with sk-ant-)" }
+      if (OAUTH_TOKEN.test(key)) return { accepted: false, why: "that's a Claude plan token, not an API key" }
       const checked = await checkKey('https://api.anthropic.com/v1/models?limit=1', { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, 'Anthropic')
       if (!checked.accepted) return checked
       writeSecret(claudeKeyFile, key)
+      setToken(null)
       setHelper(apiKeyHelper)
       return { accepted: true }
     },

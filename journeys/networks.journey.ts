@@ -323,7 +323,7 @@ test("a collaborator's own server joins the shared network; addresses spread by 
       { who: 'sam', key: machineKeyOf(sam), id: (await computerNamed(teamPhone, 'sams-box'))!.id, visiting: false },
       { who: 'alpha', key: machineKeyOf(alpha), id: (await computerNamed(teamPhone, 'alpha'))!.id, visiting: true },
     ]
-    const denied = ['/control', '/create-agent', '/move-check', '/move', '/log', '/memory', '/owner-ask-snoozes']
+    const denied = ['/control', '/create-agent', '/move-check', '/move', '/log', '/memory', '/owner-ask-snoozes', '/claude-token']
     for (const route of SIGNED_PEER_ROUTES.filter((found) => found !== '/hello' && found !== '/forget')) {
       for (const signer of signers) {
         const path = `${PEER_API_PREFIX}${route}`

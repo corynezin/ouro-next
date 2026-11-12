@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
-import { PEER_API_PREFIX, PEER_PROTOCOL, PEER_MIN_PROTOCOL } from '@ouro/contract'
+import { PEER_API_PREFIX, PEER_CLAUDE_TOKEN_PROTOCOL, PEER_PROTOCOL, PEER_MIN_PROTOCOL } from '@ouro/contract'
 import type { PeerHello, PeerIdentity, PeerMove, PeerNetworkJoinRequest } from '@ouro/contract'
 import { loadOrCreateMachineKey, NetworkKeyFile, networkIdOf, newNetworkKey, signatureHeaders } from '../adapters/peer-transport.ts'
 import type { MachineKey } from '../adapters/peer-transport.ts'
@@ -45,7 +45,7 @@ function server(name: string, address = 'http://127.0.0.1:1') {
   const config: PeersConfig = {
     store, machineId: `id-${name}`, machineName: name, ownerName: () => `owner-${name}`, address, key, networkKeys, release: 'test',
     now: () => clock.now, commit: (body) => body(), agentCounts: () => ({ running: 0, total: 0 }), ownerPushTokenHashes: () => [],
-    agentCards: () => [], claudePlan: nothing, peerClaudePlanChanged: () => {}, controlFromPeer: nothing, createAgentFromPeer: nothing,
+    agentCards: () => [], claudePlan: nothing, peerClaudePlanChanged: () => {}, controlFromPeer: nothing, claudeTokenFromPeer: nothing, createAgentFromPeer: nothing,
     deliverFromPeer: nothing, groupUpdateFromPeer: nothing, groupPostFromPeer: nothing, ownerMessageFromPeer: nothing, ownerAskFromPeer: nothing,
     askSnoozeFromPeer: nothing, memoryPullIntervalMs: 60_000, memoryProjectKeys: () => [], memoryForPeer: nothing, memoryFromPeer: nothing,
     logForPeer: nothing, moveCheckFromPeer: nothing, moveFromPeer: nothing, pullForPeer: nothing, memoryPushFromPeer: nothing,
@@ -202,4 +202,47 @@ test('a pulled copy is taken only when it is the agent asked for', async () => {
   } finally {
     shared.close()
   }
+})
+
+test("a Claude plan token goes only to the person's own computers, and only where it travels encrypted", async () => {
+  const received: string[] = []
+  const own = createServer((request, response) => {
+    let body = ''
+    request.on('data', (chunk: Buffer) => { body += chunk.toString() })
+    request.on('end', () => {
+      received.push(`${request.url} ${body}`)
+      response.setHeader('content-type', 'application/json')
+      response.end('{}')
+    })
+  })
+  await new Promise<void>((resolve) => own.listen(0, '127.0.0.1', resolve))
+  try {
+    const here = server('sharer')
+    const home = here.holdNetwork('private', 'home')
+    const team = here.holdNetwork('shared', 'extra')
+    const hello = (protocol: number) => ({ protocol, minProtocol: PEER_MIN_PROTOCOL, release: 'test', agentsRunning: 0, agentCount: 0, sleeps: false, heldAwake: false, ownerPushTokenHashes: [] })
+    const peer = (name: string, address: string, networkId: string, protocol = PEER_PROTOCOL) => {
+      here.store.savePeerInNetwork({ machineId: `id-${name}`, name, address, publicKey: 'k', networkId, visiting: false, ownerName: null, joinedAt: 1 })
+      here.store.notePeerHello(`id-${name}`, here.clock.now, hello(protocol))
+    }
+    peer('own', `http://127.0.0.1:${(own.address() as AddressInfo).port}`, home.id)
+    peer('cleartext', 'http://192.168.1.2:7777', home.id)
+    peer('old', 'http://100.64.0.9:7777', home.id, PEER_CLAUDE_TOKEN_PROTOCOL - 1)
+    peer('teammate', `http://127.0.0.1:${(own.address() as AddressInfo).port}`, team.id)
+
+    const token = `sk-ant-oat01-${'a'.repeat(40)}`
+    const sent = await here.peers.shareClaudeToken(token)
+    assert.deepEqual(sent.map((computer) => [computer.name, computer.shared]).sort(), [['cleartext', false], ['old', false], ['own', true]], "another person's computer isn't sent it at all")
+    assert.match(sent.find((computer) => computer.name === 'cleartext')!.why ?? '', /in the clear/)
+    assert.match(sent.find((computer) => computer.name === 'old')!.why ?? '', /update/)
+    assert.deepEqual(received, [`${PEER_API_PREFIX}/claude-token ${JSON.stringify({ token })}`])
+  } finally {
+    own.close()
+  }
+})
+
+test('a Claude plan token is taken only in its own shape', async () => {
+  const here = server('taker')
+  const row = { machineId: 'id-x' } as never
+  await assert.rejects(here.peers.receiveClaudeToken(row, { token: 'sk-ant-api03-not-a-plan-token-xxxxxxxxxx' }), (error: PeerRequestRefused) => error.code === 'invalid_request')
 })

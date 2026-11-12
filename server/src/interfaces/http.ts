@@ -368,6 +368,9 @@ async function integrationAction(integrations: Integrations, method: string, act
   switch (`${method} ${action}`) {
     case 'POST claude/login/start': return await integrations.claudeLoginStart()
     case 'POST claude/login/finish': return await integrations.claudeLoginFinish((await body(ClaudeLoginFinishBody)()).code)
+    case 'POST claude/share/start': return await integrations.claudeShareStart(byOwner)
+    case 'POST claude/share/finish': return await integrations.claudeShareFinish((await body(ClaudeLoginFinishBody)()).code, byOwner)
+    case 'POST claude/share/again': return await integrations.claudeShareAgain(byOwner)
     case 'POST claude/api_key': return await integrations.claudeSetApiKey((await body(SecretKeyBody)()).key)
     case 'DELETE claude/api_key': return await integrations.claudeClearApiKey()
     case 'POST chatgpt/login/start': return await integrations.chatgptLoginStart()

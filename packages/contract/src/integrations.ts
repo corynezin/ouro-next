@@ -8,8 +8,10 @@ export const IntegrationProvider = z.enum(['claude', 'chatgpt', 'openrouter', 'g
 export type IntegrationProvider = z.infer<typeof IntegrationProvider>
 
 export const ClaudeAccount = z.discriminatedUnion('method', [
-  /** A Claude subscription login, with its email when Claude Code says. */
-  z.object({ method: z.literal('plan'), email: z.string().nullable() }),
+  /** A Claude subscription login, with its email when Claude Code says. `longLived`: a year-long plan token
+   * (`claude setup-token`), made here or shared from another of the person's computers; it has no email. Absent from
+   * servers before it. */
+  z.object({ method: z.literal('plan'), email: z.string().nullable(), longLived: z.boolean().optional() }),
   /** An Anthropic API key. */
   z.object({ method: z.literal('api_key') }),
 ])
@@ -65,6 +67,22 @@ export type IntegrationActionResult = z.infer<typeof IntegrationActionResult>
 /** `POST /v2/integrations/claude/login/start`: open `url`, approve, then send the code it shows to `login/finish`. */
 export const ClaudeLoginStart = z.object({ url: z.string() })
 export type ClaudeLoginStart = z.infer<typeof ClaudeLoginStart>
+
+/** One of the person's other computers, as a shared Claude sign-in reached it. `why`: why it didn't, fit to show. */
+export const ClaudeShareComputer = z.object({ name: z.string(), shared: z.boolean(), why: z.string().nullable() })
+export type ClaudeShareComputer = z.infer<typeof ClaudeShareComputer>
+
+/**
+ * `POST /v2/integrations/claude/share/start` answers a ClaudeLoginStart: open `url`, approve, then send the code to
+ * `share/finish`. That makes a year-long token for the Claude plan, signs this server in with it, and sends it to each of
+ * the person's own computers in this server's private network. `POST claude/share/again` sends this server's token again,
+ * without approving. `computers`: each one it was sent to, and whether it took it.
+ */
+export const ClaudeShareResult = z.discriminatedUnion('accepted', [
+  z.object({ accepted: z.literal(true), integration: IntegrationEntity, computers: z.array(ClaudeShareComputer) }),
+  z.object({ accepted: z.literal(false), why: z.string() }),
+])
+export type ClaudeShareResult = z.infer<typeof ClaudeShareResult>
 
 /** `POST /v2/integrations/chatgpt/login/start`: open `url` and enter `code` there before `expiresAt`; the sign-in then
  * completes by itself and the integration changes. */

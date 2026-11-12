@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  actionOutcome, awsCredentialsOf, awsIdentityText, awsName, awsOutcome, chatgptAccountText, chatgptSection, claudeButtonLabel, claudeStatusText, GITHUB_TOKEN_PAGE, gitHubConnectedToast, gitHubMissingScopesNote,
+  actionOutcome, awsCredentialsOf, awsIdentityText, awsName, awsOutcome, chatgptAccountText, chatgptSection, claudeButtonLabel, claudeStatusText, shareComputerName, shareLineText, shareOutcome, shareToast, GITHUB_TOKEN_PAGE, gitHubConnectedToast, gitHubMissingScopesNote,
   gitHubName, KEY_REMOVAL_FAILED, keyRemovalOutcome, openRouterSpentText, pasted, usageFooter, usageRows, usageWindowLabel, usageWindowValue,
 } from './model.ts'
 
@@ -99,4 +99,22 @@ test('Sprites: a pasted token without its spaces, and refusals in the server\'s 
   assert.deepEqual(spritesOutcome({ ok: true, value: { accepted: true, state } }, 'no'), { kind: 'accepted', state })
   assert.deepEqual(spritesOutcome({ ok: true, value: { accepted: false, why: 'Sprites rejected that token' } }, 'no'), { kind: 'failed', text: 'Sprites rejected that token' })
   assert.deepEqual(spritesOutcome({ ok: true, value: { accepted: false, why: ' ' } }, 'no'), { kind: 'failed', text: 'no' })
+})
+
+test('a shared Claude sign-in, in words: the status, the toast and each computer', () => {
+  assert.equal(claudeStatusText({ status: 'signed_in', account: { method: 'plan', email: null, longLived: true } }), 'Signed in with a year-long plan token')
+  assert.equal(shareToast([]), 'Signed in here; no other computer to send it to')
+  assert.equal(shareToast([{ name: 'beta', shared: true, why: null }]), 'Signed in here and on beta')
+  assert.equal(shareToast([{ name: 'beta', shared: true, why: null }, { name: 'gamma', shared: true, why: null }]), 'Signed in here and on 2 other computers')
+  assert.equal(shareToast([{ name: 'beta', shared: true, why: null }, { name: 'gamma', shared: false, why: 'needs an update first' }]), 'Signed in here and on 1 of 2 other computers')
+  assert.equal(shareLineText({ name: 'gamma', shared: false, why: 'needs an update first' }), 'Not signed in: needs an update first')
+  assert.deepEqual(shareOutcome({ ok: true, value: { accepted: false, why: 'Claude refused it: invalid code' } }, 'refused'), { kind: 'failed', text: 'Claude refused it: invalid code' })
+})
+
+test("a computer a sign-in was shared with goes by this phone's short name for it, else its own", () => {
+  const computers = [{ name: 'srv-0a1b2c3d', address: 'http://100.64.0.2:8080/' }, { name: 'laptop', address: null }] as never[]
+  const servers = [{ label: 'studio', url: 'http://100.64.0.2:8080' }]
+  assert.equal(shareComputerName('srv-0a1b2c3d', computers, servers), 'studio')
+  assert.equal(shareComputerName('laptop', computers, servers), 'laptop')
+  assert.equal(shareComputerName('gone', computers, servers), 'gone')
 })

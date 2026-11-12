@@ -4,8 +4,8 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { LogPage as LogPageSchema } from '@ouro/contract'
 import type { LogPage, MadeServerInvite } from '@ouro/contract'
-import { PeerMemoryPush, PeerPullRequest, PEER_API_PREFIX, PEER_NETWORK_HEADERS, PEER_NETWORKS_PROTOCOL, PeerNetworkJoinResult, PEER_ASK_SNOOZE_PROTOCOL, PEER_LOG_PROTOCOL, PeerLogRequest, PEER_MEMORY_PROTOCOL, PEER_MIN_PROTOCOL, PeerAskSnooze, PeerAskSnoozeResult, PEER_PROTOCOL, PeerMemory, PeerMemoryRequest, PEER_SIGNATURE_HEADERS, PeerAgentList, PeerControl, PeerControlResult, PeerCreateAgent, PeerCreateAgentResult, PeerGroupPost, PeerGroupUpdate, PeerHello, PeerJoinResult, PeerMessage, PeerMessageResult, PeerMove, PeerOwnerAsk, PeerOwnerMessage, PeerMoveCheck, PeerMoveCheckResult, PeerMoveResult } from '@ouro/contract'
-import type { NetworkInvite, NetworkKind, NetworkRole, PeerNetworkJoinRequest, ComputerEntity, ComputerInvite, ComputerStatus, ComputerTrust, PeerAgentCard, PeerClaudePlan, PeerIdentity, PeerJoinRequest, PeerSender, RemoteAgentAction, RemoteAgentEntity } from '@ouro/contract'
+import { PEER_CLAUDE_TOKEN_PROTOCOL, PeerClaudeToken, PeerMemoryPush, PeerPullRequest, PEER_API_PREFIX, PEER_NETWORK_HEADERS, PEER_NETWORKS_PROTOCOL, PeerNetworkJoinResult, PEER_ASK_SNOOZE_PROTOCOL, PEER_LOG_PROTOCOL, PeerLogRequest, PEER_MEMORY_PROTOCOL, PEER_MIN_PROTOCOL, PeerAskSnooze, PeerAskSnoozeResult, PEER_PROTOCOL, PeerMemory, PeerMemoryRequest, PEER_SIGNATURE_HEADERS, PeerAgentList, PeerControl, PeerControlResult, PeerCreateAgent, PeerCreateAgentResult, PeerGroupPost, PeerGroupUpdate, PeerHello, PeerJoinResult, PeerMessage, PeerMessageResult, PeerMove, PeerOwnerAsk, PeerOwnerMessage, PeerMoveCheck, PeerMoveCheckResult, PeerMoveResult } from '@ouro/contract'
+import type { ClaudeShareComputer, NetworkInvite, NetworkKind, NetworkRole, PeerNetworkJoinRequest, ComputerEntity, ComputerInvite, ComputerStatus, ComputerTrust, PeerAgentCard, PeerClaudePlan, PeerIdentity, PeerJoinRequest, PeerSender, RemoteAgentAction, RemoteAgentEntity } from '@ouro/contract'
 import { networkSignatureValid, PeerRefused, PeerUnreachable, peerRequest, sha256Hex, signatureValid } from '../adapters/peer-transport.ts'
 import type { MachineKey, NetworkKeyFile, NetworkSigner } from '../adapters/peer-transport.ts'
 import { helloToSleeperDue } from '../domain/host-hold.ts'
@@ -73,6 +73,9 @@ export interface PeersConfig {
   pullForPeer: (agentName: string) => PeerMove | null
   /** A private server's project notes, pushed into this server's network. Runs its own transaction. */
   memoryPushFromPeer: (peer: PeerRow, push: PeerMemoryPush) => void
+  /** A year-long Claude plan token from one of the person's own computers: Claude Code here signs in with it. Runs no
+   * transaction of its own around the tool. */
+  claudeTokenFromPeer: (peer: PeerRow, token: string) => Promise<{ accepted: true } | { accepted: false; why: string }>
   /** This host pauses when idle. */
   hostSleeps: boolean
   /** This host is holding itself awake for work now. */
@@ -93,6 +96,9 @@ export type HandoverOutcome =
 
 /** Long enough to write a long conversation in on the other side. */
 const MOVE_TIMEOUT_MS = 120_000
+
+/** Long enough for the other side to have Claude Code check the token (TOOL_TIMEOUT_MS there). */
+const CLAUDE_TOKEN_TIMEOUT_MS = 45_000
 
 /** Long enough for the other side to ask a model for the agent's name (NAME_SUGGESTION_TIMEOUT_MS) and start it. */
 const CREATE_AGENT_TIMEOUT_MS = 30_000
@@ -716,6 +722,41 @@ export class Peers {
     const push = PeerMemoryPush.safeParse(body)
     if (!push.success) throw new PeerRequestRefused('invalid_request', 'not a memory push')
     this.config.memoryPushFromPeer(peer, push.data)
+    return {}
+  }
+
+  // Claude's sign-in, to the person's own computers
+
+  /** Sends a year-long Claude plan token to each of the person's own computers this one reaches, all at once: what became
+   * of it at each. Only to the ones that would take it from this one (peerMay's `sign_in`, the same rule they apply), and
+   * only over HTTPS or Tailscale, since the body is the token itself. Neither the token nor the body is ever logged. */
+  async shareClaudeToken(token: string): Promise<ClaudeShareComputer[]> {
+    const home = this.homeNetwork()
+    const own = this.config.store.listPeers().filter((peer) => peer.publicKey !== '' && peerMay('sign_in', peer, home).kind === 'allowed' && this.signingFor(peer).kind !== 'never')
+    return Promise.all(own.map(async (peer): Promise<ClaudeShareComputer> => {
+      const notSent = (why: string): ClaudeShareComputer => ({ name: peer.name, shared: false, why })
+      const problem = incompatibilityOf(peer)
+      if (problem) return notSent(`can't work with this computer: ${problem}`)
+      if ((peer.hello?.protocol ?? 0) < PEER_CLAUDE_TOKEN_PROTOCOL) return notSent('needs an update first')
+      if (!privateTransport(peer.address)) return notSent('reached neither over HTTPS nor Tailscale, so the token would travel in the clear')
+      try {
+        await this.signed(peer, 'POST', '/claude-token', { token } satisfies PeerClaudeToken, CLAUDE_TOKEN_TIMEOUT_MS)
+      } catch (error) {
+        if (error instanceof PeerUnreachable) return notSent(`can't be reached: ${error.message}`)
+        if (error instanceof PeerRefused) return notSent(error.message)
+        throw error
+      }
+      this.config.log('claude_token_shared', { machineId: peer.machineId })
+      return { name: peer.name, shared: true, why: null }
+    }))
+  }
+
+  /** A token from one of the person's own computers; the route has checked it may (peerMay's `sign_in`). */
+  async receiveClaudeToken(peer: PeerRow, body: unknown): Promise<Record<string, never>> {
+    const request = PeerClaudeToken.safeParse(body)
+    if (!request.success) throw new PeerRequestRefused('invalid_request', 'not a Claude plan token')
+    const outcome = await this.config.claudeTokenFromPeer(peer, request.data.token)
+    if (!outcome.accepted) throw new PeerRequestRefused('invalid_request', `${this.config.machineName} couldn't use it: ${outcome.why}`)
     return {}
   }
 
