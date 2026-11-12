@@ -51,5 +51,6 @@ export function manifestProblem(manifest: unknown): string | null {
   const ouro = isRecord(manifest.extra) ? manifest.extra.ouro : undefined
   if (!isRecord(ouro) || !Number.isInteger(ouro.updateNumber) || (ouro.updateNumber as number) <= 0) return 'extra.ouro.updateNumber is missing'
   if (ouro.commit !== null && typeof ouro.commit !== 'string') return 'extra.ouro.commit is malformed'
+  if (ouro.machineId !== undefined && typeof ouro.machineId !== 'string') return 'extra.ouro.machineId is malformed'
   return null
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { FakeClock, FakeLifecycle, MemoryDurableStore, settle } from '../platform/fakes.ts'
-import { checkOutcomeText, restartBannerText, runningCodeText, UpdateFlow } from './updateFlow.ts'
+import { checkOutcomeText, restartBannerText, runningCodeText, UpdateFlow, updateMarkInlineText, updateMarkStatus, updateMarkText, updateMarkView } from './updateFlow.ts'
 import type { Place, UpdateSource } from './updateFlow.ts'
 import type { ManifestCheck, UpdateEndpoint } from './manifest.ts'
 
@@ -155,10 +155,10 @@ test('the footer says which code is running', () => {
   assert.equal(runningCodeText({ kind: 'development' }), 'updates off (development)')
   assert.equal(runningCodeText({ kind: 'embedded', runtimeVersion: '0123456789' }), 'embedded bundle · runtime 01234567')
   assert.equal(runningCodeText({ kind: 'embedded', runtimeVersion: null }), 'embedded bundle · runtime ?')
-  assert.equal(runningCodeText({ kind: 'update', updateId: 'abcdef0123', createdAt: null, updateNumber: null }), 'update abcdef01')
-  assert.equal(runningCodeText({ kind: 'update', updateId: 'abcdef0123', createdAt: null, updateNumber: 12 }), 'update 12', 'the number the server published it as')
+  assert.equal(runningCodeText({ kind: 'update', updateId: 'abcdef0123', createdAt: null, updateNumber: null, machineId: null }), 'update abcdef01')
+  assert.equal(runningCodeText({ kind: 'update', updateId: 'abcdef0123', createdAt: null, updateNumber: 12, machineId: null }), 'update 12', 'the number the server published it as')
   const createdAt = new Date(2026, 10, 4, 9, 0)
-  assert.equal(runningCodeText({ kind: 'update', updateId: 'abcdef0123', createdAt, updateNumber: null }), `update abcdef01 · ${createdAt.toLocaleString()}`, 'with the date it was published')
+  assert.equal(runningCodeText({ kind: 'update', updateId: 'abcdef0123', createdAt, updateNumber: null, machineId: null }), `update abcdef01 · ${createdAt.toLocaleString()}`, 'with the date it was published')
 })
 
 test('a malformed manifest never reaches expo-updates, and says why', async () => {
@@ -318,4 +318,26 @@ test('a check that hangs is given up after 2 minutes, so later checks still run'
   ctx.source.downloadNewVersion = async () => { ctx.source.checks++; return true }
   assert.deepEqual(await ctx.flow.checkNow(), { kind: 'downloaded' })
   assert.equal(ctx.source.checks, 2)
+})
+
+test('a marked update reads as in the app only when this computer\'s running update is that one or later', () => {
+  const mark = { updateNumber: 12, machineId: 'home' }
+  const running = (updateNumber: number | null, machineId: string | null) => ({ kind: 'update' as const, updateId: 'u', createdAt: null, updateNumber, machineId })
+  assert.equal(updateMarkStatus(mark, running(12, 'home'), false), 'in_app')
+  assert.equal(updateMarkStatus(mark, running(13, 'home'), false), 'in_app')
+  assert.equal(updateMarkStatus(mark, running(11, 'home'), false), 'not_yet')
+  assert.equal(updateMarkStatus(mark, running(40, 'other'), false), 'elsewhere', 'numbers count per computer')
+  assert.equal(updateMarkStatus(mark, running(40, null), false), 'unknown')
+  assert.equal(updateMarkStatus(mark, { kind: 'development' }, false), 'unknown')
+  assert.equal(updateMarkText(12, 'in_app'), 'Update 12 is in your app')
+  assert.equal(updateMarkInlineText(12, 'not_yet'), 'update 12 (not in your app yet)', 'inside a sentence it stays a noun')
+})
+
+test('on the built-in bundle a mark is "not yet" only while the banner offers an update; otherwise the app cannot tell', () => {
+  const mark = { updateNumber: 12, machineId: 'home' }
+  const embedded = { kind: 'embedded' as const, runtimeVersion: '1' }
+  assert.equal(updateMarkStatus(mark, embedded, true), 'not_yet')
+  assert.equal(updateMarkStatus(mark, embedded, false), 'unknown', 'a new build, or updates taken from another computer: no banner will come')
+  assert.deepEqual(updateMarkView(mark, embedded, false), { text: "Update 12: this app can't tell whether it has it", inlineText: 'update 12', tone: 'unsure' })
+  assert.equal(updateMarkView(mark, embedded, true).tone, 'not_yet')
 })

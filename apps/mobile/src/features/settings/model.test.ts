@@ -106,30 +106,42 @@ test('the Unpair footer names this phone in the command that revokes its token o
   assert.equal(unpairFooter(undefined), 'On the computer, `ouro devices revoke <device>` also revokes the token.')
 })
 
+/** A release with the given base and version (null: from before versions). */
+const rel = (base: Parameters<typeof baseSection>[0]['base'], version: string | null = null) => ({ base, version })
+
+test('with versions, the server shows its own and names the base it offers by version', () => {
+  const offered = { n: 6, notes: 'Versions.', version: '0.6.0' }
+  const idle = baseSection(rel({ kind: 'taker', integrated: 5, offered, update: { state: 'idle' } }, '0.5.0'), true)!
+  assert.equal(idle.versionText, '0.5.0')
+  assert.deepEqual(idle.take, { n: 6, label: 'Update to 0.6.0' })
+  assert.equal(baseSection(rel({ kind: 'taker', integrated: 5, offered, update: { state: 'updating', n: 6 } }, '0.5.0'), true)!.updatingText, 'Updating to 0.6.0…')
+  assert.match(baseSection(rel({ kind: 'taker', integrated: 5, offered, update: { state: 'failed', n: 6, why: 'x' } }), true)!.note!.text, /^Ouro 0\.6\.0 didn't go in/)
+})
+
 test('the Ouro section shows the merged base, the update under way, a conflict or failure, and offers a newer base to the owner', () => {
-  assert.equal(baseSection({ kind: 'not_taking' }, true), null, 'none on the publishing server')
+  assert.equal(baseSection(rel({ kind: 'not_taking' }), true), null, 'none on the publishing server')
   const offered = { n: 4, notes: 'Faster lists.' }
-  const idle = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'idle' } }, true)!
+  const idle = baseSection(rel({ kind: 'taker', integrated: 3, offered, update: { state: 'idle' } }), true)!
   assert.equal(idle.versionText, 'Base 3')
   assert.equal(idle.footer, 'Faster lists.', 'release notes as the footer while newer')
   assert.deepEqual(idle.take, { n: 4, label: 'Update to base 4' })
-  assert.equal(baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'idle' } }, false)!.take, null, 'only the owner takes one')
+  assert.equal(baseSection(rel({ kind: 'taker', integrated: 3, offered, update: { state: 'idle' } }), false)!.take, null, 'only the owner takes one')
 
-  const current = baseSection({ kind: 'taker', integrated: 4, offered, update: { state: 'idle' } }, true)!
+  const current = baseSection(rel({ kind: 'taker', integrated: 4, offered, update: { state: 'idle' } }), true)!
   assert.equal(current.footer, BASE_FOOTER)
   assert.equal(current.take, null)
 
-  const updating = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'updating', n: 4 } }, true)!
+  const updating = baseSection(rel({ kind: 'taker', integrated: 3, offered, update: { state: 'updating', n: 4 } }), true)!
   assert.equal(updating.updatingText, 'Updating to base 4…')
   assert.equal(updating.take, null)
 
-  const conflict = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts', 'b.ts'], resolver: 'base-4-2' } }, true)!
+  const conflict = baseSection(rel({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts', 'b.ts'], resolver: 'base-4-2' } }), true)!
   assert.deepEqual(conflict.note, { text: 'Base 4 touches files you changed (a.ts, b.ts). An agent, base-4-2, is working it out; nothing has changed yet.', color: 'orange' }, 'the name the server gave it')
-  const unresolved = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts'], resolver: null } }, true)!
+  const unresolved = baseSection(rel({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts'], resolver: null } }), true)!
   assert.deepEqual(unresolved.note, { text: 'Base 4 touches files you changed (a.ts). No agent could start to work it out, so you were sent what to do; nothing has changed yet.', color: 'orange' })
   assert.equal(conflict.take, null)
 
-  const failed = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'failed', n: 4, why: 'the build broke' } }, true)!
+  const failed = baseSection(rel({ kind: 'taker', integrated: 3, offered, update: { state: 'failed', n: 4, why: 'the build broke' } }), true)!
   assert.deepEqual(failed.note, { text: "Base 4 didn't go in: the build broke. Nothing live changed unless it says so.", color: 'red' })
   assert.deepEqual(failed.take, { n: 4, label: 'Update to base 4' }, 'a failed base can be tried again')
 })

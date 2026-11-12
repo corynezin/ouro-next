@@ -56,7 +56,9 @@ async function takerBase(): Promise<Extract<BaseStatus, { kind: 'taker' }> | nul
 
 test('the computer is offered the base from the repository, takes it, and has it live and in its person\'s branch', async () => {
   const offered = await waitFor('base 1 to be offered', async () => (await takerBase())?.offered?.n === 1 && await takerBase())
-  assert.deepEqual(offered.offered, { n: 1, notes: 'the starter protocol gains a line' })
+  // The base is this source, so its version is this source's: read, not written here, since each release steps it.
+  const version = (JSON.parse(readFileSync(join(repoRoot, 'server/package.json'), 'utf8')) as { version: string }).version
+  assert.deepEqual(offered.offered, { n: 1, notes: 'the starter protocol gains a line', version })
   assert.equal(offered.integrated, 0)
   await phone.command('take_base_update', { n: 1 })
   await waitFor('base 1 to be integrated', async () => {

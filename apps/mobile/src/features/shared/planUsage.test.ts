@@ -30,9 +30,9 @@ test("the list's line gives each read plan's longest window", () => {
   assert.equal(planUsageLine({ claude: null, chatgpt: null }, false, 0, NOW), 'OpenRouter: $0.00', 'what OpenRouter says, even nothing spent yet')
 })
 
-test("an agent's usage is its share of the plan, or dollars off it or before the plan is read", () => {
+test("an agent's usage is its share of the plan's longest window, or dollars off it or before the plan is read", () => {
   const share = [{ windowMinutes: 10_080, usedFraction: 0.01, resetsAt: null }, { windowMinutes: 300, usedFraction: 0.0004, resetsAt: null }]
-  assert.equal(agentUsageText({ planShare: share, costUsd: 3 }), '~<0.1% of 5h · ~1% of 7d')
+  assert.equal(agentUsageText({ planShare: share, costUsd: 3 }), '1%', 'the longest window only')
   assert.equal(agentUsageText({ planShare: [], costUsd: 3 }), '$3.00')
   assert.equal(agentUsageText({ planShare: null, costUsd: 0 }), null)
 })

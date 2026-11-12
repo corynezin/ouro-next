@@ -39,30 +39,27 @@ export function cacheStateOf(record: PromptCacheRecord): CacheState {
 export const COMPACTION_MIN_TOKENS = 60_000
 /** With less cache left than this, the compaction's own read would miss it. */
 const MIN_CACHE_LEFT_MS = 60_000
-/** How close to expiry an agent kept up while idle is compacted. */
+/** How close to expiry an idle agent is compacted. */
 const EXPIRY_LEAD_MS = 5 * 60_000
 
 /**
- * - `before_idle_exit`: the agent is about to exit idle; a later message would resume it cold.
- * - `before_cache_expiry`: the agent stays up while idle (an active goal between cycles) and its cache expires soon, with
- *   no turn due before then to keep it warm.
+ * Whether the context will be worth compacting before its cache expires: large, not yet compacted, on a 1 hour cache with
+ * enough of it left. A 5 minute cache is cold long before an idle agent would compact it.
  */
-export type CompactionOccasion = { kind: 'before_idle_exit' } | { kind: 'before_cache_expiry'; nextTurnAt: number | null }
-
-/**
- * Whether compacting now saves money. Only a 1 hour cache: a 5 minute one is cold long before an idle exit, and close to
- * expiry after every turn.
- */
-export function compactionDue(cache: PromptCacheRecord | null, now: number, occasion: CompactionOccasion): boolean {
+export function compactionPending(cache: PromptCacheRecord | null, now: number): boolean {
   if (cache === null || cache.compacted || cache.tokens < COMPACTION_MIN_TOKENS) return false
   if (cache.ttlMs < PROMPT_CACHE_TTL_MS['1h']) return false
+  return cache.at + cache.ttlMs - now >= MIN_CACHE_LEFT_MS
+}
+
+/**
+ * Whether to compact now: shortly before the cache expires, with no turn due before then to keep it warm. Not earlier: a
+ * message before then finds the whole context still cached, and compacting would only have lost detail.
+ */
+export function compactionDue(cache: PromptCacheRecord | null, now: number, nextTurnAt: number | null): boolean {
+  if (cache === null || !compactionPending(cache, now)) return false
   const expiresAt = cache.at + cache.ttlMs
-  const left = expiresAt - now
-  if (left < MIN_CACHE_LEFT_MS) return false
-  switch (occasion.kind) {
-    case 'before_idle_exit': return true
-    case 'before_cache_expiry': return left <= EXPIRY_LEAD_MS && !(occasion.nextTurnAt !== null && occasion.nextTurnAt < expiresAt)
-  }
+  return expiresAt - now <= EXPIRY_LEAD_MS && !(nextTurnAt !== null && nextTurnAt < expiresAt)
 }
 
 /** Sent with the compact command: the summary must say where the full history still is. */

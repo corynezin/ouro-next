@@ -11,6 +11,7 @@ const good = buildUpdateManifest({
   runtimeVersion: '0.1.0',
   updateNumber: 3,
   commit: null,
+  machineId: 'machine-1',
   launchAsset: { hash: 'A'.repeat(43), url: 'http://example.invalid/updates/assets/3/bundle.js' },
   assets: [{ contentType: 'image/png', fileExtension: '.png', hash: 'B'.repeat(43), url: 'http://example.invalid/updates/assets/3/icon.png' }],
 })
@@ -30,6 +31,8 @@ const cases: [string, unknown][] = [
   ['bad extension', { ...good, assets: [{ ...good.assets[0]!, fileExtension: 'png' }] }],
   ['metadata not strings', { ...good, metadata: { a: 1 } }],
   ['no update number', { ...good, extra: { ouro: { commit: null } } }],
+  ['machine id not a string', { ...good, extra: { ouro: { ...good.extra.ouro, machineId: 7 } } }],
+  ['no machine id (made before it was added)', { ...good, extra: { ouro: { updateNumber: 3, commit: null } } }],
   ['not an object', 'manifest'],
 ]
 

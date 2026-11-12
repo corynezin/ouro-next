@@ -17,7 +17,6 @@ export type IdleFold = z.infer<typeof IdleFold>
 const preferenceSchemas = {
   requireFaceId: z.boolean(),
   idleFold: IdleFold,
-  modelAvatars: z.boolean(),
   /** Servers already asked to connect Claude during onboarding: asked once per server. */
   claudeAskedServerIds: z.array(z.string()),
   /** The one server updates come from, chosen apart from the active one. Null: the built-in version only. */
@@ -29,7 +28,6 @@ export type Preferences = { [K in keyof typeof preferenceSchemas]: z.infer<(type
 export const DEFAULT_PREFERENCES: Preferences = {
   requireFaceId: false,
   idleFold: { kind: 'server_default' },
-  modelAvatars: true,
   claudeAskedServerIds: [],
   updateHomeServerId: null,
 }

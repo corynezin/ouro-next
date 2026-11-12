@@ -1,8 +1,8 @@
 // Bases: numbered releases of Ouro itself, offered to each machine and merged into the person's own copy of the source.
 import { z } from 'zod'
 
-/** The newest base this machine hasn't merged yet. */
-export const BaseOffer = z.object({ n: z.number().int().positive(), notes: z.string() })
+/** The newest base this machine hasn't merged yet. `version`: its Ouro version (`0.6.0`); null or absent for a base from before versions, or from an older server. */
+export const BaseOffer = z.object({ n: z.number().int().positive(), notes: z.string(), version: z.string().nullable().optional() })
 export type BaseOffer = z.infer<typeof BaseOffer>
 
 /**

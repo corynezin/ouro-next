@@ -61,7 +61,7 @@ export class BaseUpdates {
 
   status(): BaseStatus {
     if (this.integrated === null) return { kind: 'not_taking' }
-    const offered = this.offered === null ? null : { n: this.offered.n, notes: this.offered.notes }
+    const offered = this.offered === null ? null : { n: this.offered.n, notes: this.offered.notes, version: this.offered.version }
     return { kind: 'taker', integrated: this.integrated, offered, update: baseUpdateOf(this.config.readRecord()) }
   }
 
@@ -98,7 +98,7 @@ export class BaseUpdates {
       return
     }
     const offered = latest !== null && this.integrated !== null && latest.n > this.integrated && !branchHas(this.config.sourceRoot!, latest.commit) ? latest : null
-    if (offered?.n === this.offered?.n && offered?.notes === this.offered?.notes && offered?.commit === this.offered?.commit) return
+    if (offered?.n === this.offered?.n && offered?.notes === this.offered?.notes && offered?.version === this.offered?.version && offered?.commit === this.offered?.commit) return
     this.offered = offered
     this.config.commit(() => this.config.offerChanged())
   }

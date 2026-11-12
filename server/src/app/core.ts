@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, linkSync } from 'no
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative } from 'node:path'
 import {
-  AGENT_NAME_PATTERN, Change, turnFailureText, chatHandle, commands, SEARCH_MAX_LIMIT, WATCH_LEASE_MS, DEFAULT_GOAL_INTERVAL_SECONDS, MAX_ASK_SNOOZE_MS, OPT_IN_ENTITIES, OWNER_ADDRESS, parseAddress, PEER_ASK_SNOOZE_PROTOCOL, PEER_OWNER_ASKS_PROTOCOL, PEER_OWNER_MESSAGES_PROTOCOL, personAddress, RESERVED_AGENT_NAMES,
+  AGENT_NAME_PATTERN, Change, turnFailureText, chatHandle, commands, SEARCH_MAX_LIMIT, WATCH_LEASE_MS, DEFAULT_GOAL_INTERVAL_SECONDS, MAX_ASK_SNOOZE_MS, OPT_IN_ENTITIES, OWNER_ADDRESS, parseAddress, PEER_ASK_SNOOZE_PROTOCOL, PEER_OWNER_ASKS_PROTOCOL, PEER_OWNER_MESSAGES_PROTOCOL, personAddress, RESERVED_AGENT_NAMES, updateMarkOf,
 } from '@ouro/contract'
 import type {
   AgentEntity, AskEntity, AskSnooze, AttachmentRef, ChatEntity, CommandName, GoalEntity, CommandOutput, DeliveryWake, EntityKind, LogPage, LogRecord, MessageEntity, MessagePurpose, PairResponse, PinEntity, PinTarget, PlanUsage, PlanWindow,
@@ -96,6 +96,8 @@ export interface CoreConfig {
   clock: Clock
   policy: AgentPolicy
   releaseId: string
+  /** The Ouro version this server runs (`0.5.0`), from its package.json; null before versions. */
+  version: string | null
   machineName: string
   /** Where the person's other computers reach this one's API; null: they can't. */
   peerAddress: string | null
@@ -1273,6 +1275,8 @@ export class OuroCore {
         if (state.state !== 'in_turn' && state.state !== 'interrupting') return
         if (record.failure === 'logged_out') this.recordSignedOut(this.accountOf(row))
         const retryAt = this.turnRetryAt(row, record)
+        // How much of the context the failed turn changed is unknown.
+        this.store.savePromptCache(agentId, null)
         this.applyAgentEvent(agentId, { type: 'turn_failed', generation, turnId: state.turnId, failure: record.failure, detail: record.detail, retryAt })
         return
       }
@@ -1321,9 +1325,10 @@ export class OuroCore {
     const account = this.accountOf(row)
     if (account !== null && record.costUsd > 0) this.store.addPlanTurnCost(row.id, account, record.at, record.costUsd)
     this.refreshUsageAfterTurn(row)
-    // Records from a runner of an earlier release carry no context.
+    // Records from a runner of an earlier release, and some providers, carry no context: it is then unknown, and a record
+    // from before this turn (say, compacted) no longer describes it.
     const context = record.context ?? null
-    if (context !== null) this.store.savePromptCache(row.id, promptCacheAfterTurn(context, record.at))
+    this.store.savePromptCache(row.id, context === null ? null : promptCacheAfterTurn(context, record.at))
 
     if (state.state === 'interrupting') {
       this.applyAgentEvent(row.id, { type: 'turn_finished', generation: record.generation, turnId: state.turnId, continuation: { kind: 'no_unacknowledged_deliveries' } })
@@ -1364,10 +1369,10 @@ export class OuroCore {
   }
 
   /** Asked by `ouro publish` on this machine, after it has exported the app. */
-  registerAppUpdate(input: RegisterUpdateInput): { updateNumber: number; runtimeVersion: string } {
+  registerAppUpdate(input: RegisterUpdateInput): { updateNumber: number; runtimeVersion: string; mark: string } {
     const row = this.appUpdates.register(input)
     this.notifier.updatePublished(row.updateNumber)
-    return { updateNumber: row.updateNumber, runtimeVersion: row.runtimeVersion }
+    return { updateNumber: row.updateNumber, runtimeVersion: row.runtimeVersion, mark: updateMarkOf(row.updateNumber, this.appUpdates.machineId()) }
   }
 
   /** Publishes the app in the person's source as `ouro publish` does, registering it here directly. */
@@ -1380,7 +1385,7 @@ export class OuroCore {
     return {
       id: 'server',
       machineName: this.config.machineName,
-      release: { id: this.config.releaseId, base: this.baseUpdates.status() },
+      release: { id: this.config.releaseId, base: this.baseUpdates.status(), version: this.config.version },
       sourceBackup: this.sourceBackup.status(),
       defaultModel: this.config.defaultModel,
       models: this.modelOptions(),

@@ -108,7 +108,7 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
   const options = foldOptions(server?.limits.idleFoldMinutes)
   const homeOptions = updateHomeOptions(savedServers)
   const creditsText = openRouterCreditsText(session.store.integration('openrouter')?.state ?? null)
-  const base = server ? baseSection(server.release.base, viewer?.isOwner ?? false) : null
+  const base = server ? baseSection(server.release, viewer?.isOwner ?? false) : null
   const backup = server ? backupSection(server.sourceBackup, viewer?.isOwner ?? false, now) : null
   const planRows = server ? claudePlanRows(server.planUsage.claude, isClaudeOnPlan(session.store.integration('claude')?.state ?? null), now) : null
 
@@ -222,9 +222,6 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
         </Section>
         {viewer?.isOwner ? <AutoArchiveSection /> : null}
         {viewer?.isOwner ? <ReplyRemindersSection /> : null}
-        <Section title="Avatars" footer={<Text>{SETTINGS_COPY.avatarsFooter}</Text>}>
-          <Toggle label="Model avatars" isOn={preferences.modelAvatars} onIsOnChange={(on) => core.preferences.set('modelAvatars', on)} />
-        </Section>
         <Section title="App" footer={<Text>{`${SETTINGS_COPY.appFooter} ${SETTINGS_COPY.updatesFromFooter}`}</Text>}>
           <KV k="Running" v={runningCodeText(runningCode())} />
           <KV k="Version" v={binaryVersionText(Application.nativeApplicationVersion, Application.nativeBuildVersion)} />

@@ -50,7 +50,7 @@ stop_runners() { local pid; for pid in $(pgrep -f "ouro-runner.ts $1/data" || tr
 trap 'stop_ourod; stop_ourod2; stop_runners "$run"; stop_runners "$run2"' EXIT INT TERM HUP
 
 rm -rf "$run"; mkdir -p "$run/data" "$run/work" "$run/home" "$run/accounts"
-# A fresh install, so defaults (such as Model avatars on) are what a new phone sees.
+# A fresh install, so defaults are what a new phone sees.
 xcrun simctl uninstall "$udid" $app_id 2>/dev/null || true
 "$repo/scripts/ios-sim.sh" ${1:-}
 # Keychain items outlive an uninstall, so a fresh install would otherwise still know the last run's server.

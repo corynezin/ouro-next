@@ -18,6 +18,8 @@ export class NotPublished extends Error {}
 export interface PublishedApp {
   updateNumber: number
   runtimeVersion: string
+  /** The mark that shows, in the app, whether this update is in it; an older server doesn't return one. */
+  mark?: string
 }
 
 /** The runtime an export runs on, as expo-updates computes it from app.json. Only the policies this app uses. */
