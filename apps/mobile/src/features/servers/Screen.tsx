@@ -3,7 +3,8 @@
 // to that this phone isn't paired with. Removing a server forgets it on this phone, and can unlink it too. With a hosted
 // account, also the account's servers not paired here yet. For the open server's owner, New server makes one on a cloud
 // account the open server is connected to (AWS, Sprites), or on the hosted account, and Destroy deletes the machine it
-// made for a server. Renders servers/model.ts.
+// made for a server, including one paired with another phone. Renders servers/model.ts; Remove and Destroy follow
+// servers/actions.ts.
 import { useCallback, useLayoutEffect, useState } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
@@ -21,6 +22,8 @@ import type { ScreenProps } from '../../navigation/routes.ts'
 import { HostedServerSetupView, MachineSetupView } from '../onboarding/SetupScreen.tsx'
 import { checkingNote, createFailureText, hostedRows, machineAsHosted, machineOfServer, machineRows, NEW_SERVER_COPY, newServerChoices, NEW_SERVER_LABEL_MAX, newServerLabelOf, renamedLabel, SERVERS_COPY, serverRows, unpairedComputerRows } from './model.ts'
 import type { HostedRow, MachineRow, NewServerChoice, ServerRow } from './model.ts'
+import { destroyServerMachine, removeAndUnlink, removeChoiceOf } from './actions.ts'
+import type { ServerActionPorts } from './actions.ts'
 
 export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
   const core = useCore()
@@ -36,13 +39,14 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
   const hostedServers = useHostedServers()
   const account = core.hostedAccount
   const [hosted, setHosted] = useState<HostedServersView>({ available: false, servers: [] })
-  /** Where the open server can make servers, and those it made that aren't paired here; null when it can't say. */
+  /** Where the open server can make servers, and every server it made and hasn't destroyed; null when it can't say. */
   const [machines, setMachines] = useState<MachineList | null>(null)
   /** The New server menu, while it's open. */
   const [choosing, setChoosing] = useState(false)
   /** The New server form, while it's open: on the hosted account, or on one of the open server's providers. */
-  const [naming, setNaming] = useState<{ text: string; creating: boolean; error: string | null; provider: { id: string; name: string } | null } | null>(null)
-  const [settingUp, setSettingUp] = useState<{ id: string; label: string; machine: boolean } | null>(null)
+  const [naming, setNaming] = useState<{ text: string; creating: boolean; error: string | null; provider: { id: string; name: string; detail: string } | null } | null>(null)
+  /** A server being set up here: one on the hosted account, or one the open server makes. */
+  const [settingUp, setSettingUp] = useState<{ kind: 'hosted' | 'machine'; id: string; label: string } | null>(null)
 
   const reload = useCallback(async () => {
     try {
@@ -87,19 +91,30 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
     }
   }
 
-  const forget = (row: ServerRow) => { core.removeServer(row.id).then(reload, () => setFailure(SERVERS_COPY.storageError)) }
   const unlinkComputer = async (computerId: string) => {
     const removed = await session.command('remove_computer', { computerId })
     if (!removed.ok) setFailure(removed.failure.kind === 'refused' ? failureText(removed.failure) : SERVERS_COPY.unlinkFailed)
     return removed.ok
   }
+  const ports: ServerActionPorts = {
+    deleteMachine: async (machineId) => {
+      const result = await session.api.deleteMachine(machineId)
+      reloadMachines()
+      return result.ok ? null : failureText(result.failure)
+    },
+    unlinkComputer,
+    forget: async (serverId) => { await core.removeServer(serverId).then(reload, () => setFailure(SERVERS_COPY.storageError)) },
+  }
+  const forget = (row: ServerRow) => { void ports.forget(row.id) }
   const remove = (row: ServerRow) => {
-    if (row.link?.kind !== 'linked' || !isOwner) return confirm(SERVERS_COPY.removeTitle(row.label), SERVERS_COPY.removeMessage, 'Remove', () => forget(row))
-    const computerId = row.link.computerId
-    actionSheet(SERVERS_COPY.removeTitle(row.label), [
-      { title: SERVERS_COPY.removeFromPhone, onPress: () => forget(row) },
-      { title: SERVERS_COPY.removeAndUnlink, destructive: true, onPress: () => { void unlinkComputer(computerId).then((ok) => { if (ok) forget(row) }) } },
-    ])
+    const choice = removeChoiceOf(row, isOwner)
+    switch (choice.kind) {
+      case 'forget_only': return confirm(SERVERS_COPY.removeTitle(row.label), SERVERS_COPY.removeMessage, 'Remove', () => forget(row))
+      case 'forget_or_unlink': return actionSheet(SERVERS_COPY.removeTitle(row.label), [
+        { title: SERVERS_COPY.removeFromPhone, onPress: () => forget(row) },
+        { title: SERVERS_COPY.removeAndUnlink, destructive: true, onPress: () => { void removeAndUnlink(ports, row, choice.computerId) } },
+      ])
+    }
   }
   const unlink = (computerId: string, name: string) => confirm(SERVERS_COPY.unlinkTitle(name), SERVERS_COPY.unlinkMessage(computers.get(computerId)?.agentsRunning ?? null), SERVERS_COPY.unlink, () => {
     void unlinkComputer(computerId)
@@ -143,40 +158,35 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
       const made = await session.api.createMachine({ provider: naming.provider.id, label: typed.label })
       if (!made.ok) return setNaming({ ...naming, creating: false, error: `${NEW_SERVER_COPY.failed} ${failureText(made.failure)}` })
       setNaming(null)
-      return setSettingUp({ id: made.value.id, label: made.value.label, machine: true })
+      return setSettingUp({ kind: 'machine', id: made.value.id, label: made.value.label })
     }
     if (!account) return
     const created = await hostedServers.api.createServer(account.token, { label: typed.label })
     if (!created.ok) return setNaming({ ...naming, creating: false, error: createFailureText(created.failure) })
     setNaming(null)
-    setSettingUp({ id: created.value.id, label: created.value.label, machine: false })
+    setSettingUp({ kind: 'hosted', id: created.value.id, label: created.value.label })
   }
 
   const choose = (choice: NewServerChoice) => {
     setChoosing(false)
     switch (choice.kind) {
       case 'hosted': return setNaming({ text: '', creating: false, error: null, provider: null })
-      case 'machine': return setNaming({ text: '', creating: false, error: null, provider: { id: choice.provider, name: choice.title } })
+      case 'machine': return setNaming({ text: '', creating: false, error: null, provider: { id: choice.provider, name: choice.title, detail: choice.detail } })
       case 'set_up': if (choice.route) navigation.navigate(choice.route)
     }
   }
 
-  const removeMachine = (row: MachineRow) => confirm(NEW_SERVER_COPY.removeTitle(row.label), NEW_SERVER_COPY.removeMessage, 'Remove', () => {
-    void session.api.deleteMachine(row.id).then((result) => {
-      setFailure(result.ok ? null : NEW_SERVER_COPY.removeFailed(failureText(result.failure)))
-      reloadMachines()
+  /** A machine not saved here: being made or failed (Remove), or paired with another phone (Destroy). */
+  const removeMachine = (row: MachineRow) => {
+    const [title, message, button, failed] = row.kind === 'paired_elsewhere'
+      ? [NEW_SERVER_COPY.destroyTitle(row.label), NEW_SERVER_COPY.destroyElsewhereMessage, NEW_SERVER_COPY.destroyConfirm, NEW_SERVER_COPY.destroyFailed]
+      : [NEW_SERVER_COPY.removeTitle(row.label), NEW_SERVER_COPY.removeMessage, 'Remove', NEW_SERVER_COPY.removeFailed]
+    confirm(title, message, button, () => {
+      void ports.deleteMachine(row.id).then((why) => setFailure(why === null ? null : failed(why)))
     })
-  })
-  /** Deletes the machine the open server made for this server, then unlinks it (best effort) and forgets it here. */
+  }
   const destroyMachine = (row: ServerRow, machineId: string) => confirm(NEW_SERVER_COPY.destroyTitle(row.label), NEW_SERVER_COPY.destroyMessage, NEW_SERVER_COPY.destroyConfirm, () => {
-    void (async () => {
-      const result = await session.api.deleteMachine(machineId)
-      reloadMachines()
-      if (!result.ok) return setFailure(NEW_SERVER_COPY.destroyFailed(failureText(result.failure)))
-      setFailure(null)
-      if (row.link?.kind === 'linked') await unlinkComputer(row.link.computerId).catch(() => false)
-      forget(row)
-    })()
+    void destroyServerMachine(ports, row, machineId).then((outcome) => setFailure(outcome.kind === 'failed' ? NEW_SERVER_COPY.destroyFailed(outcome.why) : null))
   })
 
   const leaveSetup = () => {
@@ -186,11 +196,11 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
     reloadMachines()
   }
 
-  if (settingUp?.machine) {
+  if (settingUp?.kind === 'machine') {
     const { id } = settingUp
     return <MachineSetupView label={settingUp.label} read={async () => machineAsHosted(await session.api.machine(id))} onLeave={leaveSetup} />
   }
-  if (settingUp && account) return <HostedServerSetupView account={account} server={settingUp} onLeave={leaveSetup} />
+  if (settingUp?.kind === 'hosted' && account) return <HostedServerSetupView account={account} server={settingUp} onLeave={leaveSetup} />
 
   const rows = serverRows(servers, activeId, unread, computers.values())
   const unpairedComputers = unpairedComputerRows(computers.values(), servers)
@@ -264,7 +274,7 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
       {computers.size > 0 && <Text style={s.footer}>{SERVERS_COPY.footer}</Text>}
       {someOffline && <Text style={s.footer}>{SERVERS_COPY.offlineNote}</Text>}
       {unpaired.map((row) => (
-        <Pressable key={row.id} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.background }]} onPress={() => setSettingUp({ ...row, machine: false })}>
+        <Pressable key={row.id} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.background }]} onPress={() => setSettingUp({ kind: 'hosted', id: row.id, label: row.label })}>
           <View style={{ flex: 1 }}>
             <Text style={s.name} numberOfLines={1}>{row.label}</Text>
             <Text style={s.url} numberOfLines={1}>{row.detail}</Text>
@@ -274,16 +284,19 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
       ))}
       {madeHere.map((row) => (
         <View key={row.id}>
-          <Pressable style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.background }]} onPress={() => setSettingUp({ id: row.id, label: row.label, machine: true })}>
+          <Pressable style={({ pressed }) => [s.row, { backgroundColor: pressed && row.kind === 'setting_up' ? C.pressed : C.background }]}
+            disabled={row.kind !== 'setting_up'} onPress={() => setSettingUp({ kind: 'machine', id: row.id, label: row.label })}>
             <View style={{ flex: 1 }}>
               <Text style={s.name} numberOfLines={1}>{row.label}</Text>
               <Text style={s.url} numberOfLines={2}>{row.detail}</Text>
             </View>
-            <Symbol name="chevron.right" size={12} color="secondary" />
+            {row.kind === 'setting_up' && <Symbol name="chevron.right" size={12} color="secondary" />}
           </Pressable>
-          {row.canRemove && (
+          {(row.kind === 'paired_elsewhere' || row.canRemove) && (
             <View style={s.actions}>
-              <Pressable onPress={() => removeMachine(row)} style={s.actionButton}><Text style={[s.actionText, { color: C.red }]}>Remove</Text></Pressable>
+              <Pressable onPress={() => removeMachine(row)} style={s.actionButton}>
+                <Text style={[s.actionText, { color: C.red }]}>{row.kind === 'paired_elsewhere' ? NEW_SERVER_COPY.destroy : 'Remove'}</Text>
+              </Pressable>
             </View>
           )}
         </View>
@@ -321,7 +334,7 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
           <Pressable style={{ alignItems: 'center', padding: 8 }} onPress={() => setNaming(null)}>
             <Text style={{ color: accent, fontSize: 15 }}>Cancel</Text>
           </Pressable>
-          <Text style={s.hint}>{naming.provider ? NEW_SERVER_COPY.hintFor(naming.provider.id) : NEW_SERVER_COPY.hint}</Text>
+          <Text style={s.hint}>{naming.provider ? NEW_SERVER_COPY.hintFor(naming.provider.detail) : NEW_SERVER_COPY.hint}</Text>
         </View>
       ) : !choosing && choices.length > 0 ? (
         <Pressable style={[s.addButton, { backgroundColor: accent, marginBottom: 12 }]}
