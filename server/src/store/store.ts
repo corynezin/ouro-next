@@ -255,9 +255,16 @@ export class Store {
 
   // People and devices
 
-  insertPerson(person: PersonRow): void {
-    this.run('INSERT INTO people (id, name, address, is_owner, joined_at) VALUES (?, ?, ?, ?, ?)', person.id, person.name, person.address, person.isOwner ? 1 : 0, person.joinedAt)
+  /** `originMachineId`: for the owner of another server in a shared network, that server, which is who they are. */
+  insertPerson(person: PersonRow, originMachineId: string | null = null): void {
+    this.run('INSERT INTO people (id, name, address, is_owner, joined_at, origin_machine_id) VALUES (?, ?, ?, ?, ?, ?)', person.id, person.name, person.address, person.isOwner ? 1 : 0, person.joinedAt, originMachineId)
     this.markChanged('person', person.id)
+  }
+
+  /** The owner of that other server, as kept here, removed or not. */
+  personFromMachine(machineId: string): PersonRow | null {
+    const row = this.get<Parameters<Store['toPersonRow']>[0]>('SELECT * FROM people WHERE origin_machine_id = ?', machineId)
+    return row ? this.toPersonRow(row) : null
   }
 
   private toPersonRow(row: { id: string; name: string; address: string; is_owner: number; joined_at: number }): PersonRow {
@@ -1191,9 +1198,25 @@ export class Store {
     this.markChanged('server', 'server')
   }
 
+  /** With the computers it removed from it: they mean nothing once its key is gone. */
   deleteNetwork(id: string): void {
     this.run('DELETE FROM networks WHERE id = ?', id)
+    this.run('DELETE FROM network_removed_peers WHERE network_id = ?', id)
     this.markChanged('server', 'server')
+  }
+
+  /** A computer the person removed from a network stays out of it here: see schema 27. */
+  noteRemovedFromNetwork(networkId: string, machineId: string, at: number): void {
+    this.run('INSERT INTO network_removed_peers (network_id, machine_id, removed_at) VALUES (?, ?, ?) ON CONFLICT (network_id, machine_id) DO NOTHING', networkId, machineId, at)
+  }
+
+  /** Invited back on purpose: no longer kept out. */
+  forgetRemovedFromNetwork(networkId: string, machineId: string): void {
+    this.run('DELETE FROM network_removed_peers WHERE network_id = ? AND machine_id = ?', networkId, machineId)
+  }
+
+  removedFromNetwork(networkId: string, machineId: string): boolean {
+    return this.get<{ one: number }>('SELECT 1 AS one FROM network_removed_peers WHERE network_id = ? AND machine_id = ?', networkId, machineId) !== undefined
   }
 
   setNetworkInvite(id: string, inviteHash: string | null, expiresAt: number | null): void {

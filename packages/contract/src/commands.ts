@@ -1,7 +1,7 @@
 // The write side of the API. Each command is `POST /v2/commands/<name>` with a CommandRequest body and answers with its
 // output schema or an ErrorResponse. Retrying with the same idempotency key returns the first result and repeats nothing.
 import { z } from 'zod'
-import { Address } from './address.ts'
+import { Address, AGENT_NAME_PATTERN } from './address.ts'
 import { AgentEntity, AskLevel, AskSnooze, BranchMerge, ModelId, PromptCacheLifetime } from './agent.ts'
 import { BaseOffer } from './bases.ts'
 import { ComputerEntity, ComputerInvite, ComputerTrust, NETWORK_NAME_PATTERN, NetworkEntity, NetworkInvite, NetworkKind, NetworkRole, RemoteAgentAction, RemoteAgentEntity, RemoteAskEntity } from './computers.ts'
@@ -181,12 +181,13 @@ export const commands = {
   /** The owner only. A one-use invite into a network this server holds a key for, for 30 minutes; it replaces any open
    * invite into that network. */
   create_network_invite: defineCommand(['person'], z.object({ networkId: z.string() }), NetworkInvite),
-  /** The owner only: trades an invite's code at `address` for its network's key, held here as `role`. */
-  join_network: defineCommand(['person'], z.object({ address: z.string().url(), code: z.string().min(1), role: NetworkRole }), z.object({ network: NetworkEntity, leftOut: z.array(z.string()) })),
+  /** The owner only: trades an invite's code at `address` for its network's key, held here as `role`. `kind`: the kind of
+   * network the person expects; another kind is refused, by the inviting server before the invite is used and here. */
+  join_network: defineCommand(['person'], z.object({ address: z.string().url(), code: z.string().min(1), role: NetworkRole, kind: NetworkKind }), z.object({ network: NetworkEntity, leftOut: z.array(z.string()) })),
   /** The owner only: lets go of an extra key. A home key is replaced, not removed. */
   remove_network: defineCommand(['person'], z.object({ networkId: z.string() }), Empty),
   /** The owner only: the name this server gives its owner to servers in shared networks, where they are `human@<name>`. */
-  set_owner_name: defineCommand(['person'], z.object({ name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/) }), z.object({ server: ServerEntity })),
+  set_owner_name: defineCommand(['person'], z.object({ name: z.string().regex(AGENT_NAME_PATTERN) }), z.object({ server: ServerEntity })),
   /** Owner and agents, on a private server: a copy of an agent in a shared network this server holds a key for. The
    * original stays and doesn't follow. The copy arrives paused and labelled, under `name` or its own name. */
   pull_agent: defineCommand(['person', 'agent'], z.object({ remoteAgentId: z.string(), name: z.string().nullable() }), z.object({ agent: AgentEntity })),

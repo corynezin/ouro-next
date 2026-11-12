@@ -1,9 +1,10 @@
 // Machine to machine: `/peer/v1`. Every route but /join and /network-join is signed by a known peer's key, and every one but /hello and
-// /forget is refused from a peer this server can't work with.
+// /forget is refused from a peer this server can't work with, or that may not do what the route does (domain/networks.ts).
 import { PEER_API_PREFIX, PeerJoinRequest, PeerNetworkJoinRequest } from '@ouro/contract'
 import type { PeerError } from '@ouro/contract'
 import { PeerRequestRefused } from '../app/peers.ts'
 import type { Peers, PeerRow } from '../app/peers.ts'
+import type { PeerAction } from '../domain/networks.ts'
 
 export interface PeerHttpRequest {
   method: string
@@ -45,24 +46,27 @@ const ALWAYS_ROUTES: Record<string, PeerRoute> = {
   },
 }
 
-/** Every other signed route, all POST. */
-const WORKING_ROUTES: Record<string, PeerRoute> = {
-  '/control': (peers, peer, body) => peers.receiveControl(peer, body()),
-  '/create-agent': (peers, peer, body) => peers.receiveCreateAgent(peer, body()),
-  '/move-check': (peers, peer, body) => peers.receiveMoveCheck(peer, body()),
-  '/move': (peers, peer, body) => peers.receiveMove(peer, body()),
-  '/agents': (peers, peer) => peers.receiveAgentsRequest(peer),
-  '/log': (peers, peer, body) => peers.receiveLogRequest(peer, body()),
-  '/memory': (peers, peer, body) => peers.receiveMemoryRequest(peer, body()),
-  '/group-updates': (peers, peer, body) => peers.receiveGroupUpdate(peer, body()),
-  '/owner-messages': (peers, peer, body) => peers.receiveOwnerMessage(peer, body()),
-  '/owner-asks': (peers, peer, body) => peers.receiveOwnerAsk(peer, body()),
-  '/owner-ask-snoozes': (peers, peer, body) => peers.receiveAskSnooze(peer, body()),
-  '/group-posts': (peers, peer, body) => peers.receiveGroupPost(peer, body()),
-  '/pull': (peers, peer, body) => peers.receivePull(peer, body()),
-  '/memory-push': (peers, peer, body) => peers.receiveMemoryPush(peer, body()),
-  '/messages': (peers, peer, body) => peers.receiveMessage(peer, body()),
+/** Every other signed route, all POST, each with what it does (see peerMay): a route is taken only when the peer may. */
+const WORKING_ROUTES: Record<string, { action: PeerAction; handle: PeerRoute }> = {
+  '/control': { action: 'control', handle: (peers, peer, body) => peers.receiveControl(peer, body()) },
+  '/create-agent': { action: 'create_agent', handle: (peers, peer, body) => peers.receiveCreateAgent(peer, body()) },
+  '/move-check': { action: 'move', handle: (peers, peer, body) => peers.receiveMoveCheck(peer, body()) },
+  '/move': { action: 'move', handle: (peers, peer, body) => peers.receiveMove(peer, body()) },
+  '/agents': { action: 'see_agents', handle: (peers, peer) => peers.receiveAgentsRequest(peer) },
+  '/log': { action: 'read_log', handle: (peers, peer, body) => peers.receiveLogRequest(peer, body()) },
+  '/memory': { action: 'pull_memory', handle: (peers, peer, body) => peers.receiveMemoryRequest(peer, body()) },
+  '/group-updates': { action: 'group', handle: (peers, peer, body) => peers.receiveGroupUpdate(peer, body()) },
+  '/owner-messages': { action: 'message', handle: (peers, peer, body) => peers.receiveOwnerMessage(peer, body()) },
+  '/owner-asks': { action: 'message', handle: (peers, peer, body) => peers.receiveOwnerAsk(peer, body()) },
+  '/owner-ask-snoozes': { action: 'snooze_ask', handle: (peers, peer, body) => peers.receiveAskSnooze(peer, body()) },
+  '/group-posts': { action: 'group', handle: (peers, peer, body) => peers.receiveGroupPost(peer, body()) },
+  '/pull': { action: 'pull', handle: (peers, peer, body) => peers.receivePull(peer, body()) },
+  '/memory-push': { action: 'push_memory', handle: (peers, peer, body) => peers.receiveMemoryPush(peer, body()) },
+  '/messages': { action: 'message', handle: (peers, peer, body) => peers.receiveMessage(peer, body()) },
 }
+
+/** Each working route's action, for tests that check each one is decided. */
+export const PEER_ROUTE_ACTIONS: Readonly<Record<string, PeerAction>> = Object.fromEntries(Object.entries(WORKING_ROUTES).map(([route, { action }]) => [route, action]))
 
 /** Every route that must be signed, for tests that walk them all. */
 export const SIGNED_PEER_ROUTES: readonly string[] = [...Object.keys(ALWAYS_ROUTES), ...Object.keys(WORKING_ROUTES)]
@@ -88,7 +92,10 @@ async function answer(peers: Peers, request: PeerHttpRequest): Promise<unknown> 
   if (request.method === 'POST' && always) return always(peers, peer, body)
   peers.requireWorksWith(peer)
   const working = Object.hasOwn(WORKING_ROUTES, route) ? WORKING_ROUTES[route] : undefined
-  if (request.method === 'POST' && working) return working(peers, peer, body)
+  if (request.method === 'POST' && working) {
+    peers.requireMay(working.action, peer)
+    return working.handle(peers, peer, body)
+  }
   throw new PeerRequestRefused('not_found', 'no such peer route')
 }
 

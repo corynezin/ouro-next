@@ -79,7 +79,7 @@ test("a server's first private home key takes in the computers it already truste
   })
   assert.equal(seen.visiting, false)
 
-  await betaPhone.command('join_network', { address: alpha.url, code: await inviteCode(alphaPhone, privateId), role: 'home' })
+  await betaPhone.command('join_network', { address: alpha.url, code: await inviteCode(alphaPhone, privateId), role: 'home', kind: 'private' })
   await waitFor('alpha in the private network at beta', async () => (await computerNamed(betaPhone, 'alpha'))?.networkId === privateId)
   // Once beta has signed with the key, alpha takes nothing unsigned from it.
   await waitFor('beta signed once', () => {
@@ -101,19 +101,35 @@ test("a server's first private home key takes in the computers it already truste
 })
 
 test('a private network is joined only as a home: no server only visits it', async () => {
-  await assert.rejects(teamPhone.command('join_network', { address: alpha.url, code: await inviteCode(alphaPhone, privateId), role: 'extra' }),
+  await assert.rejects(teamPhone.command('join_network', { address: alpha.url, code: await inviteCode(alphaPhone, privateId), role: 'extra', kind: 'private' }),
     (error: CommandFailed) => /only as a home/.test(error.message))
   assert.equal(await computerNamed(alphaPhone, 'team'), undefined)
+})
+
+test("a private network's invite, joined as the shared network it was said to be, is refused by both servers before it is used", async () => {
+  const code = await inviteCode(alphaPhone, privateId)
+  // Team has no home yet: joined as a home, alpha's owner would be team's, with team's memory. Alpha refuses first.
+  await assert.rejects(teamPhone.command('join_network', { address: alpha.url, code, role: 'home', kind: 'shared' }),
+    (error: CommandFailed) => error.code === 'forbidden' && /private network/.test(error.message))
+  assert.equal((await teamPhone.snapshot()).server.networks?.length ?? 0, 0, 'team holds no key')
+  assert.equal(await computerNamed(alphaPhone, 'team'), undefined, 'and alpha took nothing in')
+  // The invite wasn't used: the person who meant it, joining as private, still can. (Not here: team isn't theirs.)
+  const reopened = new DatabaseSync(join(alpha.dataDir, 'ouro.db'), { readOnly: true })
+  try {
+    assert.notEqual((reopened.prepare('SELECT invite_hash FROM networks WHERE id = ?').get(privateId) as { invite_hash: string | null }).invite_hash, null)
+  } finally {
+    reopened.close()
+  }
 })
 
 test('a shared network: the shared server takes the key as its home key, and alpha holds it as an extra key', async () => {
   const created = await alphaPhone.command('create_network', { name: 'team', kind: 'shared', role: 'extra' })
   teamId = created.network.id
   await assert.rejects(teamPhone.command('create_network_invite', { networkId: teamId }), (error: CommandFailed) => error.code === 'not_found')
-  const joined = await teamPhone.command('join_network', { address: alpha.url, code: await inviteCode(alphaPhone, teamId), role: 'home' })
+  const joined = await teamPhone.command('join_network', { address: alpha.url, code: await inviteCode(alphaPhone, teamId), role: 'home', kind: 'shared' })
   assert.equal(joined.network.kind, 'shared')
   // The invite is used.
-  await assert.rejects(betaPhone.command('join_network', { address: alpha.url, code: 'wrong', role: 'extra' }), (error: CommandFailed) => error.code === 'forbidden')
+  await assert.rejects(betaPhone.command('join_network', { address: alpha.url, code: 'wrong', role: 'extra', kind: 'shared' }), (error: CommandFailed) => error.code === 'forbidden')
 
   // Alpha says hello into the team network; team answers it, and keeps it as a visitor it never contacts.
   const teamAtAlpha = await onlineAt(alphaPhone, 'team')
@@ -236,6 +252,7 @@ test('a pulled copy arrives paused and labelled; nothing wakes it until it is st
   const { agent } = await alphaPhone.command('pull_agent', { remoteAgentId: remote.id, name: null })
   assert.equal(agent.name, 'researcher')
   assert.deepEqual({ ...agent.pulled, at: 0 }, { from: 'researcher@team', network: 'team', at: 0, awaitingStart: true })
+  assert.match(agent.folder, /\/pulled\/researcher$/, 'in a folder of its own, whatever team said')
   await assert.rejects(alphaPhone.command('pull_agent', { remoteAgentId: remote.id, name: null }), (error: CommandFailed) => error.code === 'agent_name_taken')
 
   await send(alphaPhone, 'researcher', standInScript({ do: 'run', command: 'ouro reply "copy here"' }))
@@ -268,7 +285,10 @@ test("a collaborator's own server joins the shared network; addresses spread by 
     const samPhone = await sam.pairDevice()
     await samPhone.command('set_owner_name', { name: 'sam' })
     const teamNetworkId = (await teamPhone.snapshot()).server.networks![0]!.id
-    await samPhone.command('join_network', { address: team.url, code: await inviteCode(teamPhone, teamNetworkId), role: 'home' })
+    // The invite's command is a real one, run on sam's server as it is printed.
+    const printed = (await team.cli('networks', 'invite')).trim().split('\n').at(-1)!
+    assert.match(printed, /^ouro networks join \S+ \S+ --kind shared$/)
+    assert.match(await sam.cli(...printed.split(' ').slice(1)), /joined team, a shared network/)
     const teamAtSam = await onlineAt(samPhone, 'team')
     assert.equal(teamAtSam.visiting, false)
     assert.equal((await onlineAt(teamPhone, 'sams-box')).visiting, false)
@@ -286,11 +306,67 @@ test("a collaborator's own server joins the shared network; addresses spread by 
     const back = await waitFor('the answer at sam', () => findMessage(samPhone, (found) => found.text === 'hello sam'), 30_000)
     assert.equal(back.message.from, 'scribe@team')
     assert.deepEqual(back.members, ['human', 'scribe@team'])
-    // An agent sam starts on team is theirs.
-    const remote = await samPhone.command('create_remote_agent', { computerId: teamAtSam.id, task: standInScript({ do: 'text', text: 'ok' }), name: 'samshelper', model: 'stand-in', folder: null, promptCacheLifetime: '5m' })
-    assert.equal(remote.remoteAgent.name, 'samshelper')
-    assert.equal((await teamPhone.agent('samshelper')).createdBy, 'human@sam')
+    // Another person's server talks with team's agents, but doesn't act on them as team's owner.
+    await assert.rejects(samPhone.command('create_remote_agent', { computerId: teamAtSam.id, task: standInScript({ do: 'text', text: 'ok' }), name: 'samshelper', model: 'stand-in', folder: null, promptCacheLifetime: '5m' }),
+      (error: CommandFailed) => error.code === 'forbidden')
+    const scribe = (await samPhone.snapshot()).remoteAgents.find((agent) => agent.address === 'scribe@team')!
+    await assert.rejects(samPhone.command('control_remote_agent', { remoteAgentId: scribe.id, action: { kind: 'stop' } }), (error: CommandFailed) => error.code === 'forbidden')
+    const scribeAtAlpha = await waitFor('scribe seen from alpha', async () => (await alphaPhone.snapshot()).remoteAgents.find((agent) => agent.address === 'scribe@team'), 30_000)
+    await assert.rejects(alphaPhone.command('control_remote_agent', { remoteAgentId: scribeAtAlpha.id, action: { kind: 'stop' } }),
+      (error: CommandFailed) => error.code === 'forbidden', 'nor does a visitor')
+
+    // Route by route, signed in team's network by a member (sam) and by a visitor (alpha): what another person may do, and
+    // nothing else.
+    const teamKey = networkKeyOf(team, teamNetworkId)
+    const teamMachineId = teamAtSam.id
+    const signers = [
+      { who: 'sam', key: machineKeyOf(sam), id: (await computerNamed(teamPhone, 'sams-box'))!.id, visiting: false },
+      { who: 'alpha', key: machineKeyOf(alpha), id: (await computerNamed(teamPhone, 'alpha'))!.id, visiting: true },
+    ]
+    const denied = ['/control', '/create-agent', '/move-check', '/move', '/log', '/memory', '/owner-ask-snoozes']
+    for (const route of SIGNED_PEER_ROUTES.filter((found) => found !== '/hello' && found !== '/forget')) {
+      for (const signer of signers) {
+        const path = `${PEER_API_PREFIX}${route}`
+        const headers = signatureHeaders(signer.key, signer.id, 'POST', path, '{}', Date.now(), { id: teamNetworkId, key: teamKey, visiting: signer.visiting, recipient: teamMachineId })
+        const response = await fetch(`${team.url}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: '{}' })
+        if (denied.includes(route)) assert.equal(response.status, 403, `${route} from ${signer.who}`)
+        else assert.notEqual(response.status, 403, `${route} from ${signer.who}`)
+      }
+    }
   } finally {
     await sam.cleanup()
   }
+})
+
+test("a computer removed from a network of three stays out: another's hello doesn't bring it back, nor does its own", async () => {
+  const gamma = new JourneyRun()
+  gamma.addServerEnv({ OURO_MACHINE_NAME: 'gamma' })
+  try {
+    await gamma.startServer()
+    const gammaPhone = await gamma.pairDevice()
+    await gammaPhone.command('join_network', { address: alpha.url, code: await inviteCode(alphaPhone, privateId), role: 'home', kind: 'private' })
+    // Gamma learns of beta from alpha, and beta of gamma: three servers that all know each other.
+    await onlineAt(gammaPhone, 'beta')
+    await onlineAt(betaPhone, 'gamma')
+
+    const betaAtAlpha = (await computerNamed(alphaPhone, 'beta'))!
+    await alphaPhone.command('remove_computer', { computerId: betaAtAlpha.id })
+    // Gamma's hellos still list beta, and beta still holds the key and hears of alpha from gamma: neither brings it back.
+    await new Promise((resolve) => setTimeout(resolve, 8_000))
+    assert.equal(await computerNamed(alphaPhone, 'beta'), undefined)
+    assert.equal((await computerNamed(gammaPhone, 'beta'))?.status, 'online', 'gamma still has it: out for good takes a new key')
+
+    // Invited back on purpose, it is in again.
+    await betaPhone.command('join_network', { address: alpha.url, code: await inviteCode(alphaPhone, privateId), role: 'home', kind: 'private' })
+    await onlineAt(alphaPhone, 'beta')
+  } finally {
+    await gamma.cleanup()
+  }
+})
+
+test("letting go of a network's key forgets the computers in it", async () => {
+  assert.ok(await computerNamed(alphaPhone, 'team'))
+  await alphaPhone.command('remove_network', { networkId: teamId })
+  assert.equal(await computerNamed(alphaPhone, 'team'), undefined)
+  assert.equal((await alphaPhone.snapshot()).remoteAgents.some((agent) => agent.address.endsWith('@team')), false)
 })

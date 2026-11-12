@@ -61,6 +61,10 @@ export type NetworkEntity = z.infer<typeof NetworkEntity>
 
 export const NETWORK_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$/
 
+/** A network's key as a server makes it: 32 random bytes, base64url without padding. Anything else an inviting server
+ * answers is refused, so a key file only ever holds keys of this shape. */
+export const NETWORK_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/
+
 /** A one-use invite into a network, for 30 minutes: the invited server trades `code` at `address` for the key. */
 export const NetworkInvite = z.object({ networkId: z.string(), code: z.string(), address: z.string(), expiresAt: z.number().int(), command: z.string() })
 export type NetworkInvite = z.infer<typeof NetworkInvite>
@@ -116,12 +120,14 @@ export const PeerJoinResult = z.object({ host: PeerIdentity })
 export type PeerJoinResult = z.infer<typeof PeerJoinResult>
 
 /** POST /network-join, unsigned like /join: the invite's code is its credential. Trades it for the network's key. `role`:
- * how the joiner will hold it; a joiner taking it as its home key is put in the inviter's address book. */
-export const PeerNetworkJoinRequest = z.object({ code: z.string(), joiner: PeerIdentity, ownerName: z.string(), role: z.enum(['home', 'extra']) })
+ * how the joiner will hold it; a joiner taking it as its home key is put in the inviter's address book. `kind`: the kind
+ * of network the joiner's person expects to join; the inviter refuses another kind before the invite is used, so an
+ * invite said to be for a shared network can't make the joiner a member of a private one. */
+export const PeerNetworkJoinRequest = z.object({ code: z.string(), joiner: PeerIdentity, ownerName: z.string(), role: NetworkRole, kind: NetworkKind })
 export type PeerNetworkJoinRequest = z.infer<typeof PeerNetworkJoinRequest>
 /** `hostVisiting`: the inviter holds the key as an extra key, so it lives elsewhere and is never contacted in this network. */
 export const PeerNetworkJoinResult = z.object({
-  network: z.object({ key: z.string(), name: z.string(), kind: z.enum(['private', 'shared']) }),
+  network: z.object({ key: z.string().regex(NETWORK_KEY_PATTERN), name: z.string().regex(NETWORK_NAME_PATTERN), kind: NetworkKind }),
   host: PeerIdentity,
   hostOwnerName: z.string(),
   hostVisiting: z.boolean(),
@@ -431,7 +437,7 @@ export const PeerCreateAgentResult = z.discriminatedUnion('outcome', [
 ])
 export type PeerCreateAgentResult = z.infer<typeof PeerCreateAgentResult>
 
-/** POST /pull, signed, from a server holding this one's network key, private or visiting: a copy of the agent of that name,
+/** POST /pull, signed, from a server in this shared server's network, as a member or a visitor: a copy of the agent of that name,
  * as a move would carry it, without its waiting messages or memory. The agent stays where it is and doesn't know. */
 export const PeerPullRequest = z.object({ agentName: z.string() })
 export type PeerPullRequest = z.infer<typeof PeerPullRequest>
@@ -450,8 +456,8 @@ export const PEER_SIGNATURE_HEADERS = {
 } as const
 
 /** On every request between servers with networks: the network it is sent in, an HMAC-SHA256 with that network's key of
- * the signed payload and these two headers, and whether the sender only visits that network (holds its key as an extra
- * key). Machines before networks ignore them. */
+ * the signed payload, these two headers and the recipient's machine id (so it can't be replayed to another server), and
+ * whether the sender only visits that network (holds its key as an extra key). Machines before networks ignore them. */
 export const PEER_NETWORK_HEADERS = {
   network: 'x-ouro-network',
   visiting: 'x-ouro-network-visiting',

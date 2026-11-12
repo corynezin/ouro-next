@@ -5,13 +5,13 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { LogPage as LogPageSchema } from '@ouro/contract'
 import type { LogPage } from '@ouro/contract'
 import { PeerMemoryPush, PeerPullRequest, PEER_API_PREFIX, PEER_NETWORK_HEADERS, PEER_NETWORKS_PROTOCOL, PeerNetworkJoinResult, PEER_ASK_SNOOZE_PROTOCOL, PEER_LOG_PROTOCOL, PeerLogRequest, PEER_MEMORY_PROTOCOL, PEER_MIN_PROTOCOL, PeerAskSnooze, PeerAskSnoozeResult, PEER_PROTOCOL, PeerMemory, PeerMemoryRequest, PEER_SIGNATURE_HEADERS, PeerAgentList, PeerControl, PeerControlResult, PeerCreateAgent, PeerCreateAgentResult, PeerGroupPost, PeerGroupUpdate, PeerHello, PeerJoinResult, PeerMessage, PeerMessageResult, PeerMove, PeerOwnerAsk, PeerOwnerMessage, PeerMoveCheck, PeerMoveCheckResult, PeerMoveResult } from '@ouro/contract'
-import type { NetworkInvite, NetworkRole, PeerNetworkJoinRequest, ComputerEntity, ComputerInvite, ComputerStatus, ComputerTrust, PeerAgentCard, PeerClaudePlan, PeerIdentity, PeerJoinRequest, PeerSender, RemoteAgentAction, RemoteAgentEntity } from '@ouro/contract'
+import type { NetworkInvite, NetworkKind, NetworkRole, PeerNetworkJoinRequest, ComputerEntity, ComputerInvite, ComputerStatus, ComputerTrust, PeerAgentCard, PeerClaudePlan, PeerIdentity, PeerJoinRequest, PeerSender, RemoteAgentAction, RemoteAgentEntity } from '@ouro/contract'
 import { networkSignatureValid, PeerRefused, PeerUnreachable, peerRequest, sha256Hex, signatureValid } from '../adapters/peer-transport.ts'
 import type { MachineKey, NetworkKeyFile, NetworkSigner } from '../adapters/peer-transport.ts'
 import { helloToSleeperDue } from '../domain/host-hold.ts'
 import { COMPUTER_INVITE_LIFETIME_MS, computerStatusOf, PEER_CLOCK_SKEW_MS, PEER_HELLO_INTERVAL_MS, peerRetryDelayMs, protocolProblem, signedPayload, withinClockSkew } from '../domain/peers.ts'
-import { acceptance, fullyTrusted, sharesMemoryWith, signingFor } from '../domain/networks.ts'
-import type { ClaimedNetwork, HeldNetwork, Signing } from '../domain/networks.ts'
+import { acceptance, joinedKindRefusal, peerMay, sharesMemoryWith, showsAgentDetailsTo, signingFor } from '../domain/networks.ts'
+import type { ClaimedNetwork, HeldNetwork, PeerAction, Signing } from '../domain/networks.ts'
 import { CommandRefused } from './failure.ts'
 import type { NetworkRow, PeerRow, Store } from '../store/store.ts'
 export type { PeerRow } from '../store/store.ts'
@@ -187,7 +187,8 @@ export class Peers {
     return this.config.store.listNetworks().map((network) => ({ id: network.id, kind: network.kind, role: network.role }))
   }
 
-  private homeNetwork(): HeldNetwork | null {
+  /** This server's home network, as the network decisions take it. */
+  homeNetwork(): HeldNetwork | null {
     const home = this.config.store.homeNetwork()
     return home && { id: home.id, kind: home.kind, role: home.role }
   }
@@ -197,9 +198,11 @@ export class Peers {
     return signingFor(peer, this.heldNetworks())
   }
 
-  /** Whether this server treats the peer as fully trusted: before networks, by its trust; in one, always. */
-  trusts(peer: PeerRow): boolean {
-    return fullyTrusted(peer, this.homeNetwork())
+  /** A signed request from the peer that does `action`, refused unless it may (see peerMay). Every working route asks this
+   * first, in interfaces/peer.ts. */
+  requireMay(action: PeerAction, peer: PeerRow): void {
+    const may = peerMay(action, peer, this.homeNetwork())
+    if (may.kind === 'refused') throw new PeerRequestRefused('forbidden', `${this.config.machineName} refused: ${may.reason}`)
   }
 
   /** The peer, which this server must be able to contact: refused at once, with the reason, when it never does. */
@@ -225,55 +228,68 @@ export class Peers {
     const code = randomBytes(16).toString('hex')
     const expiresAt = this.config.now() + COMPUTER_INVITE_LIFETIME_MS
     this.config.store.setNetworkInvite(network.id, hashCode(code).toString('hex'), expiresAt)
-    return { networkId: network.id, code, address, expiresAt, command: `ouro networks join ${address} ${code}` }
+    // The kind in the command is this server's word on it: the joining server's person runs it only if that is what they
+    // expect, and both servers refuse another kind (see joinedKindRefusal).
+    return { networkId: network.id, code, address, expiresAt, command: `ouro networks join ${address} ${code} --kind ${network.kind}` }
   }
 
-  /** The network whose open invite is this code; using it closes it. */
-  private takeNetworkInvite(code: string): NetworkRow | null {
+  /** The network whose open invite is this code, still open. Looking doesn't use it. */
+  private networkOfInvite(code: string): NetworkRow | null {
     const offered = hashCode(code)
     const now = this.config.now()
     for (const network of this.config.store.listNetworks()) {
       if (network.inviteHash === null || network.inviteExpiresAt === null || now > network.inviteExpiresAt) continue
       const open = Buffer.from(network.inviteHash, 'hex')
-      if (offered.length !== open.length || !timingSafeEqual(offered, open)) continue
-      this.config.store.setNetworkInvite(network.id, null, null)
-      return network
+      if (offered.length === open.length && timingSafeEqual(offered, open)) return network
     }
     return null
   }
 
   /** Another server trades this server's invite for the network's key. One taking it as its home key lives in the network,
-   * so it goes in the address book here. */
+   * so it goes in the address book here. A join this server refuses leaves the invite open: the person on the other side
+   * may have picked the wrong kind, and can try again. */
   acceptNetworkJoin(request: PeerNetworkJoinRequest): PeerNetworkJoinResult {
     const host = this.identity()
     if (!privateTransport(host.address)) throw new PeerRequestRefused('forbidden', `${this.config.machineName} gives a network's key only over HTTPS or Tailscale`)
     return this.config.commit(() => {
-      const network = this.takeNetworkInvite(request.code)
+      const network = this.networkOfInvite(request.code)
       if (!network) throw new PeerRequestRefused('invite_invalid', 'That invite is not valid: it was used, replaced, or it expired.')
-      if (request.role === 'extra' && network.kind === 'private') throw new PeerRequestRefused('forbidden', 'A private network is joined only as a home.')
+      const refusal = joinedKindRefusal(request.kind, network.kind) ?? (network.kind === 'private' && request.role === 'extra' ? 'a private network is joined only as a home' : null)
+      if (refusal !== null) throw new PeerRequestRefused('forbidden', `${this.config.machineName} refused: ${refusal}.`)
       if (request.role === 'home') this.admitInNetwork(request.joiner, network.id, false, request.ownerName)
+      // Invited back on purpose, if it was removed: see remove.
+      this.config.store.forgetRemovedFromNetwork(network.id, request.joiner.machineId)
+      // Used: no one else trades it.
+      this.config.store.setNetworkInvite(network.id, null, null)
       const key = this.config.networkKeys.get(network.id)
       if (key === null) throw new PeerRequestRefused('invite_invalid', 'That invite is not valid: this server no longer holds the key.')
       return { network: { key, name: network.name, kind: network.kind }, host, hostOwnerName: this.config.ownerName(), hostVisiting: network.role === 'extra' }
     })
   }
 
-  /** Trades an invite's code at `address` for its network's key. Nothing is kept here until the caller keeps it. */
-  async askToJoinNetwork(address: string, code: string, role: NetworkRole): Promise<PeerNetworkJoinResult> {
+  /** Trades an invite's code at `address` for its network's key, refused if it isn't of the kind the person expects. Nothing
+   * is kept here until the caller keeps it. */
+  async askToJoinNetwork(address: string, code: string, role: NetworkRole, kind: NetworkKind): Promise<PeerNetworkJoinResult> {
     if (!privateTransport(address)) throw new CommandRefused('invalid_request', `the key would come back in the clear: ${address} is reached neither over HTTPS nor Tailscale`)
     let answer: unknown
     try {
-      answer = await peerRequest(address, 'POST', '/network-join', { code, joiner: this.identity(), ownerName: this.config.ownerName(), role } satisfies PeerNetworkJoinRequest, null, this.config.now())
+      answer = await peerRequest(address, 'POST', '/network-join', { code, joiner: this.identity(), ownerName: this.config.ownerName(), role, kind } satisfies PeerNetworkJoinRequest, null, this.config.now())
     } catch (error) {
       if (error instanceof PeerUnreachable) throw new CommandRefused('peer_unreachable', error.message)
-      if (error instanceof PeerRefused) throw new CommandRefused(error.code === 'invite_invalid' ? 'forbidden' : 'invalid_request', error.message)
+      if (error instanceof PeerRefused) throw new CommandRefused(error.code === 'invite_invalid' || error.code === 'forbidden' ? 'forbidden' : 'invalid_request', error.message)
       throw error
     }
-    return PeerNetworkJoinResult.parse(answer)
+    // Everything it says is checked before any of it is kept or shown: the name lands in this server's notices.
+    const joined = PeerNetworkJoinResult.safeParse(answer)
+    if (!joined.success) throw new CommandRefused('invalid_request', `${address} answered with something that isn't a network`)
+    const refusal = joinedKindRefusal(kind, joined.data.network.kind)
+    if (refusal !== null) throw new CommandRefused('forbidden', refusal)
+    return joined.data
   }
 
   /** The server that invited this one, once the key is kept here: it goes in the address book unless it only visits. */
   admitInviter(result: PeerNetworkJoinResult, networkId: string): void {
+    this.config.store.forgetRemovedFromNetwork(networkId, result.host.machineId)
     if (result.hostVisiting) return
     try {
       this.admitInNetwork(result.host, networkId, false, result.hostOwnerName)
@@ -298,11 +314,12 @@ export class Peers {
   }
 
   /** Servers another one says live in a network this one holds a key for: kept as addresses, until each is heard from
-   * itself. Only ones unknown here; what is known stays as it is. */
+   * itself. Only ones unknown here, and never one the person removed from that network; what is known stays as it is. */
   private learnAddresses(networkId: string, addresses: NonNullable<PeerHello['addresses']>): void {
     if (!this.config.store.networkById(networkId)) return
     for (const entry of addresses) {
       if (entry.machineId === this.config.machineId || entry.name === this.config.machineName) continue
+      if (this.config.store.removedFromNetwork(networkId, entry.machineId)) continue
       if (this.config.store.peerById(entry.machineId) || this.config.store.peerByName(entry.name)) continue
       this.config.store.savePeerInNetwork({ machineId: entry.machineId, name: entry.name, address: entry.address, publicKey: '', networkId, visiting: false, ownerName: null, joinedAt: this.config.now() })
     }
@@ -429,7 +446,7 @@ export class Peers {
     const publicKey = introduction?.publicKey ?? known?.publicKey
     if (publicKey === undefined) throw new PeerRequestRefused('unauthenticated', 'this server does not know that computer')
     if (!signatureValid(publicKey, payload, signature)) throw new PeerRequestRefused('unauthenticated', 'the signature does not match')
-    const accepted = acceptance(home && { id: home.id, kind: home.kind, role: home.role }, claimed, known)
+    const accepted = acceptance(this.homeNetwork(), claimed, known)
     if (accepted.kind === 'refused') throw new PeerRequestRefused('unauthenticated', `${this.config.machineName} refused it: ${accepted.reason}`)
     if (!this.freshNonce(machineId, nonce, now)) throw new PeerRequestRefused('unauthenticated', 'the request was replayed')
     const network = accepted.network
@@ -466,6 +483,8 @@ export class Peers {
     }
     const hello = PeerHello.safeParse(body)
     if (!hello.success || !hello.data.identity || hello.data.identity.machineId !== machineId) throw unknown
+    // Removed from the network here: it still holds the key, but it doesn't come back by saying hello.
+    if (this.config.store.removedFromNetwork(home.id, machineId)) throw unknown
     return hello.data.identity
   }
 
@@ -602,8 +621,7 @@ export class Peers {
     return LogPageSchema.parse(answer)
   }
 
-  receiveLogRequest(peer: PeerRow, body: unknown): LogPage {
-    if (!this.trusts(peer)) throw new PeerRequestRefused('forbidden', `${this.config.machineName} shows its agents' logs only to computers it trusts fully`)
+  receiveLogRequest(_peer: PeerRow, body: unknown): LogPage {
     const request = PeerLogRequest.safeParse(body)
     if (!request.success) throw new PeerRequestRefused('invalid_request', 'not a log request')
     const page = this.config.logForPeer(request.data)
@@ -612,7 +630,6 @@ export class Peers {
   }
 
   receiveMemoryRequest(peer: PeerRow, body: unknown): PeerMemory {
-    if (!sharesMemoryWith(peer, this.homeNetwork())) throw new PeerRequestRefused('forbidden', `${this.config.machineName} shares memory only with the person's own computers in its private network`)
     const request = PeerMemoryRequest.safeParse(body)
     if (!request.success) throw new PeerRequestRefused('invalid_request', 'not a memory request')
     return this.config.memoryForPeer(peer, request.data.projectKeys)
@@ -649,13 +666,17 @@ export class Peers {
       if (error instanceof PeerRefused) throw new CommandRefused(error.code === 'not_found' ? 'not_found' : 'forbidden', `${peer.name} refused: ${error.message}`)
       throw error
     }
-    return { peer, copy: PeerMove.parse(answer) }
+    // The other server picks what it answers: only the agent asked for is taken, so the name it writes into the copy's
+    // label and first note is the one already shown here.
+    const copy = PeerMove.safeParse(answer)
+    if (!copy.success) throw new CommandRefused('invalid_request', `${peer.name} answered with something that isn't an agent`)
+    if (copy.data.agent.name !== remote.name) throw new CommandRefused('forbidden', `${peer.name} answered with another agent than ${remote.name}`)
+    return { peer, copy: copy.data }
   }
 
-  /** Only a shared server gives copies, and only to a server in its network: never a private one, nor before networks. */
-  receivePull(peer: PeerRow, body: unknown): PeerMove {
-    const home = this.homeNetwork()
-    if (home?.kind !== 'shared' || peer.networkId !== home.id) throw new PeerRequestRefused('forbidden', `${this.config.machineName} gives copies of its agents only in a shared network`)
+  /** Only a shared server gives copies, and only to a server in its network: never a private one, nor before networks
+   * (see peerMay). */
+  receivePull(_peer: PeerRow, body: unknown): PeerMove {
     const request = PeerPullRequest.safeParse(body)
     if (!request.success) throw new PeerRequestRefused('invalid_request', 'not a pull')
     const copy = this.config.pullForPeer(request.data.agentName)
@@ -677,7 +698,6 @@ export class Peers {
 
   /** Memory comes into a shared network only when pushed; a private server takes none this way. */
   receiveMemoryPush(peer: PeerRow, body: unknown): Record<string, never> {
-    if (this.homeNetwork()?.kind !== 'shared') throw new PeerRequestRefused('forbidden', `${this.config.machineName} takes pushed memory only in a shared network`)
     const push = PeerMemoryPush.safeParse(body)
     if (!push.success) throw new PeerRequestRefused('invalid_request', 'not a memory push')
     this.config.memoryPushFromPeer(peer, push.data)
@@ -687,8 +707,8 @@ export class Peers {
   // Its agents, both ways
 
   receiveAgentsRequest(peer: PeerRow): PeerAgentList {
-    const trusted = this.trusts(peer)
-    return { agents: this.config.agentCards(trusted ? 'full' : 'limited'), claudePlan: trusted && sharesMemoryWith(peer, this.homeNetwork()) ? this.config.claudePlan() : null }
+    const home = this.homeNetwork()
+    return { agents: this.config.agentCards(showsAgentDetailsTo(peer, home) ? 'full' : 'limited'), claudePlan: sharesMemoryWith(peer, home) ? this.config.claudePlan() : null }
   }
 
   /** Only a computer this one trusts fully is believed about the plan. */
@@ -771,7 +791,6 @@ export class Peers {
   }
 
   async receiveCreateAgent(peer: PeerRow, body: unknown): Promise<PeerCreateAgentResult> {
-    if (!this.trusts(peer)) throw new PeerRequestRefused('forbidden', `${this.config.machineName} trusts this computer only to message its agents`)
     const request = PeerCreateAgent.safeParse(body)
     if (!request.success) throw new PeerRequestRefused('invalid_request', 'not a create')
     await this.requireHoldForWork()
@@ -796,7 +815,7 @@ export class Peers {
     return result.snooze
   }
 
-  /** Any peer the person talks to the agent from may snooze its asks, as it may answer them. */
+  /** A computer of the person's, that they talk to the agent from, may snooze its asks, as it may answer them. */
   receiveAskSnooze(peer: PeerRow, body: unknown): PeerAskSnoozeResult {
     const snooze = PeerAskSnooze.safeParse(body)
     if (!snooze.success) throw new PeerRequestRefused('invalid_request', 'not an ask snooze')
@@ -804,7 +823,6 @@ export class Peers {
   }
 
   receiveControl(peer: PeerRow, body: unknown): PeerControlResult {
-    if (!this.trusts(peer)) throw new PeerRequestRefused('forbidden', `${this.config.machineName} trusts this computer only to message its agents`)
     const control = PeerControl.safeParse(body)
     if (!control.success) throw new PeerRequestRefused('invalid_request', 'not a control')
     return this.config.controlFromPeer(peer, control.data)
@@ -815,7 +833,9 @@ export class Peers {
   /** Whether that computer would take an agent of this name now: refused here at once if it can't be asked. */
   async checkMove(machineId: string, name: string): Promise<void> {
     const peer = this.requireWorkingPeer(machineId)
-    if (!this.trusts(peer)) throw new CommandRefused('forbidden', `agents move only to computers this one trusts fully, and it trusts ${peer.name} only to message`)
+    // Only where this server would take an agent from: the person's own computers.
+    const may = peerMay('move', peer, this.homeNetwork())
+    if (may.kind === 'refused') throw new CommandRefused('forbidden', `agents don't move to ${peer.name}: ${may.reason}`)
     let answer: unknown
     try {
       answer = await this.signed(peer, 'POST', '/move-check', { name } satisfies PeerMoveCheck)
@@ -842,14 +862,12 @@ export class Peers {
   }
 
   receiveMoveCheck(peer: PeerRow, body: unknown): PeerMoveCheckResult {
-    if (!this.trusts(peer)) throw new PeerRequestRefused('forbidden', `${this.config.machineName} trusts this computer only to message its agents`)
     const check = PeerMoveCheck.safeParse(body)
     if (!check.success) throw new PeerRequestRefused('invalid_request', 'not a move check')
     return this.config.moveCheckFromPeer(peer, check.data)
   }
 
   async receiveMove(peer: PeerRow, body: unknown): Promise<PeerMoveResult> {
-    if (!this.trusts(peer)) throw new PeerRequestRefused('forbidden', `${this.config.machineName} trusts this computer only to message its agents`)
     const move = PeerMove.safeParse(body)
     if (!move.success) throw new PeerRequestRefused('invalid_request', 'not a move')
     await this.requireHoldForWork()
@@ -964,10 +982,20 @@ export class Peers {
     }
   }
 
-  /** Stops reaching it. Nothing on it is deleted. */
+  /**
+   * Stops reaching it. Nothing on it is deleted. A computer in a network is kept out of it here from now on: another
+   * server's hello doesn't add it back, and it can't introduce itself again, until it is invited again. It still holds the
+   * network's key, so it can still reach the others: out of the network for good takes a new key.
+   */
   remove(machineId: string): void {
-    this.requirePeer(machineId)
+    const peer = this.requirePeer(machineId)
+    if (peer.networkId !== null) this.config.store.noteRemovedFromNetwork(peer.networkId, machineId, this.config.now())
     this.forget(machineId)
+  }
+
+  /** A network's key let go of: the computers in it are forgotten here, as they can't be reached without it. */
+  forgetNetwork(networkId: string): void {
+    for (const peer of this.config.store.listPeers()) if (peer.networkId === networkId) this.forget(peer.machineId)
   }
 
   /** The peer removed this machine. */

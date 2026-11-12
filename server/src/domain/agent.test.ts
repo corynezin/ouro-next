@@ -44,6 +44,10 @@ test('a refused wake holds the agent and launches nothing', () => {
   assert.equal(decision.next.instanceGeneration, 0)
 })
 
+test('a copy waiting to be started is neither woken nor held', () => {
+  assert.deepEqual(decideAgent(fresh(), { type: 'wake_requested', admission: { kind: 'awaiting_start' }, reason: 'new_message' }, 1000, policy), { outcome: 'refused', why: 'awaiting_start' })
+})
+
 test('a second wake while starting launches nothing', () => {
   const starting = run([{ type: 'wake_requested', admission: granted, reason: 'created' }])
   assert.deepEqual(decideAgent(starting, { type: 'wake_requested', admission: granted, reason: 'new_message' }, 1000, policy), { outcome: 'refused', why: 'not_applicable_in_state' })
