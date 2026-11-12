@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { baseUpdateOf, continueDecision, dropDecision, resolveDecision, takeRefusal } from './base-update.ts'
+import { baseUpdateOf, continueDecision, dropDecision, overtakenBase, resolveDecision, takeRefusal } from './base-update.ts'
 import type { BaseUpdateRecord } from './base-update.ts'
 
 const offer = { n: 3, notes: 'faster summaries' }
@@ -52,4 +52,15 @@ test('a conflict recorded before the choice existed waits for the owner: it can 
   const fromBefore = { state: 'conflict', n: 3, files: ['a'] } as unknown as BaseUpdateRecord
   assert.deepEqual(resolveDecision(fromBefore), { kind: 'goes_ahead', n: 3, files: ['a'], notes: '' })
   assert.deepEqual(dropDecision(fromBefore), { kind: 'goes_ahead', n: 3, stopping: null })
+})
+
+test('a failed or unresolved update to a base the source has since taken another way is overtaken; others stand', () => {
+  assert.equal(overtakenBase({ state: 'failed', n: 6, why: 'rolled back' }, 6), 6)
+  assert.equal(overtakenBase({ state: 'failed', n: 6, why: 'rolled back' }, 7), 6, 'a later base carries it')
+  assert.equal(overtakenBase({ state: 'failed', n: 6, why: 'rolled back' }, 5), null, 'still not in: it stands')
+  assert.equal(overtakenBase({ state: 'conflict', n: 6, files: ['a'], resolver: null }, 6), 6)
+  assert.equal(overtakenBase({ state: 'conflict', n: 6, files: ['a'], resolver: 'base-6' }, 6), null, 'an agent is resolving it')
+  assert.equal(overtakenBase({ state: 'deploying', n: 6, deploymentId: 'd', commit: 'c' }, 6), null)
+  assert.equal(overtakenBase({ state: 'idle' }, 6), null)
+  assert.equal(overtakenBase({ state: 'failed', n: 6, why: 'x' }, null), null)
 })

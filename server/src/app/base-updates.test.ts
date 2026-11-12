@@ -29,7 +29,16 @@ function sourceWithMergeBeside(): string {
   return root
 }
 
+/** That source, taking bases, with base `n` already in its branch: taken another way than through the update. */
+function sourceOnBase(n: number): string {
+  const root = sourceWithMergeBeside()
+  git(root, 'tag', `base-${n}`)
+  git(root, 'branch', 'ouro-base')
+  return root
+}
+
 function updates(root: string, record: BaseUpdateRecord, started: string | null = 'base-3') {
+  const logged: string[] = []
   const saved: BaseUpdateRecord[] = []
   const told: Array<{ name: string; text: string }> = []
   const handedOff: Array<{ name: string; task: string }> = []
@@ -46,9 +55,9 @@ function updates(root: string, record: BaseUpdateRecord, started: string | null 
     handOff: (work) => { handedOff.push(work); return started },
     tellAgent: (name, text) => { told.push({ name, text }) },
     tellOwner: () => {},
-    log: () => {},
+    log: (event) => { logged.push(event) },
   })
-  return { baseUpdates, saved, told, handedOff }
+  return { baseUpdates, saved, told, handedOff, logged }
 }
 
 test('dropping a conflict saves only the record in the command; the merge beside goes once the command has committed', async () => {
@@ -88,4 +97,36 @@ test('when no agent can start, the conflict keeps waiting for the owner, who was
   const { baseUpdates, saved } = updates(root, { state: 'conflict', n: 3, files: ['a.txt'], notes: '', resolver: null }, null)
   baseUpdates.resolve()
   assert.deepEqual(saved, [{ state: 'conflict', n: 3, files: ['a.txt'], notes: '', resolver: null }])
+})
+
+test('at start, a failed update to a base the source has since taken is forgotten, and its merge beside removed', () => {
+  const root = sourceOnBase(3)
+  const { baseUpdates, saved, logged } = updates(root, { state: 'failed', n: 3, why: 'rolled back' })
+  baseUpdates.resume()
+  assert.deepEqual(saved, [{ state: 'idle' }])
+  assert.ok(!existsSync(besideDirOf(root, 3)))
+  assert.deepEqual(logged, ['base_update_overtaken'])
+  assert.deepEqual(baseUpdates.status(), { kind: 'taker', integrated: 3, offered: null, update: { state: 'idle' } })
+})
+
+test('at start, a conflict waiting for the owner is forgotten once a later base carries it', () => {
+  const root = sourceOnBase(4)
+  const { baseUpdates, saved } = updates(root, { state: 'conflict', n: 3, files: ['a.txt'], notes: '', resolver: null })
+  baseUpdates.resume()
+  assert.deepEqual(saved, [{ state: 'idle' }])
+  assert.ok(!existsSync(besideDirOf(root, 3)))
+})
+
+test('at start, a conflict an agent is resolving, or a failure the source still lacks, stands with its merge beside', () => {
+  const resolving = sourceOnBase(3)
+  const onIt = updates(resolving, { state: 'conflict', n: 3, files: ['a.txt'], notes: '', resolver: 'base-3' })
+  onIt.baseUpdates.resume()
+  assert.deepEqual(onIt.saved, [])
+  assert.ok(existsSync(besideDirOf(resolving, 3)))
+
+  const behind = sourceOnBase(2)
+  const lacking = updates(behind, { state: 'failed', n: 3, why: 'rolled back' })
+  lacking.baseUpdates.resume()
+  assert.deepEqual(lacking.saved, [])
+  assert.ok(existsSync(besideDirOf(behind, 3)))
 })

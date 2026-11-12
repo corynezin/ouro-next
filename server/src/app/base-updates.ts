@@ -11,7 +11,10 @@ import {
 import type { BaseRelease, BaseSource } from '../adapters/base-source.ts'
 import { deploymentOutcome } from '../adapters/guardian-client.ts'
 import type { GuardianClient } from '../adapters/guardian-client.ts'
-import { baseUpdateOf, conflictBrief, conflictWaitingNotice, continueDecision, droppedBrief, dropDecision, resolveDecision, takeRefusal } from '../domain/base-update.ts'
+import {
+  baseUpdateOf, conflictBrief, conflictWaitingNotice, continueDecision, droppedBrief, dropDecision, NO_BASE_UPDATE, overtakenBase,
+  resolveDecision, takeRefusal,
+} from '../domain/base-update.ts'
 import type { BaseUpdateRecord } from '../domain/base-update.ts'
 import { NotPublished } from './app-publishing.ts'
 import type { PublishedApp } from './app-publishing.ts'
@@ -70,8 +73,21 @@ export class BaseUpdates {
     return { kind: 'taker', integrated: this.integrated, offered, update: baseUpdateOf(this.config.readRecord()) }
   }
 
+  /**
+   * A failed or waiting update to a base the source has since taken another way is forgotten, with its merge beside. Run
+   * wherever the integrated base is read again, so the record never outlives it for long: at start and after each check.
+   */
+  private clearOvertaken(): void {
+    const n = overtakenBase(this.config.readRecord(), this.integrated)
+    if (n === null) return
+    this.config.commit(() => this.config.saveRecord(NO_BASE_UPDATE))
+    removeBeside(this.config.sourceRoot!, n)
+    this.config.log('base_update_overtaken', { n, integrated: this.integrated })
+  }
+
   /** At start: an update this server's predecessor began is followed to its end. */
   resume(): void {
+    this.clearOvertaken()
     const record = this.config.readRecord()
     if (record.state === 'deploying') void this.follow(record.n, record.deploymentId, record.commit)
     if (record.state === 'merging') {
@@ -97,6 +113,7 @@ export class BaseUpdates {
       if (latest !== null && this.config.sourceRoot !== null) {
         await this.config.baseSource!.fetchTagsInto(this.config.sourceRoot)
         this.integrated = integratedBase(this.config.sourceRoot)
+        this.clearOvertaken()
       }
     } catch (error) {
       this.config.log('base_offer_check_failed', { error: (error as Error).message })
