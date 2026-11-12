@@ -71,6 +71,7 @@ export function runRunner(config: RunnerConfig): void {
       case 'compaction_finished': return journal({ kind: 'compaction_finished', contextTokens: event.contextTokens })
       case 'plan_usage_observed': return journal({ kind: 'plan_usage_observed', windows: event.windows })
       case 'notice': return journal({ kind: 'notice', text: event.text })
+      case 'background_tasks': return journal({ kind: 'background_tasks', running: event.running })
     }
   }
 

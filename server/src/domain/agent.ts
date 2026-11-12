@@ -80,6 +80,9 @@ export type AgentEvent =
   | { type: 'launch_deadline_passed' }
   /** Deliveries were handed to the runner for `turnId`. Idle starts a turn; in a turn, they join it. */
   | { type: 'deliveries_dispatched'; generation: number; turnId: string }
+  /** The model began working with nothing handed to it, such as when a background task it started finished. Idle starts
+   * a turn, so the turn holds off the idle exit and a finish waits for its end as any other turn does. */
+  | { type: 'unprompted_turn_began'; generation: number; turnId: string }
   | { type: 'turn_activity'; generation: number; turnId: string; activity: TurnActivity }
   | { type: 'turn_finished'; generation: number; turnId: string; continuation: TurnContinuation }
   | { type: 'turn_failed'; generation: number; turnId: string; failure: ProviderFailure; detail: string; retryAt: number | null }
@@ -188,6 +191,9 @@ export function decideAgent(lifecycle: AgentLifecycle, event: AgentEvent, now: n
       if (state.state !== 'starting') return refuse('not_applicable_in_state')
       return beginStopping(context, state.generation, crashOutcome(context, true, 'launch never answered'), 'launch deadline passed', [{ effect: 'kill_runner', generation: state.generation }])
     case 'deliveries_dispatched': return decideDispatch(context, event.turnId)
+    case 'unprompted_turn_began':
+      if (state.state !== 'idle') return refuse('not_applicable_in_state')
+      return transition(context, { state: 'in_turn', since: now, generation: state.generation, turnId: event.turnId, activity: { kind: 'waiting' }, lastOutputAt: now, afterTurn: null }, 'turn began on its own, such as for a background task that finished')
     case 'turn_activity':
       if (state.state !== 'in_turn') return refuse('not_applicable_in_state')
       if (state.turnId !== event.turnId) return refuse('stale_turn')
@@ -605,12 +611,35 @@ function toMoving(context: DecisionContext, toMachine: string, cause: string): A
   return transition(context, { state: 'moving', since: context.now, toMachine, ownershipEpoch: context.lifecycle.ownershipEpoch + 1, handoff: { kind: 'not_sent' } }, cause)
 }
 
+/**
+ * A background task (a shell command or subagent the model left running) keeps an idle agent up, as stopping the runner
+ * would kill it and its finishing would never wake the agent. Up to this long after the tasks last changed: a task that
+ * hangs, or whose end the provider never reports, must not keep an agent and its process up for ever.
+ */
+export const BACKGROUND_TASKS_CAP_MS = 2 * 60 * 60_000
+
+/** The background tasks the model's runner of `generation` last reported, and when that report changed. */
+export interface BackgroundTasks {
+  generation: number
+  running: number
+  changedAt: number
+}
+
+/** When the idle exit may come: the idle period counts from the later of going idle and the background tasks' last change. */
+export function idleExitAt(idleSince: number, generation: number, idleExitMs: number, background: BackgroundTasks | null): number {
+  if (background === null || background.generation !== generation) return idleSince + idleExitMs
+  if (background.running > 0) return Math.max(idleSince + idleExitMs, background.changedAt + BACKGROUND_TASKS_CAP_MS)
+  return Math.max(idleSince, background.changedAt) + idleExitMs
+}
+
 export interface DueFacts {
   hasQueuedWork: boolean
   activeGoal: boolean
   /** When its goal's next cycle starts, if one is scheduled. */
   nextGoalCycleAt: number | null
   promptCache: PromptCacheRecord | null
+  /** Null: none reported. */
+  backgroundTasks: BackgroundTasks | null
 }
 
 /** The first deadline this state is waiting on, and the event it becomes. The scheduler applies these when due. */
@@ -629,10 +658,10 @@ export function dueEvent(lifecycle: AgentLifecycle, now: number, policy: AgentPo
       if (facts.hasQueuedWork) return null
       if (compactionDue(facts.promptCache, now, facts.nextGoalCycleAt)) return { type: 'compaction_requested' }
       if (policy.idleExitMs === null || facts.activeGoal) return null
-      // Compacted just before its cache expired, it has nothing left to wait for. A relaunch restarts the idle period, so
-      // this doesn't wait for that either.
-      const compacted = facts.promptCache?.compacted === true
-      if (now < state.since + policy.idleExitMs && !compacted) return null
+      // Compacted just before its cache expired, it has nothing left to wait for but its background tasks. A relaunch
+      // restarts the idle period, so this doesn't wait for that either.
+      const idleMs = facts.promptCache?.compacted === true ? 0 : policy.idleExitMs
+      if (now < idleExitAt(state.since, state.generation, idleMs, facts.backgroundTasks)) return null
       // A large context stays up until it is compacted just before its cache expires: a message before then finds it
       // whole and warm. Exited, nothing could compact it.
       return compactionPending(facts.promptCache, now) ? null : { type: 'idle_timeout_reached' }

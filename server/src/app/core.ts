@@ -552,6 +552,7 @@ export class OuroCore {
         activeGoal: goalKeepsAgentUp(goal),
         nextGoalCycleAt: goal === null ? null : nextCycle(goal, this.cycleFacts(current)).at,
         promptCache: current.promptCache,
+        backgroundTasks: current.backgroundTasks,
       })
       if (due) this.commit(() => this.applyAgentEvent(agent.id, due))
       this.commit(() => this.reportLongTurn(agent.id, now))
@@ -1258,10 +1259,15 @@ export class OuroCore {
   }
 
   private applyJournalRecord(agentId: string, record: JournalRecord): void {
+    if (record.generation !== this.requireAgentRow(agentId).lifecycle.instanceGeneration) return
+    const generation = record.generation
+    // The model working while idle began a turn of its own, such as for a background task that finished: from here it is
+    // a turn like any other, so it holds off the idle exit, and a finish inside it waits for its end.
+    if (beginsUnpromptedTurn(record) && this.requireAgentRow(agentId).lifecycle.state.state === 'idle') {
+      this.applyAgentEvent(agentId, { type: 'unprompted_turn_began', generation, turnId: randomUUID() })
+    }
     const row = this.requireAgentRow(agentId)
     const { state } = row.lifecycle
-    if (record.generation !== row.lifecycle.instanceGeneration) return
-    const generation = record.generation
     this.summaries.noteRecord(agentId, record)
 
     const noteActivity = (activity: Extract<AgentEvent, { type: 'turn_activity' }>['activity']) => {
@@ -1275,6 +1281,13 @@ export class OuroCore {
       case 'runner_exiting':
       case 'incoming':
         return
+      case 'background_tasks': {
+        const known = row.backgroundTasks
+        if (known?.generation === generation && known.running === record.running) return
+        // By this server's clock, as the idle period it is weighed against is.
+        this.store.saveBackgroundTasks(agentId, { generation, running: record.running, changedAt: this.config.clock.now() })
+        return
+      }
       case 'taken_in':
         this.markTakenIn(agentId, record.attemptIds, record.at)
         return
@@ -3844,6 +3857,11 @@ function addressOfCaller(caller: Caller): string {
   return caller.kind === 'person' ? caller.person.address : caller.agent.name
 }
 
+/** What the model writes only while it works: arriving while idle, it means a turn began with nothing handed to it. */
+function beginsUnpromptedTurn(record: JournalRecord): boolean {
+  return record.kind === 'thinking' || record.kind === 'text' || record.kind === 'tool_use' || record.kind === 'tool_result'
+}
+
 function logRecordOf(record: JournalRecord): LogRecord[] {
   switch (record.kind) {
     case 'incoming': return [{ kind: 'incoming', at: record.at, from: record.from, text: record.text }]
@@ -3862,6 +3880,7 @@ function logRecordOf(record: JournalRecord): LogRecord[] {
     case 'turn_result':
     case 'compaction_finished':
     case 'plan_usage_observed':
+    case 'background_tasks':
       return []
   }
 }

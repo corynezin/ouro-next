@@ -551,6 +551,10 @@ export const migrations: readonly string[] = [
     PRIMARY KEY (network_id, machine_id)
   ) STRICT;
   `,
+  // 29: the background tasks an agent's runner last reported (null: none reported), which keep it up while idle. Expand only.
+  `
+  ALTER TABLE agents ADD COLUMN background_tasks_json TEXT;
+  `,
 ]
 
 export const SCHEMA_VERSION = migrations.length

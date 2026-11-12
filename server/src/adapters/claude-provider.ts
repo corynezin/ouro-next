@@ -196,6 +196,8 @@ export function startClaudeSession(params: ProviderSessionParams, onEvent: (even
     switch (raw.type) {
       case 'system':
         if (raw.subtype === 'init' && typeof raw.session_id === 'string') onEvent({ type: 'session_identified', providerSessionId: raw.session_id })
+        // The whole set each time it changes: a task started, finished, or was stopped.
+        if (raw.subtype === 'background_tasks_changed' && Array.isArray(raw.tasks)) onEvent({ type: 'background_tasks', running: raw.tasks.length })
         if (raw.subtype === 'compact_boundary' && isRecord(raw.compact_metadata) && typeof raw.compact_metadata.post_tokens === 'number') compactedTokens = raw.compact_metadata.post_tokens
         return
       case 'rate_limit_event': {

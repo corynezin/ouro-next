@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { decideAgent, defaultAgentPolicy, dueEvent } from './agent.ts'
+import { BACKGROUND_TASKS_CAP_MS, decideAgent, defaultAgentPolicy, dueEvent } from './agent.ts'
 import type { AgentLifecycle } from './agent.ts'
 import { COMPACTION_MIN_TOKENS, PROMPT_CACHE_TTL_MS, compactionDue, compactionPending, promptCacheAfterCompaction, promptCacheAfterTurn } from './compaction.ts'
 import type { PromptCacheRecord } from './compaction.ts'
@@ -39,7 +39,7 @@ test('a turn due before the cache expires keeps it warm instead', () => {
 })
 
 const idleSince = (since: number): AgentLifecycle => ({ state: { state: 'idle', since, generation: 1 }, instanceGeneration: 1, consecutiveCrashes: 0, consecutiveCreditFailures: 0, ownershipEpoch: 0, consecutiveStalls: 0 })
-const facts = (promptCache: PromptCacheRecord | null) => ({ hasQueuedWork: false, activeGoal: false, nextGoalCycleAt: null, promptCache })
+const facts = (promptCache: PromptCacheRecord | null) => ({ hasQueuedWork: false, activeGoal: false, nextGoalCycleAt: null, promptCache, backgroundTasks: null })
 
 test('an idle agent worth compacting stays up past its idle exit, compacts just before expiry, then exits', () => {
   const policy = defaultAgentPolicy
@@ -55,6 +55,16 @@ test('an idle agent worth compacting stays up past its idle exit, compacts just 
   const compacted = promptCacheAfterCompaction(big(0), 8_000, 57 * MINUTE)
   assert.deepEqual(dueEvent(idleAgain.next, 57 * MINUTE, policy, facts(compacted)), { type: 'idle_timeout_reached' }, 'nothing left to wait for')
   assert.ok(exitAt < 55 * MINUTE)
+})
+
+test('a compacted agent still waits for its running background tasks, up to their cap', () => {
+  const policy = defaultAgentPolicy
+  const compacted = promptCacheAfterCompaction(big(0), 8_000, 57 * MINUTE)
+  const running = { ...facts(compacted), backgroundTasks: { generation: 1, running: 1, changedAt: 10 * MINUTE } }
+  assert.equal(dueEvent(idleSince(0), 57 * MINUTE, policy, running), null)
+  assert.deepEqual(dueEvent(idleSince(0), 10 * MINUTE + BACKGROUND_TASKS_CAP_MS, policy, running), { type: 'idle_timeout_reached' })
+  const finished = { ...facts(compacted), backgroundTasks: { generation: 1, running: 0, changedAt: 50 * MINUTE } }
+  assert.deepEqual(dueEvent(idleSince(0), 57 * MINUTE, policy, finished), { type: 'idle_timeout_reached' }, 'nothing left to wait for')
 })
 
 test('an idle agent not worth compacting exits at its idle exit, as before', () => {

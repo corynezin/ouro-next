@@ -148,3 +148,37 @@ test("a refusal written as the assistant's text is a refusal, whatever the resul
 test("another provider's policy refusal reads as a refusal too", () => {
   assert.equal(classifyClaudeFailure('Invalid prompt: your prompt was flagged as potentially violating our usage policy.'), 'model_refused')
 })
+
+test('each background_tasks_changed gives how many background tasks run, as Claude Code writes it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ouro-fake-claude-'))
+  try {
+    const bin = join(dir, 'claude')
+    // As Claude Code 2.1 wrote it for a background shell started in a turn, which then finished after the turn's result.
+    writeFileSync(bin, `#!/usr/bin/env node
+const { createInterface } = require('node:readline')
+const out = (message) => process.stdout.write(JSON.stringify(message) + '\\n')
+createInterface({ input: process.stdin }).on('line', () => {
+  out({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'b1', task_type: 'local_bash', description: 'Watch CI' }] })
+  out({ type: 'system', subtype: 'task_started', task_id: 'b1', is_backgrounded: true, task_type: 'local_bash' })
+  out({ type: 'result', subtype: 'success', is_error: false, total_cost_usd: 0 })
+  out({ type: 'system', subtype: 'task_notification', task_id: 'b1', status: 'completed' })
+  out({ type: 'system', subtype: 'background_tasks_changed', tasks: [] })
+})
+`)
+    chmodSync(bin, 0o755)
+    const events: ProviderEvent[] = []
+    let notify = () => {}
+    const session = startClaudeSession(
+      { model: 'm', folder: dir, resumeProviderSessionId: null, systemPrompt: '', env: { PATH: process.env.PATH ?? '', OURO_CLAUDE_BIN: bin }, stateDir: dir, memoryDir: null, promptCacheTtlMs: null },
+      (event) => { events.push(event); notify() },
+    )
+    await new Promise<void>((resolve) => {
+      notify = () => { if (events.filter((event) => event.type === 'background_tasks').length === 2) resolve() }
+      session.deliver({ attemptId: 'a1', from: 'alice', text: 'hi', modelContent: 'hi' })
+    })
+    session.stop()
+    assert.deepEqual(events.flatMap((event) => (event.type === 'background_tasks' ? [event.running] : [])), [1, 0])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

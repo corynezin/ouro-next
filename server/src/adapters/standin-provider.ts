@@ -32,6 +32,9 @@ export type StandInStep =
   /** The provider loses this conversation and the runner crashes, the first time this name is reached: the next launch
    *  can't resume it. */
   | { do: 'lose_session_once'; name: string }
+  /** Leaves a background task running past the turn, as Claude Code's background shell does. Once barrier `name` is
+   *  released the task ends, and the model takes its own turn for it, with nothing handed to it, running `then`. */
+  | { do: 'background'; name: string; then: StandInStep[] }
 
 function crashRunner(): void {
   process.kill(-process.pid, 'SIGKILL')
@@ -88,6 +91,9 @@ export function startStandInSession(params: ProviderSessionParams, onEvent: (eve
   let currentTurn: { attemptIds: string[]; cancel: () => void } | null = null
   let stopped = false
   let interruptRequested = false
+  // Turns the model takes on its own, for background tasks that ended: each waits until no turn runs.
+  const unpromptedTurns: StandInStep[][] = []
+  let backgroundRunning = 0
 
   onEvent({ type: 'session_identified', providerSessionId: sessionId })
 
@@ -104,10 +110,11 @@ export function startStandInSession(params: ProviderSessionParams, onEvent: (eve
     })
   })
 
-  const waitForBarrier = (name: string) => new Promise<void>((resolve) => {
+  // A background task outlives the turn that started it, so interrupting a later turn doesn't end it.
+  const waitForBarrier = (name: string, { interruptible = true } = {}) => new Promise<void>((resolve) => {
     writeFileSync(join(barrierDir, `${name}.reached`), '')
     const check = setInterval(() => {
-      if (stopped || interruptRequested || existsSync(join(barrierDir, `${name}.release`))) {
+      if (stopped || (interruptible && interruptRequested) || existsSync(join(barrierDir, `${name}.release`))) {
         clearInterval(check)
         resolve()
       }
@@ -171,6 +178,17 @@ export function startStandInSession(params: ProviderSessionParams, onEvent: (eve
           case 'exit_session':
             onEvent({ type: 'exited', reason: 'the session ended' })
             return
+          case 'background':
+            backgroundRunning += 1
+            onEvent({ type: 'background_tasks', running: backgroundRunning })
+            void waitForBarrier(step.name, { interruptible: false }).then(() => {
+              if (stopped) return
+              backgroundRunning -= 1
+              onEvent({ type: 'background_tasks', running: backgroundRunning })
+              unpromptedTurns.push(step.then)
+              startNextTurnIfIdle()
+            })
+            break
           case 'claude_error':
             onEvent({ type: 'turn_failed', failure: classifyClaudeFailure(step.text), detail: step.text.slice(0, 500), retryAfterMs: null })
             onEvent({ type: 'exited', reason: 'claude exited with 1' })
@@ -183,8 +201,30 @@ export function startStandInSession(params: ProviderSessionParams, onEvent: (eve
     onEvent({ type: 'turn_result', acknowledgedAttemptIds: deliveries.map((delivery) => delivery.attemptId), costUsd, context })
   }
 
+  /** Only text and commands: what a model does when a background task's end wakes it. */
+  async function runUnpromptedTurn(steps: StandInStep[]): Promise<void> {
+    const nothingHanded: DeliveryForModel = { attemptId: '', from: '', text: '', modelContent: '' }
+    onEvent({ type: 'thinking' })
+    for (const step of steps) {
+      if (stopped || interruptRequested) break
+      if (step.do === 'text') onEvent({ type: 'text', text: step.text })
+      if (step.do === 'run') await runCommand(step.command, nothingHanded)
+    }
+    if (!stopped) onEvent({ type: 'turn_result', acknowledgedAttemptIds: [], costUsd: 0.001, context: null })
+  }
+
   function startNextTurnIfIdle(): void {
-    if (currentTurn || stopped || inbox.length === 0) return
+    if (currentTurn || stopped) return
+    const unprompted = inbox.length === 0 ? unpromptedTurns.shift() : undefined
+    if (unprompted) {
+      currentTurn = { attemptIds: [], cancel: () => {} }
+      void runUnpromptedTurn(unprompted).finally(() => {
+        currentTurn = null
+        startNextTurnIfIdle()
+      })
+      return
+    }
+    if (inbox.length === 0) return
     const deliveries = inbox.splice(0)
     interruptRequested = false
     currentTurn = { attemptIds: deliveries.map((delivery) => delivery.attemptId), cancel: () => {} }
