@@ -21,7 +21,8 @@
     "test": "npm run lint:imports && npm run typecheck && npm run test:unit",
     "test:live": "node --no-warnings --test --test-concurrency=1 'journeys/live/*.live.ts'",
     "test:journeys": "node --no-warnings --test --test-concurrency=1 'journeys/*.journey.ts' 'apps/mobile/journeys/*.journey.ts'",
-    "test:unit": "node --no-warnings --test 'packages/*/src/**/*.test.ts' 'server/src/**/*.test.ts' 'guardian/src/**/*.test.ts' 'hub/src/**/*.test.ts' 'tools/**/*.test.ts' 'apps/mobile/src/**/*.test.ts'"
+    "test:unit": "node --no-warnings --test 'packages/*/src/**/*.test.ts' 'server/src/**/*.test.ts' 'guardian/src/**/*.test.ts' 'hub/src/**/*.test.ts' 'tools/**/*.test.ts' 'benchmarks/**/*.test.ts' 'apps/mobile/src/**/*.test.ts'",
+    "bench": "node --no-warnings benchmarks/maintainability/bench.ts"
   },
   "devDependencies": {
     "patch-package": "^8.0.1",
