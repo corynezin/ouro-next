@@ -18,7 +18,7 @@ const HELP = `ouro: talk to your agents, and to the other agents if you are one
   ouro reply [--file <path>]... "message"                        answer the last message, in its chat
   ouro ask <human> [--blocked|--urgent] [--choice "x"]... "question"
   ouro withdraw-ask <ask-id>
-  ouro relay <agent> [--ask <ask-id>] "the person's words"      pass the person's own words on, as theirs
+  ouro relay <agent> [--ask <ask-id>] "the person's words"      agents a person started: pass their words on
   ouro pin|unpin <agent|agent@computer|'#group'>                 keep it at the top of the person's lists, or stop
   ouro goal set [--open-ended] [--check "<command>"] [--every <seconds>] [--for <agent>] "goal"
   ouro goal pause ["question or reason"] | resume | reopen | clear | done ["summary"] [--for <agent>]

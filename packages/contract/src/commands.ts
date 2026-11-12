@@ -90,7 +90,7 @@ export const commands = {
   /** Brings the calling agent's project memory and the person's shared notes together; Claude Code's hooks call it. */
   sync_memory: defineCommand(['agent'], Empty, Empty),
 
-  /** An agent passes its creator's own words to an agent here, as theirs: their answer to a question, say. */
+  /** An agent a person started passes their own words to an agent here, as theirs: their answer to a question, say. */
   relay_message: defineCommand(['agent'], z.object({
     to: Address,
     text: z.string().min(1),
@@ -150,8 +150,6 @@ export const commands = {
   pin: defineCommand(['person', 'agent'], z.object({ target: PinTarget }), z.object({ pin: PinEntity })),
   /** Unpinning what isn't pinned does nothing. */
   unpin: defineCommand(['person', 'agent'], z.object({ target: PinTarget }), Empty),
-  /** Moves a pin just before another of the person's pins, or to the end when `beforePinId` is null. */
-  move_pin: defineCommand(['person'], z.object({ pinId: z.string(), beforePinId: z.string().nullable() }), z.object({ pin: PinEntity })),
   mark_chat_read: defineCommand(['person'], z.object({ chatId: z.string(), readThroughSeq: z.number().int().nonnegative() }), z.object({ readState: ReadStateEntity })),
 
   /** A one-time code for a new device of the owner, or for a named new person. */

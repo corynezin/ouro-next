@@ -11,7 +11,7 @@ import {
 } from '@ouro/contract'
 import type {
   AgentEntity, AskEntity, AskSnooze, AttachmentRef, ChatEntity, CommandName, GoalEntity, CommandOutput, DeliveryWake, EntityKind, LogPage, LogRecord, MessageEntity, MessagePurpose, PairResponse, PinEntity, PinTarget, PlanUsage, PlanWindow,
-  IntegrationProvider, NotificationSettings, PushTokenRegistration, SearchPage, ServerEntity, ServerIdentity, Snapshot, SummaryPage, Viewer,
+  IntegrationProvider, NotificationSettings, PushTokenRegistration, SearchPage, ServerEntity, ServerIdentity, Snapshot, StandingInstructions, SummaryPage, Viewer,
 } from '@ouro/contract'
 import { journalSize, readJournalBackward, readJournalForward } from '../adapters/journal-file.ts'
 import type { DataPaths } from '../adapters/paths.ts'
@@ -46,7 +46,8 @@ import { claudePlanForPeers, goalPlanHold, mergePlanReading, planUsageOf, sameLo
 import type { PlanAccount, PlanReading, PlanWindowReading } from '../domain/usage.ts'
 import type { LaunchModel, ModelProvider, ModelRuntime } from '../domain/models.ts'
 import { replyReminder } from '../domain/reply.ts'
-import { pinPositionAfter, pinPositionAt } from '../domain/pins.ts'
+import { relayDecision } from '../domain/relay.ts'
+import { starterDecision } from '../domain/starter.ts'
 import { excerptAround, searchWords } from '../domain/search.ts'
 import { unmergedBranchReport } from '../domain/worktree.ts'
 import { autoArchiveDue } from '../domain/archive.ts'
@@ -185,8 +186,10 @@ const STARTER_TASK = "Be the person's front door: route each request to an agent
 const STARTER_WELCOME = "Hi! I'm your front door to Ouro. Tell me what you want (change this app, build something, look into something) and I'll start an agent for it and bring back the result.\n\nI'm pinned at the top of your list. Swipe to unpin me, or pin any other agent or group to keep it up here."
 /** Set once the starter agent is made, or found already there: so it is made once, and never again after an archive. */
 const STARTER_META_KEY = 'starter_created'
-/** Before pins, the starter agent was the special "master": a machine that has one keeps it, pinned. */
+/** Before pins, the starter agent was the special "master": a machine that has one keeps it, pinned. Still a reserved
+ * name, so an agent called this was made by Ouro. */
 const LEGACY_STARTER_NAME = 'master'
+const STARTER_INSTRUCTIONS: StandingInstructions = { kind: 'protocol', name: 'starter' }
 const SUMMARY_PAGE_LIMIT_MAX = 100
 const STAND_IN_MODEL = 'stand-in'
 const NO_NAME_SUGGESTION: NameSuggestion = { name: null, costUsd: 0 }
@@ -987,7 +990,7 @@ export class OuroCore {
     if (!message) throw new Error(`delivery ${delivery.id} has no message`)
     const chat = this.store.chatEntity(message.chatId)
     const modelContent = renderForModel(
-      { from: message.from, text: message.text, purpose: message.purpose, attachmentPaths: message.attachments.map((attachment) => this.namedAttachmentPath(attachment)) },
+      { from: message.from, relayedBy: message.relayedBy, text: message.text, purpose: message.purpose, attachmentPaths: message.attachments.map((attachment) => this.namedAttachmentPath(attachment)) },
       { wake: delivery.wake, possiblySeen: delivery.state.possiblySeen },
       { groupHandle: chat?.kind === 'group' ? chatHandle(chat) : null },
     )
@@ -1042,6 +1045,12 @@ export class OuroCore {
     }
   }
 
+  private standingInstructionsText(instructions: StandingInstructions): string {
+    switch (instructions.kind) {
+      case 'protocol': return this.protocols[instructions.name]
+    }
+  }
+
   /** An agent that has run before but has no session to resume starts a new one, seeded from what's stored. */
   private systemPromptFor(row: AgentRow, resumeConversation: boolean, launch: LaunchModel): string {
     const notOnThisMachine = "(not on this machine: say so if it's needed)"
@@ -1054,7 +1063,7 @@ export class OuroCore {
       serverSource: this.config.personSource?.serverDir ?? notOnThisMachine,
     }
     const rules = renderSystemPrompt(this.protocols.default, facts)
-    const base = row.instructions === null ? rules : `${rules}\n\n${renderSystemPrompt(row.instructions, facts)}`
+    const base = row.instructions === null ? rules : `${rules}\n\n${renderSystemPrompt(this.standingInstructionsText(row.instructions), facts)}`
     const fallback = launch.fallbackFrom === null
       ? ''
       : `\n\nYou were set to run on ${launch.fallbackFrom.label}, but ${launch.fallbackFrom.provider === 'openrouter' ? 'OpenRouter' : launch.fallbackFrom.provider} isn't set up on this machine, so you are running on ${launch.model.label} instead. Say so if it matters to your work.`
@@ -1619,17 +1628,25 @@ export class OuroCore {
    * it a front door; nothing else about it is special, so they can unpin, archive or move it like any other.
    */
   private ensureStarterAgent(owner: PersonRow, now: number): void {
-    if (this.store.getMeta(STARTER_META_KEY) !== null) return
+    const decision = starterDecision({
+      settledBefore: this.store.getMeta(STARTER_META_KEY) !== null,
+      activeLegacyId: this.store.activeAgentByName(LEGACY_STARTER_NAME)?.id ?? null,
+      archivedLegacy: this.store.newestArchivedAgentByName(LEGACY_STARTER_NAME) !== null,
+    })
+    if (decision.kind === 'none') return
     this.store.setMeta(STARTER_META_KEY, String(now))
-    const legacy = this.store.activeAgentByName(LEGACY_STARTER_NAME)
-    if (legacy) {
-      // Its rules were master.md, chosen by its name; they are its standing instructions now.
-      this.store.updateAgentFields(legacy.id, { task: STARTER_TASK, instructions: this.protocols.starter })
-      this.pinFor(owner.id, { kind: 'agent', agentId: legacy.id }, now)
-      return
+    switch (decision.kind) {
+      case 'keep_archived': return
+      case 'adopt_legacy':
+        // Its rules were master.md, chosen by its name; starter.md is its standing instructions now.
+        this.store.setAgentRole(decision.agentId, STARTER_TASK, STARTER_INSTRUCTIONS)
+        this.pinFor(owner.id, { kind: 'agent', agentId: decision.agentId }, now)
+        return
+      case 'make': return this.makeStarterAgent(owner, now)
     }
-    // An archived master stays archived: that was the person's choice.
-    if (this.store.newestArchivedAgentByName(LEGACY_STARTER_NAME)) return
+  }
+
+  private makeStarterAgent(owner: PersonRow, now: number): void {
     const name = this.store.activeAgentByName(STARTER_AGENT_NAME) ? this.chooseAgentName(null, STARTER_TASK, STARTER_AGENT_NAME) : STARTER_AGENT_NAME
     const agentId = shortId()
     this.store.insertAgent({
@@ -1645,7 +1662,7 @@ export class OuroCore {
       credentialHash: hashSecret(randomUUID()),
       worktree: null,
       promptCacheLifetime: '5m',
-      instructions: this.protocols.starter,
+      instructions: STARTER_INSTRUCTIONS,
     })
     this.pinFor(owner.id, { kind: 'agent', agentId }, now)
     this.postToPerson({ fromAgent: this.requireAgentRow(agentId), to: owner, text: STARTER_WELCOME, attachments: [], purpose: 'message', clientKey: null, posesAskId: null })
@@ -1653,20 +1670,32 @@ export class OuroCore {
 
   /**
    * Work a base update needs done (resolving a conflict, publishing the app) goes to an agent of its own, started for the
-   * owner in their source. If none can start (no free slot, budget spent, or anything else), the owner is told instead:
-   * the update itself has already been decided, so this never throws.
+   * owner in their source; its name is returned. If none can start (no free slot, budget spent, or anything else), the
+   * owner is told instead and null is returned: the update itself has already been decided, so this never throws. Inside
+   * a transaction, so whatever the update records goes in with the hand-off or not at all.
    */
-  private handOffBaseWork(work: { name: string; task: string }): void {
+  private handOffBaseWork(work: { name: string; task: string }): string | null {
     const root = this.config.personSource?.root ?? this.config.defaultFolder
     try {
-      this.commit(() => {
-        this.startAgent({ task: work.task, name: null, model: null, folder: root, promptCacheLifetime: '5m' }, `base-work:${randomUUID()}`,
-          { parent: OWNER_ADDRESS, createdBy: OWNER_ADDRESS, parentAgentId: null, folder: root }, { name: work.name, costUsd: 0 })
-      })
+      const agentId = this.undoable(() => this.startAgent({ task: work.task, name: null, model: null, folder: root, promptCacheLifetime: '5m' }, `base-work:${randomUUID()}`,
+        { parent: OWNER_ADDRESS, createdBy: OWNER_ADDRESS, parentAgentId: null, folder: root }, { name: work.name, costUsd: 0 }))
+      return this.requireAgentRow(agentId).name
     } catch (error) {
       const why = (error as Error).message
       if (!(error instanceof CommandRefused)) this.config.log('base_work_not_handed_off', { name: work.name, why })
-      this.commit(() => this.alert(OWNER_ADDRESS, `${work.task}\n\n(Ouro couldn't start an agent for this: ${why}.)`))
+      this.alert(OWNER_ADDRESS, `${work.task}\n\n(Ouro couldn't start an agent for this: ${why}.)`)
+      return null
+    }
+  }
+
+  /** Inside a transaction: `body`'s writes and effects, or, if it throws, none of them, and the error. */
+  private undoable<T>(body: () => T): T {
+    const effects = this.pendingEffects.length
+    try {
+      return this.store.savepoint(body)
+    } catch (error) {
+      this.pendingEffects.length = effects
+      throw error
     }
   }
 
@@ -1834,7 +1863,6 @@ export class OuroCore {
       case 'mark_chat_read': return this.commandMarkRead(caller, input as never)
       case 'pin': return this.commandPin(caller, input as never)
       case 'unpin': return this.commandUnpin(caller, input as never)
-      case 'move_pin': return this.commandMovePin(caller, input as never)
       case 'watch_agent': return this.commandWatchAgent(caller, input as never)
       case 'register_push_token': return this.commandRegisterPushToken(caller, input as never)
       case 'clear_push_token': return this.commandClearPushToken(caller)
@@ -1865,7 +1893,10 @@ export class OuroCore {
       })
       case 'control_remote_agent': return this.requireComputerManager(caller, () => {
         if (prepared.remoteAgentAnswer === null) throw new CommandRefused('invalid_request', 'controlling an agent elsewhere needs its computer to answer first')
-        return { remoteAgent: this.peers.noteAnswered(prepared.remoteAgentAnswer.computerId, prepared.remoteAgentAnswer.card) }
+        const remoteAgent = this.peers.noteAnswered(prepared.remoteAgentAnswer.computerId, prepared.remoteAgentAnswer.card)
+        // As an archived agent here loses its pins, so does one archived there from here.
+        if ((input as { action: RemoteAgentAction }).action.kind === 'archive') this.unpinEverywhere({ kind: 'remote_agent', address: remoteAgent.address })
+        return { remoteAgent }
       })
       case 'create_remote_agent': return this.requireComputerManager(caller, () => {
         if (prepared.remoteAgentAnswer === null) throw new CommandRefused('invalid_request', 'starting an agent elsewhere needs its computer to answer first')
@@ -2713,11 +2744,16 @@ export class OuroCore {
     throw new CommandRefused('not_found', `no agent named ${name}`)
   }
 
-  /** The person's own words, carried by any agent of theirs: from the person, marked as relayed, closing asks as theirs would. */
+  /**
+   * A person's own words, carried by an agent they started (see relayDecision): from the person, marked as relayed, and
+   * shown to the recipient as relayed. It closes only the ask it names: a relay isn't the person talking to that agent.
+   */
   private commandRelay(caller: Caller, input: { to: string; text: string; answersAskId: string | null }, clientKey: string): CommandOutput<'relay_message'> {
     if (caller.kind !== 'agent') throw new CommandRefused('forbidden', "only an agent relays a person's words")
-    const person = this.store.personByAddress(caller.agent.createdBy)
-    if (!person) throw new CommandRefused('not_found', `no person at ${caller.agent.createdBy}`)
+    const decision = relayDecision(caller.agent)
+    if (decision.kind === 'refused') throw new CommandRefused('forbidden', decision.why)
+    const person = this.store.personByAddress(decision.person)
+    if (!person) throw new CommandRefused('not_found', `no person at ${decision.person}`)
     const parsed = parseAddress(input.to)
     if (parsed.kind !== 'agent' || parsed.machine !== null) throw new CommandRefused('invalid_request', "a relay goes to an agent on this machine")
     if (input.answersAskId !== null && !this.store.openAskById(input.answersAskId)) throw new CommandRefused('ask_closed', 'that question is already closed')
@@ -2727,7 +2763,7 @@ export class OuroCore {
     })
     this.requestWake(toAgent.id, 'new_message')
     this.settleAgent(toAgent.id)
-    this.closeAsksAnsweredBy(toAgent.name, input.answersAskId)
+    if (input.answersAskId !== null) this.closeAsk(input.answersAskId, this.config.clock.now())
     return { message: this.store.messageEntity(this.store.messageById(message.id)!) }
   }
 
@@ -3058,6 +3094,8 @@ export class OuroCore {
 
   private commandFinish(caller: Caller, input: { summary: string }, clientKey: string, prepared: PreparedChecks): CommandOutput<'finish_agent'> {
     if (caller.kind !== 'agent') throw new CommandRefused('forbidden', 'only an agent can finish itself')
+    // Standing instructions (the front door's) are a role with no end; a finished one would be auto-archived, pin and all.
+    if (caller.agent.instructions !== null) throw new CommandRefused('forbidden', 'you have a standing role and never finish: end your turn instead')
     const goal = this.store.goalOf(caller.agent.id)
     if (goal && goal.progress.status === 'active') this.completeGoalWithNotice(goal, input.summary, prepared.goalCheck)
     const decision = this.applyAgentEvent(caller.agent.id, { type: 'finish_requested', summary: input.summary })
@@ -3219,21 +3257,35 @@ export class OuroCore {
 
   private commandPin(caller: Caller, input: { target: PinTarget }): CommandOutput<'pin'> {
     const person = this.pinOwnerOf(caller)
-    const { target } = input
-    if (target.kind === 'agent') {
-      const agent = this.requireAgentRow(target.agentId)
-      if (agent.lifecycle.state.state === 'archived') throw new CommandRefused('agent_archived', `${agent.name} is archived`)
+    this.requirePinnable(input.target)
+    return { pin: this.pinFor(person.id, input.target, this.config.clock.now()) }
+  }
+
+  /** Only what the lists show can be pinned: a pin of anything else would stay hidden for good. */
+  private requirePinnable(target: PinTarget): void {
+    switch (target.kind) {
+      case 'agent': {
+        const agent = this.requireAgentRow(target.agentId)
+        const state = agent.lifecycle.state.state
+        if (state === 'archived') throw new CommandRefused('agent_archived', `${agent.name} is archived`)
+        if (state === 'moved') throw new CommandRefused('invalid_request', `${agent.name} moved to another computer: pin it there as name@computer`)
+        return
+      }
+      case 'remote_agent': {
+        if (!this.peers.remoteAgents().some((remote) => remote.address === target.address)) throw new CommandRefused('not_found', `no agent ${target.address} on the other computers`)
+        return
+      }
+      case 'chat': {
+        const chat = this.store.chatEntity(target.chatId)
+        if (!chat) throw new CommandRefused('not_found', 'no such chat')
+        if (chat.kind !== 'group') throw new CommandRefused('invalid_request', 'pin the agent, not its direct chat')
+        return
+      }
+      default: {
+        const unknown: never = target
+        throw new CommandRefused('invalid_request', `nothing pinnable: ${JSON.stringify(unknown)}`)
+      }
     }
-    if (target.kind === 'chat') {
-      const chat = this.store.chatEntity(target.chatId)
-      if (!chat) throw new CommandRefused('not_found', 'no such chat')
-      if (chat.kind !== 'group') throw new CommandRefused('invalid_request', "pin the agent, not its direct chat")
-    }
-    if (target.kind === 'remote_agent') {
-      const parsed = parseAddress(target.address)
-      if (parsed.kind !== 'agent' || parsed.machine === null) throw new CommandRefused('invalid_request', 'an agent on another computer is pinned as name@computer')
-    }
-    return { pin: this.pinFor(person.id, target, this.config.clock.now()) }
   }
 
   private commandUnpin(caller: Caller, input: { target: PinTarget }): CommandOutput<'unpin'> {
@@ -3243,30 +3295,11 @@ export class OuroCore {
     return {}
   }
 
-  private commandMovePin(caller: Caller, input: { pinId: string; beforePinId: string | null }): CommandOutput<'move_pin'> {
-    const person = this.pinOwnerOf(caller)
-    const pins = this.store.listPins(person.id)
-    const pin = pins.find((p) => p.id === input.pinId)
-    if (!pin) throw new CommandRefused('not_found', 'no such pin')
-    const rest = pins.filter((p) => p.id !== pin.id)
-    const at = input.beforePinId === null ? rest.length : rest.findIndex((p) => p.id === input.beforePinId)
-    if (at < 0) throw new CommandRefused('not_found', 'no such pin to move before')
-    const position = pinPositionAt(rest.map((p) => p.position), at)
-    if (position === null) {
-      const ordered = [...rest.slice(0, at), pin, ...rest.slice(at)]
-      ordered.forEach((p, index) => { if (p.position !== index) this.store.updatePin(person.id, { ...p, position: index }) })
-      return { pin: { ...pin, position: at } }
-    }
-    const moved = { ...pin, position }
-    this.store.updatePin(person.id, moved)
-    return { pin: moved }
-  }
-
-  /** The person's pin of this target, made at the end of their pins if they had none. */
+  /** The person's pin of this target, made after their other pins if they had none. */
   private pinFor(personId: string, target: PinTarget, now: number): PinEntity {
     const existing = this.store.pinOf(personId, target)
     if (existing) return existing
-    const pin: PinEntity = { id: shortId(), target, position: pinPositionAfter(this.store.listPins(personId).at(-1)?.position), pinnedAt: now }
+    const pin: PinEntity = { id: shortId(), target, pinnedAt: now }
     this.store.insertPin(personId, pin)
     return pin
   }
@@ -3278,7 +3311,7 @@ export class OuroCore {
   private repinEverywhere(from: PinTarget, to: PinTarget): void {
     for (const { personId, pin } of this.store.pinsOf(from)) {
       if (this.store.pinOf(personId, to)) this.store.deletePin(personId, pin.id)
-      else this.store.updatePin(personId, { ...pin, target: to })
+      else this.store.retargetPin(personId, pin.id, to)
     }
   }
 

@@ -143,3 +143,20 @@ test('a client is sent changes of an opt-in kind only when it asks for them', ()
   assert.deepEqual(store.changesAfter(0, 'p', 10, ['pin']).map((row) => row.entity), ['agent'])
   store.close()
 })
+
+test('a savepoint that throws undoes only its own writes, and the transaction around it goes on', () => {
+  const store = new Store(':memory:')
+  store.transaction(() => {
+    store.setMeta('kept', '1')
+    assert.throws(() => store.savepoint(() => {
+      store.setMeta('undone', '1')
+      throw new Error('refused')
+    }), /refused/)
+    store.setMeta('after', '1')
+  })
+  assert.equal(store.getMeta('kept'), '1')
+  assert.equal(store.getMeta('undone'), null)
+  assert.equal(store.getMeta('after'), '1')
+  assert.throws(() => store.savepoint(() => 1), /inside a transaction/)
+  store.close()
+})

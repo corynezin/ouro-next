@@ -1,7 +1,7 @@
 // Moving an agent to another of the person's computers, machine to machine. The sender stays the agent's owner until
 // the receiver answers that it has it.
 import { z } from 'zod'
-import { ModelId, PromptCacheLifetime } from './agent.ts'
+import { ModelId, PromptCacheLifetime, StandingInstructions } from './agent.ts'
 import { GoalKind } from './entities.ts'
 import { MessagePurpose } from './message.ts'
 
@@ -41,8 +41,8 @@ export const PeerMove = z.object({
     ownershipEpoch: z.number().int(),
     /** Older computers don't send it; every agent there had the 5 minute cache, so that is what it means. */
     promptCacheLifetime: PromptCacheLifetime.default('5m'),
-    /** Standing instructions added to its rules. Older computers don't send it: none. */
-    instructions: z.string().nullable().default(null),
+    /** Older computers don't send it: none. Instructions this computer doesn't know of (a newer one's): none. */
+    instructions: StandingInstructions.nullable().default(null).catch(null),
   }),
   goal: z.object({
     text: z.string(),

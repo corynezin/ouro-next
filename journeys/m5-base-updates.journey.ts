@@ -1,6 +1,6 @@
 // Taking bases (J-34, server side): an offered base is merged beside the person's live source and goes live through the
-// guardian's release path, then into their branch; a conflict goes to an agent started for it and nothing live changes until it
-// is resolved; a base that doesn't build changes nothing. A local bare repository stands in for the public base repository.
+// guardian's release path, then into their branch; a conflict goes to an agent started for it (or, when none can start, to
+// the owner) and nothing live changes until it is resolved; a base that doesn't build changes nothing. A local bare repository stands in for the public base repository.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -24,6 +24,7 @@ const FOLDER_LINE = 'Work in {{folder}} unless the task says otherwise.'
 const PERSON_LINE = 'Work in {{folder}} unless the task says otherwise. Keep notes short.'
 const BASE_2_LINE = 'Work in {{folder}} unless your task says otherwise.'
 const RESOLVED_LINE = 'Work in {{folder}} unless your task says otherwise. Keep notes short.'
+const BASE_4_LINE = 'Work in {{folder}} unless the task you were given says otherwise.'
 
 /** A stand-in for `expo export`, configured the way a person's is. */
 const FAKE_EXPORT = `mkdir -p {out}/b && echo bundle > {out}/b/ios.js && printf '{"version":0,"fileMetadata":{"ios":{"bundle":"b/ios.js","assets":[]}}}' > {out}/metadata.json`
@@ -56,6 +57,10 @@ async function makeBaseTrees(): Promise<void> {
 
   cpSync(treeOf(2), treeOf(3), { recursive: true })
   editTree(3, 'server/src/app/render.ts', 'const STOP_WORDS', 'const typeError: number = "not a number"\nconst STOP_WORDS')
+
+  // Base 4 drops base 3's broken change and rewords the line the person changed again.
+  cpSync(treeOf(2), treeOf(4), { recursive: true })
+  editTree(4, DEFAULT_PROTOCOL, BASE_2_LINE, BASE_4_LINE)
 }
 
 /** Releasing base `n` in the repository, which servers then offer. */
@@ -143,7 +148,7 @@ test('a base that conflicts with the person\'s changes goes to an agent started 
     const status = await base()
     return status?.update.state === 'conflict' && status.update
   }, 60_000)
-  assert.deepEqual(conflicted, { state: 'conflict', n: 2, files: [DEFAULT_PROTOCOL] })
+  assert.deepEqual(conflicted, { state: 'conflict', n: 2, files: [DEFAULT_PROTOCOL], resolver: 'base-2' })
   assert.equal((await run.status()).active, releaseBefore, 'nothing live changed')
   assert.equal(await head(), headBefore)
   const brief = (await waitFor('an agent started with the brief', async () => await startedFor('base-2'))).task
@@ -196,4 +201,27 @@ test('a base that fails to build changes nothing: the live release and the perso
   assert.equal((await run.status()).active, releaseBefore)
   assert.equal(await head(), headBefore)
   assert.doesNotMatch(sourceText('server/src/app/render.ts'), /typeError/)
+})
+
+test('a conflict no agent can start for goes to the owner, and is recorded with no resolver', async () => {
+  // A running agent holds the only slot.
+  await phone.command('create_agent', { task: standInScript({ do: 'run', command: 'sleep 600' }), name: 'sleeper', model: null, folder: null })
+  await waitFor('the sleeper to run', async () => (await startedFor('sleeper'))?.state.state === 'in_turn')
+  await phone.command('set_limits', { agentLimit: 1, budgetUsd: null })
+  await offer(4, 'the default protocol is reworded again')
+  await waitFor('base 4 to be offered', async () => (await base())?.offered?.n === 4)
+
+  await phone.command('take_base_update', { n: 4 })
+  const conflicted = await waitFor('base 4 to conflict', async () => {
+    const status = await base()
+    return status?.update.state === 'conflict' && status.update
+  }, 60_000)
+  assert.deepEqual(conflicted, { state: 'conflict', n: 4, files: [DEFAULT_PROTOCOL], resolver: null })
+  assert.equal(await startedFor('base-4'), undefined, 'no agent was started')
+  const snapshot = await phone.snapshot()
+  const systemChat = snapshot.chats.find((chat) => chat.members.some((member) => member.address === 'system') && chat.members.some((member) => member.address === snapshot.viewer.address))
+  assert.ok(systemChat, 'the owner was told, from the system')
+  const notice = (await phone.history(systemChat.id)).messages.find((message) => message.text.startsWith('Ouro base 4 conflicts'))
+  assert.ok(notice, 'with the brief')
+  assert.match(notice.text, /couldn't start an agent for this: the limit of 1 running agents is reached/)
 })

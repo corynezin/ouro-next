@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  AgentState, Change, CommandRequest, commands, displayStateOf, parseAddress, PeerMessage, receiptOf, SyncFrame,
+  AgentState, Change, CommandRequest, commands, displayStateOf, parseAddress, PeerMessage, pinTargetKey, receiptOf, SyncFrame,
 } from './index.ts'
 import type { MessageEntity } from './index.ts'
 
@@ -73,4 +73,10 @@ test('a message from a peer older than protocol 3 answers no ask', () => {
   const fromProtocol2 = { messageId: 'm1', from: { kind: 'owner' }, to: 'helper', text: 'yes', wake: 'wake', purpose: 'message', sentAt: 1 }
   assert.equal(PeerMessage.parse(fromProtocol2).answersAskId, null)
   assert.equal(PeerMessage.parse({ ...fromProtocol2, answersAskId: 'ask-1' }).answersAskId, 'ask-1')
+})
+
+test('a pin target is the same as another exactly when its key is', () => {
+  assert.equal(pinTargetKey({ kind: 'agent', agentId: 'x' }), pinTargetKey({ kind: 'agent', agentId: 'x' }))
+  assert.notEqual(pinTargetKey({ kind: 'agent', agentId: 'x' }), pinTargetKey({ kind: 'chat', chatId: 'x' }))
+  assert.notEqual(pinTargetKey({ kind: 'remote_agent', address: 'x@a' }), pinTargetKey({ kind: 'remote_agent', address: 'x@b' }))
 })

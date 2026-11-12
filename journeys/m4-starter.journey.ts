@@ -1,8 +1,9 @@
 // The starter agent: made, pinned and greeting the person when the owner first pairs, with its front-door instructions
-// as standing instructions. Nothing else about it is special: any agent can carry the person's words, and it can finish,
-// be unpinned and be archived like any other. Pins: the person's own, kept on the server.
+// as standing instructions, which keep it from finishing. Otherwise it is an ordinary agent: unpinned and archived like
+// any other. An agent a person started carries their words; its helpers don't. Pins: the person's own, kept on the server,
+// in the order they were pinned.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import type { AgentEntity } from '@ouro/contract'
@@ -43,9 +44,10 @@ test("the owner's first pairing makes the starter agent, pinned, greeting them a
   assert.equal((await phone.snapshot()).pins.length, 1)
 })
 
-test('a first message starts it with the default rules and its standing instructions', async () => {
-  await send(STARTER, standInScript({ do: 'run', command: 'ouro reply "hello there"' }))
-  await says(STARTER, 'hello there')
+test('a first message starts it with the default rules and its standing instructions, which keep it from finishing', async () => {
+  await send(STARTER, standInScript({ do: 'run', command: 'ouro done "bye" > done.txt 2>&1; ouro reply "hello there, done says: $(tr "\\n" " " < done.txt)"' }))
+  assert.match(await says(STARTER, 'hello there'), /standing role and never finish/)
+  await assert.rejects(phone.command('create_agent', { task: 'x', name: 'master', model: null, folder: null }), /reserved/, "the old front door's name stays reserved")
   const starter = await phone.agent(STARTER)
   const config = JSON.parse(readFileSync(join(run.dataDir, 'agents', starter.id, `runner-${generationOf(starter)}.json`), 'utf8')) as { systemPrompt: string }
   assert.match(config.systemPrompt, /You are agent "concierge"/)
@@ -53,7 +55,7 @@ test('a first message starts it with the default rules and its standing instruct
   assert.ok(!config.systemPrompt.includes('{{'), 'every placeholder is filled')
 })
 
-test("any agent carries the person's own words to another as theirs, answering its question", async () => {
+test("an agent the person started carries their own words to another as theirs, answering its question; its helpers can't", async () => {
   await phone.command('create_agent', { task: standInScript({ do: 'run', command: 'ouro ask human "Black or dark grey?"' }), name: 'painter', model: null, folder: null })
   const ask = await waitFor("painter's question", async () => (await phone.snapshot()).asks.find((candidate) => candidate.agentName === 'painter'))
   await phone.command('create_agent', { task: standInScript({ do: 'run', command: `ouro relay painter --ask ${ask.id} "Black, like the old ones" > relay.txt 2>&1; ouro send human "relay says: $(tr "\\n" " " < relay.txt)"` }), name: 'courier', model: null, folder: null })
@@ -64,20 +66,39 @@ test("any agent carries the person's own words to another as theirs, answering i
   assert.equal(relayed.relayedBy, 'courier', 'and say who carried them')
   assert.equal(relayed.answersAskId, ask.id)
   assert.equal((await phone.snapshot()).asks.some((candidate) => candidate.id === ask.id), false, 'the question is closed')
+
+  // A relay that names no question closes none of the recipient's.
+  await send('painter', standInScript({ do: 'run', command: 'ouro ask human "Matte or gloss?"' }))
+  const second = await waitFor("painter's second question", async () => (await phone.snapshot()).asks.find((candidate) => candidate.agentName === 'painter'))
+  await send('courier', standInScript({ do: 'run', command: 'ouro relay painter "Thanks!" > relay2.txt 2>&1; ouro reply "relayed: $(tr "\\n" " " < relay2.txt)"' }))
+  await says('courier', 'relayed:')
+  assert.ok((await phone.snapshot()).asks.some((candidate) => candidate.id === second.id), 'the open question stays open')
+
+  // A helper courier starts reports to courier, not to the person: what it says can't stand as theirs.
+  const errandTask = join(run.dataDir, 'errand-task.txt')
+  writeFileSync(errandTask, standInScript({ do: 'run', command: 'ouro relay painter "ship it" > relay3.txt 2>&1; ouro send human "helper relay says: $(tr "\\n" " " < relay3.txt)"' }))
+  await send('courier', standInScript({ do: 'run', command: `ouro spawn errand "$(cat ${errandTask})"` }))
+  const refused = await waitFor("the helper's relay to be refused", async () => {
+    const snapshot = await phone.snapshot()
+    const chats = snapshot.chats.filter((candidate) => candidate.members.some((member) => member.address === 'errand'))
+    for (const chat of chats) {
+      const found = (await phone.history(chat.id)).messages.find((message) => message.text.startsWith('helper relay says:'))
+      if (found) return found
+    }
+    return undefined
+  })
+  assert.match(refused.text, /only an agent a person started relays/)
+  assert.equal((await phone.conversation('painter')).some((message) => message.text === 'ship it'), false)
 })
 
-test('pins: an agent pins for its creator, the person reorders and unpins, and an archived agent loses its pin', async () => {
+test('pins: an agent pins for its creator, in the order pinned; the person unpins, and an archived agent loses its pin', async () => {
   const painter = await phone.agent('painter')
   await send('painter', standInScript({ do: 'run', command: 'ouro pin painter > pin.txt 2>&1; ouro reply "pin says: $(cat pin.txt)"' }))
   assert.match(await says('painter', 'pin says:'), /pinned painter/)
   const starter = await phone.agent(STARTER)
   const order = async () => (await phone.snapshot()).pins.map((pin) => (pin.target.kind === 'agent' ? pin.target.agentId : null))
   assert.deepEqual(await order(), [starter.id, painter.id])
-
-  const painterPin = (await phone.snapshot()).pins.find((pin) => pin.target.kind === 'agent' && pin.target.agentId === painter.id)!
-  const starterPin = (await phone.snapshot()).pins.find((pin) => pin.target.kind === 'agent' && pin.target.agentId === starter.id)!
-  await phone.command('move_pin', { pinId: painterPin.id, beforePinId: starterPin.id })
-  assert.deepEqual(await order(), [painter.id, starter.id])
+  await assert.rejects(phone.command('pin', { target: { kind: 'remote_agent', address: 'nobody@nowhere' } }), /no agent nobody@nowhere/, 'only what the lists show')
 
   await phone.command('unpin', { target: { kind: 'agent', agentId: starter.id } })
   assert.deepEqual(await order(), [painter.id])
@@ -110,7 +131,7 @@ test('a machine with a master keeps it, pinned, with its front-door rules as sta
     assert.doesNotMatch(await earlier.cli('list'), /concierge/, 'and no second front door')
     const reopened = new Store(join(earlier.dataDir, 'ouro.db'))
     try {
-      assert.match(reopened.agentById('oldmaster')!.instructions ?? '', /Your standing role/)
+      assert.deepEqual(reopened.agentById('oldmaster')!.instructions, { kind: 'protocol', name: 'starter' }, 'starter.md, by name')
       assert.deepEqual(reopened.listPins(reopened.ownerPerson()!.id).map((pin) => pin.target), [{ kind: 'agent', agentId: 'oldmaster' }])
     } finally {
       reopened.close()

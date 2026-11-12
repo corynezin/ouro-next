@@ -38,8 +38,11 @@ export interface BaseUpdatesConfig {
   offerChanged: () => void
   /** Publishes the app as committed in the person's source, as `ouro publish` does; null when the server has no app folder. */
   publishApp: (() => Promise<PublishedApp>) | null
-  /** Starts an agent of the owner's for work the update needs; called outside any transaction. */
-  handOff: (work: { name: string; task: string }) => void
+  /**
+   * Starts an agent of the owner's for work the update needs, and returns its name; null when none could start and the
+   * owner was told instead. Called inside a transaction.
+   */
+  handOff: (work: { name: string; task: string }) => string | null
   log: (event: string, fields: Record<string, unknown>) => void
 }
 
@@ -138,8 +141,11 @@ export class BaseUpdates {
       removeBeside(root, n)
       const merged = mergeBeside(root, n)
       if (merged.kind === 'conflicted') {
-        this.config.commit(() => this.config.saveRecord({ state: 'conflict', n, files: merged.files }))
-        this.config.handOff({ name: `base-${n}`, task: conflictBrief(n, notes, merged.files, besideDirOf(root, n)) })
+        // One transaction: a conflict recorded with nobody told would wait for ever, refusing every retake.
+        this.config.commit(() => {
+          const resolver = this.config.handOff({ name: `base-${n}`, task: conflictBrief(n, notes, merged.files, besideDirOf(root, n)) })
+          this.config.saveRecord({ state: 'conflict', n, files: merged.files, resolver })
+        })
         return
       }
     }
@@ -206,7 +212,7 @@ export class BaseUpdates {
   private async publishApp(n: number): Promise<void> {
     const failed = (why: string) => {
       this.config.log('base_update_app_not_published', { n, why })
-      this.config.handOff({ name: `base-${n}-publish`, task: `Ouro base ${n} is live on this computer and changes the app, but the app didn't reach the phone: ${why}. Fix that, publish it with \`ouro publish\`, then tell the person in one line whether it worked ("tap the update banner in Ouro to get it"), and finish.` })
+      this.config.commit(() => this.config.handOff({ name: `base-${n}-publish`, task: `Ouro base ${n} is live on this computer and changes the app, but the app didn't reach the phone: ${why}. Fix that, publish it with \`ouro publish\`, then tell the person in one line whether it worked ("tap the update banner in Ouro to get it"), and finish.` }))
     }
     if (this.config.publishApp === null) return failed('this server has no app folder to publish from')
     try {

@@ -12,11 +12,11 @@ test('only the offered base is taken, and only when no update is under way or wa
   assert.equal(takeRefusal({ state: 'idle' }, null, 3)?.code, 'base_not_offered')
   assert.equal(takeRefusal({ state: 'merging', n: 3 }, offer, 3)?.code, 'base_update_in_progress')
   assert.equal(takeRefusal({ state: 'deploying', n: 3, deploymentId: 'd', commit: 'c' }, offer, 3)?.code, 'base_update_in_progress')
-  assert.equal(takeRefusal({ state: 'conflict', n: 3, files: ['a'] }, offer, 3)?.code, 'base_update_in_progress')
+  assert.equal(takeRefusal({ state: 'conflict', n: 3, files: ['a'], resolver: 'base-3' }, offer, 3)?.code, 'base_update_in_progress')
 })
 
 test('an update continues only from a conflict whose merge is resolved and committed', () => {
-  const conflict: BaseUpdateRecord = { state: 'conflict', n: 3, files: ['a'] }
+  const conflict: BaseUpdateRecord = { state: 'conflict', n: 3, files: ['a'], resolver: 'base-3' }
   assert.deepEqual(continueDecision(conflict, () => null), { kind: 'continues', n: 3 })
   assert.deepEqual(continueDecision(conflict, () => 'a still conflicts'), { kind: 'refused', refusal: { code: 'base_conflict_unresolved', message: 'a still conflicts' } })
   assert.equal(continueDecision({ state: 'idle' }, () => null).kind, 'refused')
@@ -25,5 +25,7 @@ test('an update continues only from a conflict whose merge is resolved and commi
 test('merging and deploying both show as updating', () => {
   assert.deepEqual(baseUpdateOf({ state: 'merging', n: 4 }), { state: 'updating', n: 4 })
   assert.deepEqual(baseUpdateOf({ state: 'deploying', n: 4, deploymentId: 'd', commit: 'c' }), { state: 'updating', n: 4 })
-  assert.deepEqual(baseUpdateOf({ state: 'conflict', n: 4, files: ['x'] }), { state: 'conflict', n: 4, files: ['x'] })
+  assert.deepEqual(baseUpdateOf({ state: 'conflict', n: 4, files: ['x'], resolver: 'base-4' }), { state: 'conflict', n: 4, files: ['x'], resolver: 'base-4' })
+  const fromBefore = { state: 'conflict', n: 4, files: ['x'] } as unknown as BaseUpdateRecord
+  assert.deepEqual(baseUpdateOf(fromBefore), { state: 'conflict', n: 4, files: ['x'], resolver: null }, 'a record from before resolvers names none')
 })

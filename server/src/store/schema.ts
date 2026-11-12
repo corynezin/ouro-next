@@ -502,18 +502,18 @@ export const migrations: readonly string[] = [
     message_id TEXT PRIMARY KEY REFERENCES messages(id)
   ) STRICT;
   `,
-  // 27: each person's pins: agents here, agents on their other computers, and group chats kept at the top of their lists.
-  // And an agent's standing instructions, added to its rules. Expand only.
+  // 27: each person's pins: agents here, agents on their other computers, and group chats kept at the top of their lists,
+  // found by pinTargetKey.
+  // And an agent's standing instructions, added to its rules: JSON naming a protocol file. Expand only.
   `
   ALTER TABLE agents ADD COLUMN instructions TEXT;
   CREATE TABLE pins (
     id TEXT PRIMARY KEY,
     person_id TEXT NOT NULL REFERENCES people(id),
-    target_kind TEXT NOT NULL CHECK (target_kind IN ('agent', 'remote_agent', 'chat')),
-    target_ref TEXT NOT NULL,
-    position REAL NOT NULL,
+    target_key TEXT NOT NULL,
+    target_json TEXT NOT NULL,
     pinned_at INTEGER NOT NULL,
-    UNIQUE (person_id, target_kind, target_ref)
+    UNIQUE (person_id, target_key)
   ) STRICT;
   `,
 ]
