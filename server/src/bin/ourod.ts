@@ -25,6 +25,7 @@ import { gitBaseSource } from '../adapters/git-bases.ts'
 import { httpGitHubApi } from '../adapters/github-api.ts'
 import { guardianClient } from '../adapters/guardian-client.ts'
 import { DEFAULT_LIVE_POLICY, DEFAULT_SUMMARY_POLICY } from '../domain/summary.ts'
+import { ownPeerAddress } from '../domain/peers.ts'
 
 const startedAt = performance.now()
 const DEFAULT_SLOW_REQUEST_MS = 2_000
@@ -133,8 +134,7 @@ const core = new OuroCore({
   policy,
   releaseId,
   machineName: environment.OURO_MACHINE_NAME ?? 'this-machine',
-  // Other computers reach this one where phones do, unless told otherwise: its API answers peers there too.
-  peerAddress: environment.OURO_PEER_ADDRESS ?? environment.OURO_PUBLIC_URL ?? null,
+  peerAddress: ownPeerAddress({ peerAddress: environment.OURO_PEER_ADDRESS, publicUrl: environment.OURO_PUBLIC_URL }),
   defaultModel: environment.OURO_DEFAULT_MODEL ?? 'opus',
   defaultFolder: environment.OURO_DEFAULT_FOLDER ?? join(paths.dataDir, 'work'),
   agentLimit: Number(environment.OURO_AGENT_LIMIT ?? 8),
