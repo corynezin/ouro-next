@@ -120,8 +120,10 @@ export class ServerApi {
     return this.read(`/v2/agents/${encodeURIComponent(agentId)}/log${query}`, LogPage)
   }
 
-  /** The model requests of the agent's conversation, and everything sent with one of them. */
-  contextList(agentId: string) { return this.read(`/v2/agents/${encodeURIComponent(agentId)}/context`, ContextList) }
+  /** The model requests of the agent's conversation, newest first, a page from before request `beforeN`; and everything sent with one of them. */
+  contextList(agentId: string, beforeN: number | null) {
+    return this.read(`/v2/agents/${encodeURIComponent(agentId)}/context${beforeN === null ? '' : `?before=${beforeN}`}`, ContextList)
+  }
   contextDetail(agentId: string, n: number) { return this.read(`/v2/agents/${encodeURIComponent(agentId)}/context/${n}`, ContextDetail) }
 
   /** One block of a request, uncut: system block `item`, block `block` of message `item`, or block `block` of the reply. */

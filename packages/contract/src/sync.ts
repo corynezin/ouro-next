@@ -126,7 +126,15 @@ export const LogPage = z.object({
 })
 export type LogPage = z.infer<typeof LogPage>
 
-/** `GET /v2/agents/<id>/context`: one row per model request the agent made, newest last. Tokens are exact, from the API's own usage. */
+/** Why an agent has no model requests to show: it isn't on Claude Code, it hasn't started a conversation, or the
+ * conversation's transcript isn't on this computer. The app words each. */
+export const ContextUnavailable = z.enum(['not_claude_code', 'no_conversation', 'transcript_missing'])
+export type ContextUnavailable = z.infer<typeof ContextUnavailable>
+
+/** How many requests a Context list page holds when the app doesn't say. */
+export const CONTEXT_PAGE_DEFAULT_LIMIT = 50
+
+/** `GET /v2/agents/<id>/context?before=<n>&limit=<k>`: one row per model request the agent made. Tokens are exact, from the API's own usage. */
 export const ContextRequestRow = z.object({
   n: z.number().int().nonnegative(),
   at: z.number().int(),
@@ -139,16 +147,26 @@ export const ContextRequestRow = z.object({
 export type ContextRequestRow = z.infer<typeof ContextRequestRow>
 
 export const ContextList = z.object({
+  /** Newest first. */
   requests: z.array(ContextRequestRow),
+  /** Pass the last request's `n` as `before` to continue. */
+  hasOlder: z.boolean(),
   /** Why there is nothing to show, when there is nothing. */
-  unavailable: z.string().nullable(),
+  unavailable: ContextUnavailable.nullable(),
 })
 export type ContextList = z.infer<typeof ContextList>
 
+/** What a request's input tokens went on. The app colours and words each. */
+export const ContextCategory = z.enum(['system', 'tools', 'system_reminders', 'user_text', 'attachments', 'assistant_text', 'tool_calls', 'tool_results', 'thinking'])
+export type ContextCategory = z.infer<typeof ContextCategory>
+
+/** A block's kind as the API names it; `other` for kinds this viewer doesn't know, named in the block's label. */
+export const ContextBlockKind = z.enum(['text', 'thinking', 'tool_use', 'tool_result', 'image', 'document', 'other'])
+export type ContextBlockKind = z.infer<typeof ContextBlockKind>
+
 export const ContextBlock = z.object({
-  /** text, thinking, tool_use, tool_result, or another block type. */
-  type: z.string(),
-  /** A tool's name, when it has one. */
+  type: ContextBlockKind,
+  /** A tool's name, or for `other` the API's own name for the block. */
   label: z.string(),
   text: z.string(),
   /** Estimated; see ContextDetail.exact. */
@@ -157,10 +175,22 @@ export const ContextBlock = z.object({
 })
 export type ContextBlock = z.infer<typeof ContextBlock>
 
+/** `system`: what Claude Code adds mid-conversation (reminders, tools that became available), sent as messages of their own. */
+export const ContextRole = z.enum(['user', 'assistant', 'system'])
+export type ContextRole = z.infer<typeof ContextRole>
+
+/** One message sent with a request, or one the transcript doesn't hold. */
+export const ContextMessage = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('message'), role: ContextRole, blocks: z.array(ContextBlock) }),
+  z.object({ kind: z.literal('unresolved') }),
+])
+export type ContextMessage = z.infer<typeof ContextMessage>
+
 export const ContextBlockPart = z.enum(['system', 'message', 'response'])
 export type ContextBlockPart = z.infer<typeof ContextBlockPart>
 /** Where a block sits in a request: system block `item`; block `block` of message `item`; or block `block` of the reply. */
-export interface ContextBlockPlace { part: ContextBlockPart; item: number; block: number }
+export const ContextBlockPlace = z.object({ part: ContextBlockPart, item: z.number().int().nonnegative(), block: z.number().int().nonnegative() })
+export type ContextBlockPlace = z.infer<typeof ContextBlockPlace>
 
 /** `GET /v2/agents/<id>/context/<n>/text?part=system|message|response&i=<item>&k=<block>`: one block, uncut. */
 export const ContextBlockText = z.object({ text: z.string() })
@@ -175,10 +205,10 @@ export const ContextDetail = z.object({
   /** True when the per-item counts were scaled to the API's reported input total; false when they are raw estimates. */
   exact: z.boolean(),
   totalInput: z.number().int(),
-  categories: z.array(z.object({ name: z.string(), tokens: z.number().int() })),
+  categories: z.array(z.object({ name: ContextCategory, tokens: z.number().int() })),
   system: z.array(ContextBlock),
   tools: z.array(z.object({ name: z.string(), description: z.string(), tokens: z.number().int() })),
-  messages: z.array(z.object({ role: z.string(), unresolved: z.boolean(), blocks: z.array(ContextBlock) })),
+  messages: z.array(ContextMessage),
   response: z.array(ContextBlock),
 })
 export type ContextDetail = z.infer<typeof ContextDetail>
