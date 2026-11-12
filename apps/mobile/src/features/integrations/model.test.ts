@@ -90,3 +90,13 @@ test('AWS: refusals in the server\'s words, named by account, and sent only when
   assert.deepEqual(awsCredentialsOf(' AKIAX ', 'secret\n', 'US-EAST-1'), { accessKeyId: 'AKIAX', secretAccessKey: 'secret', region: 'us-east-1' })
   assert.equal(awsCredentialsOf('AKIAX', ' ', 'us-east-1'), null)
 })
+
+test('Sprites: a pasted token without its spaces, and refusals in the server\'s words', async () => {
+  const { spritesOutcome, spritesTokenOf } = await import('./model.ts')
+  assert.equal(spritesTokenOf(' abc\ndef '), 'abcdef')
+  assert.equal(spritesTokenOf('  '), null)
+  const state = { status: 'connected', token: 'abcd…wxyz', problem: null } as const
+  assert.deepEqual(spritesOutcome({ ok: true, value: { accepted: true, state } }, 'no'), { kind: 'accepted', state })
+  assert.deepEqual(spritesOutcome({ ok: true, value: { accepted: false, why: 'Sprites rejected that token' } }, 'no'), { kind: 'failed', text: 'Sprites rejected that token' })
+  assert.deepEqual(spritesOutcome({ ok: true, value: { accepted: false, why: ' ' } }, 'no'), { kind: 'failed', text: 'no' })
+})

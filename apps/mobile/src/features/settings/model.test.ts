@@ -4,7 +4,7 @@ import { DEFAULT_NOTIFICATION_SETTINGS } from '@ouro/contract'
 import type { NotificationSettings } from '@ouro/contract'
 import {
   awsStatusText, backupSection, BACKUP_WARNING, baseSection, changedNotificationSettings, integrationRows, leaveAction, notificationSettingsOf, notifyingModeOf, peopleRows,
-  serverShortName, tailscaleStatusText, updateHomeIndex, updateHomeOptions,
+  serverShortName, spritesStatusText, tailscaleStatusText, updateHomeIndex, updateHomeOptions,
 } from './model.ts'
 import type { NotificationChange } from './model.ts'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
@@ -182,6 +182,14 @@ test('AWS reads like the others, and shows nothing when its route failed', () =>
   assert.equal(awsStatusText({ kind: 'loaded', value: { status: 'not_connected' } }), 'Not set up')
   assert.equal(awsStatusText({ kind: 'checking' }), 'Checking…')
   assert.equal(awsStatusText({ kind: 'failed' }), null)
+})
+
+test('Sprites has its own words, not AWS\'s, and says when the token stopped working', () => {
+  assert.equal(spritesStatusText({ kind: 'loaded', value: { status: 'connected', token: 'abc…xyz', problem: null } }), 'Connected')
+  assert.equal(spritesStatusText({ kind: 'loaded', value: { status: 'connected', token: 'abc…xyz', problem: 'refused' } }), 'Not working')
+  assert.equal(spritesStatusText({ kind: 'loaded', value: { status: 'not_connected' } }), 'Not set up')
+  assert.equal(spritesStatusText({ kind: 'checking' }), 'Checking…')
+  assert.equal(spritesStatusText({ kind: 'failed' }), null)
 })
 
 test('Tailscale reads Connected or Not set up, or what it is doing', () => {

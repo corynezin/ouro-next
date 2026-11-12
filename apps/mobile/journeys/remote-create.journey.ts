@@ -24,8 +24,9 @@ test('Remote create: the Machine picker offers the other computer, and an agent 
     assert.ok(invite.ok, invite.ok ? '' : JSON.stringify(invite.failure))
     const [, , , address, code] = invite.value.command.split(' ')
     await beta.cli('computers', 'join', address!, code!)
-    const machine = await waitFor('beta under Machine', () => machineOptions(session.store.computers.values()).find((option) => option.label === 'beta'))
-    assert.deepEqual(machineOptions(session.store.computers.values()).map((option) => option.label), ['Cloud computer', 'beta'])
+    const machine = await waitFor('beta under Machine', () => machineOptions(session.store.computers.values(), [], 'alpha').find((option) => option.label === 'beta'))
+    assert.deepEqual(machineOptions(session.store.computers.values(), [], 'alpha').map((option) => option.label), ['alpha', 'beta'])
+    assert.ok(session.store.computers.get(machine.computerId!)?.address, 'a computer comes with its address, so a phone paired with it too can name it as Settings does')
 
     // Start, as the sheet sends it with beta picked.
     const made = await session.command('create_remote_agent', newRemoteAgentInput(machine.computerId!, 'hello there', ' cy ', null, null))

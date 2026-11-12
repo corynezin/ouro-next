@@ -24,11 +24,14 @@ export type Routes = {
   Person: { address: string }
   /** An agent on another of the person's computers: `<computer id>:<name>`. */
   RemoteChat: { remoteAgentId: string }
+  RemoteLog: { remoteAgentId: string }
   NewGroup: undefined
   AddToChat: { chatId: string }
   New: undefined
   Servers: undefined
+  /** Servers → Link a computer with a command. */
   Computers: undefined
+  Tailscale: undefined
   Settings: undefined
   /** Settings → Invite someone: a one-time code for a new person on this server. */
   Invite: undefined
@@ -38,6 +41,8 @@ export type Routes = {
   /** `thenMakePrivateCopy`: the person came to connect GitHub to back up, so the private copy is made once it connects. */
   GitHub: { thenMakePrivateCopy?: boolean } | undefined
   AWS: undefined
+  /** A Sprites API token, for making new servers as Sprites. */
+  Sprites: undefined
   Pair: undefined
   SelectText: { text: string }
   /** A file sent in a chat, fetched with the session's authorisation. */

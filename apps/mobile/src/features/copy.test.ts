@@ -42,9 +42,7 @@ test('Settings footers and outcomes say what the reference says (SET-08, SET-13,
 })
 
 test('Computers says what the reference says (COMP-01, COMP-03, COMP-06, COMP-07)', () => {
-  assert.equal(COMPUTERS_COPY.listTitle, 'Your computers')
-  assert.equal(COMPUTERS_COPY.listFooter, 'When starting an agent, pick one under Machine.')
-  assert.equal(COMPUTERS_COPY.addTitle, 'Add a computer')
+  assert.equal(COMPUTERS_COPY.addTitle, 'Link a computer')
   assert.equal(COMPUTERS_COPY.making, 'Making an invite…')
   assert.match(COMPUTERS_COPY.addFooter, /^Use your own Mac or Linux machine for agents\. .*Add only computers you trust that with\./)
   assert.equal(TAILSCALE_COPY.remove, 'Remove Tailscale from this server')

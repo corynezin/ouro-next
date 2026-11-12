@@ -2,7 +2,7 @@
 import { ago } from '../../design/format.ts'
 import type {
   AwsIntegrationState, ChatgptIntegrationState, ClaudeIntegrationState, DeviceEntity, GithubIntegrationState, NotificationSettings, NotificationSettingsEntity, OpenrouterIntegrationState, PersonEntity,
-  ServerEntity, TailscaleState,
+  ServerEntity, SpritesIntegrationState, TailscaleState,
 } from '@ouro/contract'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
 
@@ -247,6 +247,15 @@ export function awsStatusText(aws: RouteStatus<AwsIntegrationState>): string | n
     case 'checking': return CHECKING_TEXT
     case 'failed': return null
     case 'loaded': return aws.value.status === 'connected' ? 'Connected' : 'Not set up'
+  }
+}
+
+/** Sprites' row, like AWS's: Connected (or what the Sprites API said about the token), or Not set up. */
+export function spritesStatusText(sprites: RouteStatus<SpritesIntegrationState>): string | null {
+  switch (sprites.kind) {
+    case 'checking': return CHECKING_TEXT
+    case 'failed': return null
+    case 'loaded': return sprites.value.status === 'connected' ? (sprites.value.problem ? 'Not working' : 'Connected') : 'Not set up'
   }
 }
 

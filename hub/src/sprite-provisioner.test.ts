@@ -9,8 +9,8 @@ import { after, test } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
 import type { ComputerOrder } from './provisioning.ts'
 import { LAUNCHER, SpriteProvisioner, SpriteStepFailure } from './sprite-provisioner.ts'
-import { SpriteNameOutOfScope, SpritesApiError, SpritesHttpApi } from './sprites-api.ts'
-import type { SpriteInfo, SpritesApi } from './sprites-api.ts'
+import { SpriteNameOutOfScope, SpritesApiError, SpritesHttpApi } from '@ouro/contract/sprites'
+import type { SpriteInfo, SpritesApi } from '@ouro/contract/sprites'
 
 const dir = mkdtempSync(join(tmpdir(), 'hub-sprites-test-'))
 after(() => rmSync(dir, { recursive: true, force: true }))

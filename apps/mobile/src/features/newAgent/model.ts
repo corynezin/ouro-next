@@ -1,5 +1,7 @@
 // The New agent sheet as data. The server says which models exist; this groups them as the pickers show them.
 import type { CommandInput, ComputerEntity, ModelOption, PromptCacheLifetime } from '@ouro/contract'
+import { sameServerUrl } from '../../core/accounts/savedServers.ts'
+import type { SavedServer } from '../../core/accounts/savedServers.ts'
 import type { ApiFailure, ApiResult } from '../../core/session/serverApi.ts'
 
 export interface ModelGroup { title: string; models: { id: string; label: string }[] }
@@ -81,16 +83,19 @@ export const typedAgentName = (typed: string) => typed.replace(/\s/g, '')
 /** Where a new agent runs: here, or on one of the person's other computers. */
 export interface MachineOption { key: string; computerId: string | null; label: string }
 
-const HERE: MachineOption = { key: 'here', computerId: null, label: 'Cloud computer' }
+/** A computer as the phone names its server in Settings → Servers, when the phone is paired with it too; else its own name. */
+export const computerLabel = (computer: ComputerEntity, saved: readonly SavedServer[]) =>
+  (computer.address ? saved.find((server) => sameServerUrl(server.url, computer.address!))?.label : undefined) ?? computer.name
 
-/** Here first, then the other computers by name, those with no agents yet too. Only a computer that trusts this one fully
- * takes an agent from it; with none, there is nothing to pick and the picker isn't shown. */
-export function machineOptions(computers: Iterable<ComputerEntity>): MachineOption[] {
+/** Here first, named `hereLabel` (this server's name in Settings), then the other computers by their names, those with no
+ * agents yet too. Only a computer that trusts this one fully takes an agent from it; with none, there is nothing to pick
+ * and the picker isn't shown. */
+export function machineOptions(computers: Iterable<ComputerEntity>, saved: readonly SavedServer[], hereLabel: string): MachineOption[] {
   const others = [...computers]
     .filter((computer) => computer.trust === 'full')
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((computer) => ({ key: `computer:${computer.id}`, computerId: computer.id, label: computer.name }))
-  return others.length ? [HERE, ...others] : []
+    .map((computer) => ({ key: `computer:${computer.id}`, computerId: computer.id, label: computerLabel(computer, saved) }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+  return others.length ? [{ key: 'here', computerId: null, label: hereLabel }, ...others] : []
 }
 
 export const machineFooter = (machineName: string) => `It runs on ${machineName} and reports to you here.`

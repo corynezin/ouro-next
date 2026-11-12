@@ -1,5 +1,5 @@
 // Start an agent that reports to you, here or on another of your computers. A sheet.
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as Clipboard from 'expo-clipboard'
 import { Button, Form, HStack, Host, Image, Picker, Section, Spacer, Text } from '@expo/ui/swift-ui'
 import { accessibilityLabel, buttonStyle, disabled, foregroundStyle, lineLimit, pickerStyle, tag, truncationMode } from '@expo/ui/swift-ui/modifiers'
@@ -10,7 +10,9 @@ import { formatSize } from '../../design/format.ts'
 import { actionSheet } from '../../design/menus.tsx'
 import { failureText } from '../../core/session/serverApi.ts'
 import { uploadFailureText } from '../../core/session/outbox.ts'
-import { useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
+import { useCore, useCoreVersion, useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
+import type { SavedServer } from '../../core/accounts/savedServers.ts'
+import { serverShortName } from '../settings/model.ts'
 import type { ScreenProps } from '../../navigation/routes.ts'
 import type { PromptCacheLifetime } from '@ouro/contract'
 import { canStartAgent, FILES_COPY, hasPromptCache, machineFooter, machineOptions, modelGroups, newAgentInput, newRemoteAgentInput, PROMPT_CACHE_OPTIONS, typedAgentName, uploadFilesOnce } from './model.ts'
@@ -32,7 +34,12 @@ export function NewAgentScreen({ navigation }: ScreenProps<'New'>) {
   const { field, blurFields } = useBlurFields()
   const model = chosenModel ?? server?.defaultModel ?? null
   const groups = useMemo(() => modelGroups(server?.models ?? [], model), [version, model])
-  const machines = useMemo(() => machineOptions(session.store.computers.values()), [version])
+  const core = useCore()
+  const coreVersion = useCoreVersion(core)
+  const [savedServers, setSavedServers] = useState<SavedServer[]>([])
+  useEffect(() => { core.servers.list().then(setSavedServers, () => {}) }, [core, coreVersion])
+  const hereLabel = serverShortName(savedServers, session.serverId, server?.machineName ?? null)
+  const machines = useMemo(() => machineOptions(session.store.computers.values(), savedServers, hereLabel), [version, savedServers, hereLabel])
   const machine = machines.find((option) => option.key === machineKey) ?? null
   const remoteComputerId = machine?.computerId ?? null
   const cacheShown = hasPromptCache(server?.models ?? [], model)

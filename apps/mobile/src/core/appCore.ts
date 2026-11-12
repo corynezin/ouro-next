@@ -7,6 +7,8 @@ import { pairWithServer } from './accounts/pairing.ts'
 import { PreferencesStore } from './accounts/preferences.ts'
 import { SavedServers, SERVER_LIST_DAMAGED_PAIRING, ServerListDamaged } from './accounts/savedServers.ts'
 import type { SavedServer, ServerWithToken } from './accounts/savedServers.ts'
+import { inviteTarget, serversToLink } from './accounts/serverLinks.ts'
+import type { AfterPairing } from './accounts/serverLinks.ts'
 import type { AppLifecycle, Clock, DurableStore, IdSource, Network, SecureStorage } from './platform/ports.ts'
 import { ServerDrafts } from './session/drafts.ts'
 import { ServerOutbox } from './session/outbox.ts'
@@ -147,6 +149,31 @@ export class AppCore {
   }
 
   /**
+   * Links two saved servers as each other's computers: `host` makes a one-use invite and `joiner` joins with it, so the
+   * person never copies a command. Words for the failure, or null if it worked. Only a server's owner may do either.
+   */
+  async linkServers(joiner: SavedServer, host: SavedServer): Promise<string | null> {
+    const [joining, hosting] = await Promise.all([this.servers.withToken(joiner), this.servers.withToken(host)])
+    if (!joining || !hosting) return NO_TOKEN_MESSAGE
+    const invite = await this.outboxFor(hosting).api.command('create_computer_invite', {}, this.deps.ids.newId())
+    if (!invite.ok) return failureText(invite.failure)
+    const target = inviteTarget(invite.value)
+    if (!target) return 'The invite had no address.'
+    const joined = await this.outboxFor(joining).api.command('join_computer', target, this.deps.ids.newId())
+    return joined.ok ? null : failureText(joined.failure)
+  }
+
+  /** A server the person just made links itself with every other saved server it isn't linked with yet. Best-effort: a
+   * server they don't own, or can't be reached, stays unlinked and shows Link in Servers. */
+  private async linkWithOtherServers(added: SavedServer) {
+    const saved = await this.servers.list()
+    if (saved.length < 2) return
+    const snapshot = await this.snapshotOf(added)
+    if (!snapshot?.ok) return
+    for (const other of serversToLink(added, saved, snapshot.value.computers)) await this.linkServers(added, other).catch(() => null)
+  }
+
+  /**
    * Asks a server this phone is leaving to stop pushing to it. Not waited on and not retried: an unreachable server is
    * forgotten all the same, and its pushes then name a device this phone no longer has, so they open nothing.
    */
@@ -171,20 +198,22 @@ export class AppCore {
   }
 
   /** Throws a readable error if the pairing or saving fails. */
-  async pairAndActivate(url: string, code: string, details: { label?: string; hostedServerId?: string } = {}): Promise<SavedServer> {
+  async pairAndActivate(url: string, code: string, details: { label?: string; hostedServerId?: string; afterPairing?: AfterPairing } = {}): Promise<SavedServer> {
     // Before the code is spent: a pairing code works once, and a damaged list would refuse to keep what it gave.
     if (this.servers.needsRecovery) throw new ServerListDamaged(SERVER_LIST_DAMAGED_PAIRING)
     const result = await pairWithServer(this.deps.network, url, code)
     if (!result.ok) throw new Error(result.reason)
     const { deviceToken, deviceId, personId: _personId, machineName } = result.paired
+    const { afterPairing = 'nothing', ...saving } = details
     const server = await this.servers.add(
       { url, token: deviceToken, deviceName: machineName, deviceId, personName: null },
-      details,
+      saving,
     )
     await this.discardOutbox(server.id) // its token just changed
     // The first server paired gives this phone its updates, until the person picks another.
     if (this.preferences.current.updateHomeServerId === null) this.preferences.set('updateHomeServerId', server.id)
     await this.activate({ server, token: deviceToken })
+    if (afterPairing === 'link_with_other_servers') void this.linkWithOtherServers(server).catch(() => {})
     return server
   }
 

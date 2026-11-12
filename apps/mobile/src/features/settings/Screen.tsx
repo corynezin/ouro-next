@@ -1,5 +1,6 @@
-// Settings: integrations (connected or not, Tailscale among them), servers by short name, people and an invite page (the
-// owner's), computers, notifications (on or off, and urgent), updates (Ouro, backup and the app), archived agents, and signing out or
+// Settings: integrations (connected or not, Tailscale among them), servers by short name (each linked one is a computer the
+// others can run agents on), people and an invite page (the owner's),
+// notifications (on or off, and urgent), updates (Ouro, backup and the app), archived agents, and signing out or
 // unpairing. Notifications are in NotificationsSection. Renders settings/model.ts.
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { Linking } from 'react-native'
@@ -19,11 +20,12 @@ import { NotificationsSection } from './NotificationsSection.tsx'
 import { StatusRow } from './StatusRow.tsx'
 import { useRouteStatus } from './useRouteStatus.ts'
 import {
-  BACKUP_MADE_TOAST, backupSection, BASE_UPDATE_STARTED, baseSection, awsStatusText, tailscaleStatusText, integrationRows, leaveAction, peopleRows, serverShortName,
+  BACKUP_MADE_TOAST, backupSection, BASE_UPDATE_STARTED, baseSection, awsStatusText, spritesStatusText, tailscaleStatusText, integrationRows, leaveAction, peopleRows, serverShortName,
   updateHomeIndex, updateHomeOptions,
 } from './model.ts'
 import type { BaseSection, PersonRow } from './model.ts'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
+import type { SpritesIntegrationState } from '@ouro/contract'
 
 export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
   const updates = useUpdateFlow()
@@ -44,8 +46,11 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
   /** Signed up through the hub; someone running their own server has none. */
   const account = core.hostedAccount
   useEffect(() => { core.servers.list().then(setSavedServers, () => {}) }, [core, coreVersion])
-  // AWS and Tailscale aren't synced: each is asked of its own route.
+  // AWS, Sprites and Tailscale aren't synced: each is asked of its own route. Only the owner makes servers with Sprites; an
+  // older server has no such route, and then there is no row.
   const aws = useRouteStatus(navigation, useCallback(() => session.api.awsStatus(), [session]))
+  const loadSprites = useCallback(() => session.api.spritesStatus(), [session])
+  const sprites = useRouteStatus<SpritesIntegrationState>(navigation, isOwner ? loadSprites : null)
   const loadTailscale = useCallback(async () => {
     const result = await session.api.tailscale('GET')
     return result.ok ? { ok: true as const, value: result.value.tailscale } : result
@@ -110,7 +115,6 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
   })
   const base = server ? baseSection(server.release, isOwner) : null
   const backup = server ? backupSection(server.sourceBackup, isOwner, now) : null
-  const computerCount = session.store.computers.size
 
   return (
     <Host style={{ flex: 1 }}>
@@ -118,7 +122,8 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
         <Section title="Integrations">
           {integrations.map((row) => <StatusRow key={row.key} title={row.title} status={row.status} onPress={() => navigation.navigate(row.route)} />)}
           <StatusRow title="AWS" status={awsStatusText(aws)} onPress={() => navigation.navigate('AWS')} />
-          {isOwner ? <StatusRow title="Tailscale" status={tailscaleStatusText(tailscale)} onPress={() => navigation.navigate('Computers')} /> : null}
+          {isOwner && sprites.kind !== 'failed' ? <StatusRow title="Sprites" status={spritesStatusText(sprites)} onPress={() => navigation.navigate('Sprites')} /> : null}
+          {isOwner ? <StatusRow title="Tailscale" status={tailscaleStatusText(tailscale)} onPress={() => navigation.navigate('Tailscale')} /> : null}
         </Section>
 
         <Section title="Servers">
@@ -142,12 +147,6 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
             ))}
             {removeFailure !== null ? <Note text={removeFailure} color="red" /> : null}
             <StatusRow title="Invite someone" onPress={() => navigation.navigate('Invite')} />
-          </Section>
-        ) : null}
-
-        {isOwner ? (
-          <Section title="Computers">
-            <StatusRow title={computerCount > 0 ? 'Your computers' : 'Add a computer'} status={computerCount > 0 ? String(computerCount) : null} onPress={() => navigation.navigate('Computers')} />
           </Section>
         ) : null}
 

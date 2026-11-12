@@ -31,7 +31,7 @@ import { RemoteChatScreen } from '../features/remoteAgent/Screen.tsx'
 import { DetailsScreen } from '../features/details/Screen.tsx'
 import { GoalScreen } from '../features/goal/Screen.tsx'
 import { ContextRequestScreen, ContextScreen } from '../features/context/Screen.tsx'
-import { LogScreen } from '../features/log/Screen.tsx'
+import { LogScreen, RemoteLogScreen } from '../features/log/Screen.tsx'
 import { AllSummariesScreen } from '../features/summaries/AllSummariesScreen.tsx'
 import { SummariesScreen } from '../features/summaries/Screen.tsx'
 import { ChatScreen } from '../features/chat/Screen.tsx'
@@ -47,9 +47,11 @@ import { InviteScreen } from '../features/settings/InviteScreen.tsx'
 import { ChatGptScreen } from '../features/integrations/ChatGptScreen.tsx'
 import { ClaudeScreen } from '../features/integrations/ClaudeScreen.tsx'
 import { AwsScreen } from '../features/integrations/AwsScreen.tsx'
+import { SpritesScreen } from '../features/integrations/SpritesScreen.tsx'
 import { GitHubScreen } from '../features/integrations/GitHubScreen.tsx'
 import { OpenRouterScreen } from '../features/integrations/OpenRouterScreen.tsx'
 import { ComputersScreen } from '../features/computers/Screen.tsx'
+import { TailscaleScreen } from '../features/computers/TailscaleScreen.tsx'
 import { SelectTextScreen } from '../features/selectText/Screen.tsx'
 import { FileScreen } from '../features/file/Screen.tsx'
 import { recoveryBanner, rootView } from '../features/shell/model.ts'
@@ -188,6 +190,7 @@ export function AppRoot({ core, hostedServers, updates, lock, push, otherServers
                     <Stack.Screen name="Agents" component={AgentsScreen} options={{ title: 'Agents', headerTitle: '', headerTransparent: false }} />
                     <Stack.Screen name="Chat" component={ChatScreen} options={{ title: '' }} />
                     <Stack.Screen name="Log" component={LogScreen} />
+                    <Stack.Screen name="RemoteLog" component={RemoteLogScreen} />
                     <Stack.Screen name="Context" component={ContextScreen} />
                     <Stack.Screen name="ContextRequest" component={ContextRequestScreen} />
                     <Stack.Screen name="Summaries" component={SummariesScreen} />
@@ -209,12 +212,14 @@ export function AppRoot({ core, hostedServers, updates, lock, push, otherServers
                       <Stack.Screen name="Settings" component={SettingsScreen} />
                       <Stack.Screen name="Invite" component={InviteScreen} />
                       <Stack.Screen name="Computers" component={ComputersScreen} />
+                      <Stack.Screen name="Tailscale" component={TailscaleScreen} options={{ title: 'Tailscale' }} />
                       <Stack.Screen name="Servers" component={ServersScreen} options={{ title: 'Servers' }} />
                       <Stack.Screen name="Claude" component={ClaudeScreen} options={{ title: 'Claude Code' }} />
                       <Stack.Screen name="ChatGPT" component={ChatGptScreen} options={{ title: 'ChatGPT' }} />
                       <Stack.Screen name="OpenRouter" component={OpenRouterScreen} options={{ title: 'OpenRouter' }} />
                       <Stack.Screen name="GitHub" component={GitHubScreen} options={{ title: 'GitHub' }} />
                       <Stack.Screen name="AWS" component={AwsScreen} options={{ title: 'AWS' }} />
+                      <Stack.Screen name="Sprites" component={SpritesScreen} options={{ title: 'Sprites' }} />
                       <Stack.Screen name="Pair" options={{ title: 'Add a server' }}>{(props) => <PairScreen onBack={() => props.navigation.goBack()} />}</Stack.Screen>
                     </Stack.Group>
                   </Stack.Navigator>

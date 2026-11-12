@@ -60,8 +60,9 @@ test('a limited computer gives no controls; a trusted one gives them as a local 
 })
 
 test('its chat is titled by the bare name over its computer, and a message goes to name@machine', () => {
-  assert.deepEqual(remoteChatModel(remoteOf(), computer()), { title: 'bob', subtitle: '@mac', statusText: 'idle' })
-  assert.equal(remoteChatModel(remoteOf({ details: null }), computer()).statusText, 'waiting · That computer trusts this one only to send messages.')
+  assert.deepEqual(remoteChatModel(remoteOf(), computer(), 0), { title: 'bob', subtitle: '@mac', statusText: 'idle', statusLabel: 'idle', busy: false, summaryLine: null, canReadLog: true })
+  assert.equal(remoteChatModel(remoteOf({ details: null }), computer(), 0).canReadLog, false)
+  assert.equal(remoteChatModel(remoteOf({ details: null }), computer(), 0).statusText, 'waiting · That computer trusts this one only to send messages.')
   assert.deepEqual(remoteSend(remoteOf(), 'hi', null), {
     destination: { kind: 'direct', to: 'bob@mac', answersAskId: null }, conversationId: 'c1:bob', text: 'hi', attachments: [],
   })
@@ -168,4 +169,14 @@ test("an agent whose computer is offline has the offline tone: orange line, dimm
   const [entry] = remoteListEntries(store, { kind: 'never' }, NOW)
   assert.equal(entry!.row.statusTone, 'offline')
   assert.equal(entry!.row.statusText, '⊘ mac offline')
+})
+
+test('its chat runs a timer while it works and shows its latest summary, as a local agent\'s does', () => {
+  const working = remoteChatModel(remoteOf({ details: { ...thinking, summaryLine: 'Fixing the build' }, activity: 'running' }), computer(), NOW)
+  assert.equal(working.statusText, 'thinking  0:05')
+  assert.equal(working.statusLabel, 'thinking', 'held steady by its status, not the ticking timer')
+  assert.equal(working.busy, true)
+  assert.equal(working.summaryLine, 'Fixing the build')
+  const offline = remoteChatModel(remoteOf({ details: thinking, activity: 'running' }), computer({ status: 'offline' }), NOW)
+  assert.equal(offline.statusText, '⊘ mac offline', 'no timer for a computer that is not answering')
 })

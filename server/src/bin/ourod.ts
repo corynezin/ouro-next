@@ -27,6 +27,12 @@ import { gitBaseSource } from '../adapters/git-bases.ts'
 import { httpGitHubApi } from '../adapters/github-api.ts'
 import { guardianClient } from '../adapters/guardian-client.ts'
 import { DEFAULT_LIVE_POLICY, DEFAULT_SUMMARY_POLICY } from '../domain/summary.ts'
+import { ec2CredentialsOf, HttpEc2Api } from '../adapters/ec2.ts'
+import { currentCommitOf, Ec2Provisioner, publicAddressOfThisServer, runSsh, SpriteMachineProvisioner } from '../adapters/machine-provisioners.ts'
+import type { IntegrationTools } from '../adapters/integrations.ts'
+import { SpritesHttpApi } from '@ouro/contract/sprites'
+import { Machines } from '../app/machines.ts'
+import { MachinesFile } from '../store/machines-file.ts'
 import { ownPeerAddress } from '../domain/peers.ts'
 
 const startedAt = performance.now()
@@ -130,6 +136,66 @@ function tailscaleSetupFromEnvironment(): TailscaleSetup {
   return { kind: 'not_needed' }
 }
 
+/**
+ * New servers made from this one's own source, on the AWS account connected in Settings (an EC2 instance) or the Sprites
+ * account (a Sprite). Each is offered only while its account is connected.
+ */
+function machinesFromEnvironment(spritesToken: () => string | null): Machines {
+  const sourceRoot = personSourceOf(agentBaseEnv.OURO_APP_SOURCE)?.root ?? null
+  const settings = { sourceRoot: sourceRoot ?? '', defaultModel: environment.OURO_DEFAULT_MODEL ?? null, baseRepo: environment.OURO_BASE_REPO ?? null }
+  const awsFiles = awsFilesOf(environment)
+  const instanceType = environment.OURO_EC2_INSTANCE_TYPE ?? 't3.medium'
+  const ec2 = new Ec2Provisioner({
+    api: new HttpEc2Api(() => {
+      const credentials = ec2CredentialsOf(awsFiles)
+      if (!credentials) throw new Error('AWS is not connected')
+      return credentials
+    }),
+    keysDir: join(paths.dataDir, 'machines', 'keys'),
+    ssh: runSsh, makerAddress: publicAddressOfThisServer,
+    settings, instanceType, diskGb: 30, pollIntervalMs: 5_000,
+    deadlines: { create: 5 * 60_000, ssh: 5 * 60_000, upload: 5 * 60_000, install: 40 * 60_000, service: 10 * 60_000 },
+  })
+  const spriteProvisioner = (token: string) => new SpriteMachineProvisioner({
+    api: new SpritesHttpApi(token, 'ouro-made-'), settings, pollIntervalMs: 3_000,
+    deadlines: { upload: 5 * 60_000, install: 15 * 60_000, service: 20 * 60_000, query: 60_000 },
+  })
+  const noSource = 'This server has no copy of its source to make another from.'
+  return new Machines({
+    file: new MachinesFile(join(paths.dataDir, 'machines', 'machines.json')),
+    providers: [
+      {
+        id: 'aws', name: 'AWS', setup: 'aws',
+        provisioner: () => (sourceRoot !== null && ec2CredentialsOf(awsFiles) ? ec2 : null),
+        detail: () => {
+          if (sourceRoot === null) return noSource
+          const credentials = ec2CredentialsOf(awsFiles)
+          return credentials ? `An EC2 ${instanceType} in ${credentials.region}. Takes 10–15 minutes.` : 'Connect AWS in Integrations first.'
+        },
+      },
+      {
+        id: 'sprite', name: 'Sprite', setup: 'sprites',
+        provisioner: () => {
+          const token = spritesToken()
+          return sourceRoot !== null && token !== null ? spriteProvisioner(token) : null
+        },
+        detail: () => sourceRoot === null ? noSource : spritesToken() !== null ? 'A Sprite on your Sprites account. Takes about 10 minutes.' : 'Connect Sprites in Integrations first.',
+      },
+    ],
+    currentCommit: async () => (sourceRoot === null ? null : await currentCommitOf(sourceRoot)),
+    now: Date.now,
+    log: logEvent,
+  })
+}
+
+const integrationTools: IntegrationTools = environment.OURO_INTEGRATIONS_STAND_IN_DIR
+  ? standInIntegrationTools(environment.OURO_INTEGRATIONS_STAND_IN_DIR, { openrouter: paths.openrouterApiKey })
+  : realIntegrationTools({
+    dataDir: paths.dataDir, anthropicKeyFile: paths.anthropicApiKey, openrouterKeyFile: paths.openrouterApiKey, claudeConfigDir: environment.CLAUDE_CONFIG_DIR ?? null,
+    awsFiles: awsFilesOf(environment), spritesTokenFile: join(paths.dataDir, 'secrets', 'sprites-token'),
+  })
+const machines = environment.OURO_INTEGRATIONS_STAND_IN_DIR ? null : machinesFromEnvironment(() => integrationTools.spritesToken())
+
 const core = new OuroCore({
   paths,
   clock: environment.OURO_CLOCK_FILE ? fileClock(environment.OURO_CLOCK_FILE) : systemClock,
@@ -156,9 +222,7 @@ const core = new OuroCore({
   summaryModel: environment.OURO_SUMMARY_MODEL ?? 'haiku',
   sendPush: pushSenderFromEnvironment(),
   // Journeys use the stand-in; a real machine asks the accounts' own tools.
-  integrationTools: environment.OURO_INTEGRATIONS_STAND_IN_DIR
-    ? standInIntegrationTools(environment.OURO_INTEGRATIONS_STAND_IN_DIR, { openrouter: paths.openrouterApiKey })
-    : realIntegrationTools({ dataDir: paths.dataDir, anthropicKeyFile: paths.anthropicApiKey, openrouterKeyFile: paths.openrouterApiKey, claudeConfigDir: environment.CLAUDE_CONFIG_DIR ?? null, awsFiles: awsFilesOf(environment) }),
+  integrationTools,
   // An older guardian's acceptance check runs stand-in agents with real accounts and an empty home.
   accountsAreStandIns: environment.OURO_INTEGRATIONS_STAND_IN_DIR !== undefined,
   hostHold: hostHoldFromEnvironment(),
@@ -170,6 +234,7 @@ const core = new OuroCore({
   githubApi: httpGitHubApi(environment.OURO_GITHUB_API_URL ?? 'https://api.github.com'),
   guardian: agentBaseEnv.OURO_GUARDIAN_SOCKET ? guardianClient(agentBaseEnv.OURO_GUARDIAN_SOCKET) : null,
   tailscale: tailscaleSetupFromEnvironment(),
+  machines,
   log: logEvent,
 })
 
@@ -190,6 +255,7 @@ if (appListen.startsWith('unix:')) {
 }
 
 core.start(Number(environment.OURO_TICK_MS ?? 1000))
+machines?.resumeAll()
 
 function logMemory(): void {
   const usage = process.memoryUsage()

@@ -1,8 +1,9 @@
-// The part of the Sprites API (https://docs.sprites.dev/api) the Sprite provisioner uses, and its HTTP client.
+// The part of the Sprites API (https://docs.sprites.dev/api) that making a Sprite uses, and its HTTP client: one copy for
+// the hub (hosted computers) and the server (Servers → New server → Sprite). See index.ts for why it lives here.
 // Nothing here reads a command's output from exec: the HTTP form's framing relies on chunk boundaries surviving
 // proxies, so commands write their results to files that are read back with the filesystem API.
 //
-// The organisation's token reaches every Sprite in it, the hub's own and others alike. So the client is scoped to one
+// The organisation's token reaches every Sprite in it, whatever else is in it alike. So the client is scoped to one
 // name prefix: it names, lists and touches only Sprites whose names start with it, and refuses any other name.
 
 export type SpriteUrlAuth = 'sprite' | 'public'
@@ -39,7 +40,7 @@ export interface SpritesApi {
   writeFile(name: string, path: string, content: Buffer, mode: string): Promise<void>
   /** Null when there is no such file. */
   readFile(name: string, path: string): Promise<Buffer | null>
-  /** The Sprite and all it holds are gone; a Sprite that doesn't exist is as good. Throws `SpriteNameOutOfScope` for one that isn't the hub's. */
+  /** The Sprite and all it holds are gone; a Sprite that doesn't exist is as good. Throws `SpriteNameOutOfScope` for one out of scope. */
   deleteSprite(name: string): Promise<void>
   /** Runs a command and settles when it ends; its output and exit status are not read. */
   exec(name: string, argv: string[]): Promise<void>
@@ -96,7 +97,7 @@ export class SpritesHttpApi implements SpritesApi {
       names.push(...(page.sprites ?? []).map((sprite) => sprite.name))
       continuation = page.has_more ? page.next_continuation_token : null
     } while (continuation)
-    // The prefix is the API's filter too, but what counts against the hub's limit is decided here.
+    // The prefix is the API's filter too, but what is in scope is decided here.
     return names.filter((name) => name.startsWith(this.namePrefix))
   }
 
@@ -141,9 +142,9 @@ export class SpritesHttpApi implements SpritesApi {
     await response!.arrayBuffer()
   }
 
-  /** The name, if it is one of this hub's. */
+  /** The name, if it is in scope. */
   private inScope(name: string): string {
-    if (!name.startsWith(this.namePrefix) || name.length === this.namePrefix.length) throw new SpriteNameOutOfScope(`the Sprite ${JSON.stringify(name)} is not one of this hub's, which start with ${JSON.stringify(this.namePrefix)}`)
+    if (!name.startsWith(this.namePrefix) || name.length === this.namePrefix.length) throw new SpriteNameOutOfScope(`the Sprite ${JSON.stringify(name)} is out of scope: the ones this client touches start with ${JSON.stringify(this.namePrefix)}`)
     return name
   }
 

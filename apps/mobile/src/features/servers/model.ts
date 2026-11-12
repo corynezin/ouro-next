@@ -1,25 +1,47 @@
-// The saved servers as rows. Pure: Screen.tsx only draws this.
-import type { HostedServer, ProvisioningStep } from '@ouro/contract'
+// The servers as rows: the ones saved on this phone, each with how it is linked to the open one, then the computers the
+// open one is linked to that this phone isn't paired with. Pure: Screen.tsx only draws this.
+import type { ComputerEntity, HostedServer, MachineProvider, NewMachine, ProvisioningStep } from '@ouro/contract'
+import { sameServerUrl } from '../../core/accounts/savedServers.ts'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
+import { computerStateText } from '../computers/model.ts'
 import { hubFailureText } from '../../core/hub/hubApi.ts'
-import type { HubFailure } from '../../core/hub/hubApi.ts'
+import type { HubFailure, HubResult } from '../../core/hub/hubApi.ts'
+import { failureText } from '../../core/session/serverApi.ts'
+import type { ApiResult } from '../../core/session/serverApi.ts'
 
 /** What the last check of the servers that aren't open found, and whether one is running. */
 export interface OtherServersUnreadView { counts: ReadonlyMap<string, number>; checking: boolean }
 
+/** How a server is linked to the open one, as one of its computers. Null on the open server's own row. */
+export type ServerLink =
+  | { kind: 'linked'; computerId: string; stateText: string; fullTrust: boolean; incompatibility: string | null }
+  | { kind: 'not_linked' }
+
 export interface ServerRow {
   id: string; label: string; url: string; personText: string | null; isActive: boolean; canRemove: boolean
+  link: ServerLink | null
   /** The badge: unread there, when it isn't open and has some. */
   unreadBadge: number | null
   /** The spinner: a check is running and has nothing to show for it yet. */
   checking: boolean
 }
 
-export function serverRows(servers: readonly SavedServer[], activeId: string | null, unread: OtherServersUnreadView): ServerRow[] {
+/** The open server's computer at a saved server's address: the same machine, linked. */
+export const computerAt = (url: string, computers: Iterable<ComputerEntity>): ComputerEntity | undefined =>
+  [...computers].find((computer) => computer.address && sameServerUrl(computer.address, url))
+
+function linkOf(computer: ComputerEntity | undefined): ServerLink {
+  if (!computer) return { kind: 'not_linked' }
+  return { kind: 'linked', computerId: computer.id, stateText: computerStateText(computer), fullTrust: computer.trust === 'full', incompatibility: computer.incompatibility }
+}
+
+export function serverRows(servers: readonly SavedServer[], activeId: string | null, unread: OtherServersUnreadView, computers: Iterable<ComputerEntity> = []): ServerRow[] {
+  const linked = [...computers]
   return servers.map((server) => {
     const isActive = server.id === activeId
     const count = isActive ? 0 : unread.counts.get(server.id) ?? 0
     return {
+      link: isActive ? null : linkOf(computerAt(server.url, linked)),
       id: server.id,
       label: server.label,
       url: server.url,
@@ -31,6 +53,16 @@ export function serverRows(servers: readonly SavedServer[], activeId: string | n
       checking: !isActive && count === 0 && unread.checking,
     }
   })
+}
+
+/** A computer the open server is linked to that this phone isn't paired with, such as one linked from Terminal. */
+export interface UnpairedComputerRow { computerId: string; name: string; stateText: string; fullTrust: boolean; incompatibility: string | null }
+
+export function unpairedComputerRows(computers: Iterable<ComputerEntity>, servers: readonly SavedServer[]): UnpairedComputerRow[] {
+  return [...computers]
+    .filter((computer) => !computer.address || !isSaved(computer.address, servers))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((computer) => ({ computerId: computer.id, name: computer.name, stateText: computerStateText(computer), fullTrust: computer.trust === 'full', incompatibility: computer.incompatibility }))
 }
 
 /** Under the list while a check runs. */
@@ -46,6 +78,8 @@ export function renamedLabel(typed: string, current: string): string | null {
   return label && label !== current ? label : null
 }
 
+const isSaved = (url: string, saved: readonly SavedServer[]) => saved.some((server) => sameServerUrl(server.url, url))
+
 /** One of the account's servers that this phone isn't paired with: still being set up, failed, or ready to connect. */
 export interface HostedRow { id: string; label: string; detail: string }
 
@@ -54,15 +88,12 @@ const STEP_TEXT: Record<ProvisioningStep, string> = {
   setup: 'Setting up agents…', service: 'Opening connection…', pair: 'Connecting…',
 }
 
-const withoutTrailingSlashes = (url: string) => url.replace(/\/+$/, '')
-
 export function hostedRows(hosted: readonly HostedServer[], saved: readonly SavedServer[]): HostedRow[] {
   const savedIds = new Set(saved.map((server) => server.hostedServerId))
   // Paired before the phone kept hosted ids: known by its address instead.
-  const savedUrls = new Set(saved.map((server) => withoutTrailingSlashes(server.url)))
   const unpaired = hosted.filter((server) => {
     if (savedIds.has(server.id)) return false
-    return !(server.status.state === 'ready' && savedUrls.has(withoutTrailingSlashes(server.status.address)))
+    return !(server.status.state === 'ready' && isSaved(server.status.address, saved))
   })
   return unpaired.map((server) => ({ id: server.id, label: server.label, detail: hostedDetail(server.status) }))
 }
@@ -91,14 +122,127 @@ export const createFailureText = (failure: HubFailure) => hubFailureText(failure
 export const NEW_SERVER_COPY = {
   button: 'New server',
   title: 'Name your new server',
+  titleOn: (where: string) => `Name your new server on ${where}`,
   placeholder: 'e.g. Work',
   hint: 'A server takes a few minutes to set up. You can leave and come back.',
+  /** The open server says what it makes and how long that takes (its provider's `detail`). */
+  hintFor: (detail: string) => `${detail} You can leave and come back.`,
   failed: 'Could not create the server.',
+  chooseTitle: 'Where should the new server run?',
+  hosted: 'Ouro hosted',
+  setUpFirst: (name: string) => `Set up ${name}…`,
+  removeTitle: (label: string) => `Remove ${label}?`,
+  removeMessage: 'Its machine is destroyed, with everything on it.',
+  removeFailed: (why: string) => `Could not remove it: ${why}`,
+  destroy: 'Destroy machine…',
+  destroyTitle: (label: string) => `Destroy ${label}?`,
+  destroyMessage: 'Its machine is deleted, with its agents and everything on it, and the server leaves this phone. This can\'t be undone.',
+  destroyConfirm: 'Destroy',
+  destroyFailed: (why: string) => `Could not destroy it: ${why}`,
+  destroyElsewhereMessage: 'Its machine is deleted, with its agents and everything on it, for every phone paired with it. This can\'t be undone.',
+  pairedElsewhere: 'Paired with another phone',
 } as const
+
+// ---- Servers this server makes on a cloud account (contract machines.ts) ----
+
+/** One place a new server can be made, as the New server menu offers it. */
+export type NewServerChoice =
+  | { kind: 'machine'; provider: string; title: string; detail: string }
+  /** Not set up yet: choosing it opens the integration's screen, when this app knows it. */
+  | { kind: 'set_up'; provider: string; title: string; detail: string; route: IntegrationRoute | null }
+  | { kind: 'hosted'; title: string }
+
+export type IntegrationRoute = 'AWS' | 'Sprites'
+
+/** The screen for a provider's `setup`; null for one this app doesn't know yet. */
+export function integrationRouteOf(setup: string | null): IntegrationRoute | null {
+  switch (setup) {
+    case 'aws': return 'AWS'
+    case 'sprites': return 'Sprites'
+    default: return null
+  }
+}
+
+/** The open server's providers, then the hosted hub's when the phone has an account with room. */
+export function newServerChoices(providers: readonly MachineProvider[], hostedAvailable: boolean): NewServerChoice[] {
+  const choices: NewServerChoice[] = providers.map((provider) => provider.available
+    ? { kind: 'machine', provider: provider.id, title: provider.name, detail: provider.detail }
+    : { kind: 'set_up', provider: provider.id, title: NEW_SERVER_COPY.setUpFirst(provider.name), detail: provider.detail, route: integrationRouteOf(provider.setup) })
+  if (hostedAvailable) choices.push({ kind: 'hosted', title: NEW_SERVER_COPY.hosted })
+  return choices
+}
+
+/**
+ * A machine the open server made that isn't a server saved on this phone (one that is shows Destroy on its own row):
+ * - `setting_up`: being made, failed, or ready for a phone to pair; tapping it carries on setting it up. Removable once
+ *   settled, which destroys the machine.
+ * - `paired_elsewhere`: a phone has paired with it, not this one (or this one forgot it). It offers only Destroy, so a
+ *   machine no phone here can reach can still be stopped from billing.
+ */
+export type MachineRow =
+  | { kind: 'setting_up'; id: string; label: string; detail: string; canRemove: boolean }
+  | { kind: 'paired_elsewhere'; id: string; label: string; detail: string }
+
+const providerName = (provider: string, providers: readonly MachineProvider[]) =>
+  providers.find((candidate) => candidate.id === provider)?.name ?? provider
+
+export function machineRows(machines: readonly NewMachine[], providers: readonly MachineProvider[], saved: readonly SavedServer[]): MachineRow[] {
+  return machines
+    .filter((machine) => !(machine.status.state === 'ready' && isSaved(machine.status.address, saved)))
+    .map((machine): MachineRow => {
+      const where = providerName(machine.provider, providers)
+      return machine.paired
+        ? { kind: 'paired_elsewhere', id: machine.id, label: machine.label, detail: `${where} · ${NEW_SERVER_COPY.pairedElsewhere}` }
+        : { kind: 'setting_up', id: machine.id, label: machine.label, detail: `${where} · ${hostedDetail(machine.status)}`, canRemove: machine.status.state !== 'provisioning' }
+    })
+}
+
+/** The machine the open server made for this saved server, paired or not, when it made one and it's ready: the one Destroy
+ * removes. */
+export function machineOfServer(url: string, machines: readonly NewMachine[]): NewMachine | null {
+  return machines.find((machine) => machine.status.state === 'ready' && sameServerUrl(machine.status.address, url)) ?? null
+}
+
+/** A machine's state as the setup flow reads a hosted server's: the same shape, and failures in the hub's terms. */
+export function machineAsHosted(result: ApiResult<NewMachine>): HubResult<HostedServer> {
+  if (result.ok) {
+    const { id, label, createdAt, status } = result.value
+    return { ok: true, value: { id, label, createdAt, primary: false, status } }
+  }
+  const { failure } = result
+  switch (failure.kind) {
+    case 'unauthenticated': return { ok: false, failure: { kind: 'unauthenticated' } }
+    case 'refused': return { ok: false, failure: { kind: 'refused', code: failure.error.code, message: failure.error.message, retryable: failure.error.retryable } }
+    case 'invalid_answer': return { ok: false, failure: { kind: 'invalid_answer', status: failure.status } }
+    case 'machine_unreachable':
+    case 'no_answer':
+    case 'timed_out':
+    case 'cancelled': return { ok: false, failure: { kind: 'unreachable', reason: failureText(failure) } }
+  }
+}
 
 export const SERVERS_COPY = {
   storageError: 'Could not read or update saved servers. Retry, or use the storage recovery warning.',
   noCredentials: 'This server has no usable saved credentials. Pair again to reconnect.',
   removeTitle: (label: string) => `Remove ${label}?`,
   removeMessage: 'The machine and agents keep running. Pair again later with a new code.',
+  removeFromPhone: 'Remove from this phone',
+  removeAndUnlink: 'Remove and unlink',
+  unlink: 'Unlink',
+  unlinkTitle: (label: string) => `Unlink ${label}?`,
+  unlinkMessage: (running: number | null) => running
+    ? `${running} ${running === 1 ? 'agent is' : 'agents are'} running there. They keep running, but this server won't see them any more.`
+    : 'This server stops reaching it. Nothing on it is deleted.',
+  notLinked: 'Not linked',
+  link: 'Link',
+  linking: 'Linking…',
+  linkFailed: (label: string, why: string) => `Could not link ${label}: ${why}`,
+  notOnPhone: 'Not on this phone',
+  fullTrust: 'Full trust',
+  limitedTrust: 'Limited trust',
+  unlinkFailed: 'Could not unlink it.',
+  trustFailed: 'Could not change its trust.',
+  footer: 'Linked servers can start agents on each other: pick one under Machine when starting an agent. Full trust lets a server do anything you or an agent can do on this one; limited trust only lets it send messages.',
+  offlineNote: 'An offline server comes back by itself when it wakes.',
+  linkByCommand: 'Link a computer with a command',
 } as const
