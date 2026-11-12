@@ -1,7 +1,7 @@
-// A file sent in a chat: an image full screen with pinch to zoom, anything else in a web view. The share button downloads
-// it and opens the share sheet. Every request carries the session's authorisation.
-import { useLayoutEffect, useState } from 'react'
-import { ActivityIndicator, Alert, ScrollView, Text, View, useWindowDimensions } from 'react-native'
+// A file sent in a chat: an image full screen with pinch to zoom, Markdown formatted, anything else in a web view. The
+// share button downloads it and opens the share sheet. Every request carries the session's authorisation.
+import { useEffect, useLayoutEffect, useState } from 'react'
+import { ActivityIndicator, Alert, Linking, ScrollView, Text, View, useWindowDimensions } from 'react-native'
 import { Image } from 'expo-image'
 import { WebView } from 'react-native-webview'
 import { File, Paths } from 'expo-file-system'
@@ -10,7 +10,7 @@ import { C } from '../../design/colors.ts'
 import { HeaderIcon } from '../../design/form.tsx'
 import { useSession } from '../../navigation/coreContext.tsx'
 import type { ScreenProps } from '../../navigation/routes.ts'
-import { FILE_COPY, sharedFileName } from './model.ts'
+import { FILE_COPY, isMarkdownFile, markdownLinkAction, markdownPage, sharedFileName } from './model.ts'
 
 async function share(url: string, headers: Record<string, string>, fileName: string) {
   try {
@@ -37,6 +37,41 @@ export function FileScreen({ route, navigation }: ScreenProps<'File'>) {
       headerRight: () => <HeaderIcon symbol="square.and.arrow.up" onPress={() => { void share(uri, headers, fileName) }} />,
     })
   }, [navigation, fileName, uri, headers])
+
+  // `tooLarge`: read, and too large to format, so it opens in the plain web view below like any other file.
+  const [html, setHtml] = useState<string | null>(null)
+  const [tooLarge, setTooLarge] = useState(false)
+  const markdown = !isImage && isMarkdownFile(fileName) && !tooLarge
+  useEffect(() => {
+    if (!markdown) return
+    let current = true
+    fetch(uri, { headers })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(FILE_COPY.httpError(response.status))
+        return markdownPage(await response.arrayBuffer())
+      })
+      .then(
+        (page) => { if (!current) return; if (page === null) setTooLarge(true); else setHtml(page) },
+        (e: Error) => { if (current) { setLoading(false); setError(e.message) } },
+      )
+    return () => { current = false }
+  }, [markdown, uri]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (markdown) return (
+    <View style={{ flex: 1, backgroundColor: C.background }}>
+      {html !== null ? (
+        <WebView source={{ html }} style={{ flex: 1, backgroundColor: 'transparent' }} originWhitelist={['about:*']}
+          javaScriptEnabled={false} onLoadEnd={() => setLoading(false)}
+          onShouldStartLoadWithRequest={({ url }) => {
+            const action = markdownLinkAction(url)
+            if (action === 'open') Linking.openURL(url).catch(() => {})
+            return action === 'load'
+          }} />
+      ) : null}
+      {loading ? <ActivityIndicator style={{ position: 'absolute', top: 24, alignSelf: 'center' }} /> : null}
+      {error ? <Text style={{ color: C.red, padding: 16 }}>{error}</Text> : null}
+    </View>
+  )
 
   if (isImage) return (
     <ScrollView style={{ flex: 1, backgroundColor: 'black' }} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}

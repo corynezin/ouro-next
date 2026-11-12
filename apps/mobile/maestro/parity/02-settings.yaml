@@ -7,13 +7,6 @@ appId: dev.claudeinbox.ouronext
     timeout: 10000
 - assertVisible: "This device, Ouro \\(iPhone\\)"
 - assertVisible: "Switch between servers, add a new one, or remove one from this phone only \\(the machine and agents keep running\\)\\."
-- scrollUntilVisible:
-    element: "Model avatars"
-- assertVisible: "Agents use Notionists faces\\. The circle’s ring identifies the company: Anthropic terracotta, OpenAI green, Google red, DeepSeek blue, Qwen purple\\. Backgrounds go from light \\(fast\\) to medium \\(balanced\\) to dark \\(flagship\\); gray means unclassified\\. Turn this off to restore the original avatars\\."
-- takeScreenshot: parity-settings-avatars
-- scrollUntilVisible:
-    element: "Manage servers"
-    direction: UP
 - tapOn: "Manage servers"
 - extendedWaitUntil:
     visible: "Add a server"

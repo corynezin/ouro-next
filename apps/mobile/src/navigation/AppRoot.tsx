@@ -17,7 +17,6 @@ import type { PushCenter } from '../core/push/pushCenter.ts'
 import type { OtherServersUnread } from '../core/servers/otherServersUnread.ts'
 import { LockCover } from './LockCover.tsx'
 import { useUpdatesDownloadedAtLaunch } from '../native/updates.ts'
-import { ModelAvatarsEnabled } from '../design/Avatar.tsx'
 import { C } from '../design/colors.ts'
 import { accent } from '../design/theme.ts'
 import { toast, ToastHost } from '../design/Toast.tsx'
@@ -150,7 +149,6 @@ export function AppRoot({ core, hostedServers, updates, lock, push, otherServers
           <UpdateFlowProvider value={updates}>
           <PushProvider value={push}>
           <OtherServersUnreadProvider value={otherServersUnread}>
-          <ModelAvatarsEnabled.Provider value={core.preferences.current.modelAvatars}>
             <UpdateBanner flow={updates} onHeight={setBannerHeight} />
             {banner && (
               <BelowStatusBar updateBannerShown={updateBannerShown}>
@@ -213,7 +211,6 @@ export function AppRoot({ core, hostedServers, updates, lock, push, otherServers
             )}
             <ToastHost />
             <LockCover gate={lock} />
-          </ModelAvatarsEnabled.Provider>
           </OtherServersUnreadProvider>
           </PushProvider>
           </UpdateFlowProvider>
