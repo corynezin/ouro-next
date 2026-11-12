@@ -3,8 +3,9 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { awsCredentialsProblem, iniSection, realAwsTools, sigV4Authorization, withIniSection } from './aws.ts'
-import { ProviderUnreachable } from './integrations.ts'
+import { awsCredentialsProblem, iniSection, realAwsTools, sigV4Authorization, stsHeaders, withIniSection } from './aws.ts'
+import type { SigningCredentials } from './aws.ts'
+import { ProviderUnreachable } from './provider-outcome.ts'
 
 test("a request is signed as AWS's own Signature Version 4 test suite says (get-vanilla)", () => {
   const authorization = sigV4Authorization(
@@ -67,4 +68,24 @@ test('a key AWS accepts becomes the default profile, readable only by its owner,
   await tools.awsDisconnect()
   assert.deepEqual(await tools.awsStatus(), { status: 'not_connected' })
   assert.equal(readFileSync(files.credentials, 'utf8'), '[personal]\naws_access_key_id = AKIAPERSONAL\n')
+})
+
+test('temporary credentials someone put in the default profile are checked with their session token, which is signed', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ouro-aws-'))
+  const files = { credentials: join(dir, 'credentials'), config: join(dir, 'config') }
+  writeFileSync(files.credentials, '[default]\naws_access_key_id = ASIAIOSFODNN7EXAMPLE\naws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\naws_session_token = FwoGZXIvYXdzEXAMPLETOKEN\n')
+  const asked: SigningCredentials[] = []
+  const tools = realAwsTools(files, async (credentials) => {
+    asked.push(credentials)
+    return { kind: 'known', accountId: '111122223333', arn: 'arn:aws:sts::111122223333:assumed-role/dev/me' }
+  })
+  const status = await tools.awsStatus()
+  assert.equal(status.status === 'connected' && status.problem, null)
+  assert.equal(asked[0]!.sessionToken, 'FwoGZXIvYXdzEXAMPLETOKEN')
+
+  const headers = stsHeaders(asked[0]!)
+  assert.equal(headers['x-amz-security-token'], 'FwoGZXIvYXdzEXAMPLETOKEN')
+  const signing = { method: 'POST', host: 'sts.amazonaws.com', path: '/', query: '', body: '', region: 'us-east-1', service: 'sts', amzDate: '20150830T123600Z' }
+  assert.match(sigV4Authorization({ ...signing, headers }, asked[0]!), /SignedHeaders=content-type;host;x-amz-date;x-amz-security-token,/)
+  assert.equal(stsHeaders({ accessKeyId: 'AKIAIOSFODNN7EXAMPLE', secretAccessKey: 's' })['x-amz-security-token'], undefined, 'a long-lived key sends none')
 })

@@ -149,7 +149,7 @@ export function createApiHandler(core: OuroCore, trust: ListenerTrust, logging: 
 
     if (path.startsWith('/v2/integrations/')) {
       if (caller.kind !== 'person') throw new CommandRefused('forbidden', 'accounts are set up from the app')
-      return replyJson(response, 200, await integrationAction(core.integrations, method, path.slice('/v2/integrations/'.length), request))
+      return replyJson(response, 200, await integrationAction(core.integrations, method, path.slice('/v2/integrations/'.length), request, caller.person.isOwner))
     }
 
     if (path === '/v2/tailscale') {
@@ -342,7 +342,7 @@ async function machineAction(machines: Machines, method: string, path: string, r
 }
 
 /** The accounts' routes. Codes, keys and tokens pass straight to the provider's tool: never stored here or logged. */
-async function integrationAction(integrations: Integrations, method: string, action: string, request: IncomingMessage): Promise<unknown> {
+async function integrationAction(integrations: Integrations, method: string, action: string, request: IncomingMessage, byOwner: boolean): Promise<unknown> {
   const body = <S extends z.ZodType>(schema: S) => async (): Promise<z.infer<S>> => {
     const parsed = schema.safeParse(await readJson(request))
     if (!parsed.success) throw new CommandRefused('invalid_request', 'that request is missing what this action needs')
@@ -361,7 +361,7 @@ async function integrationAction(integrations: Integrations, method: string, act
     case 'POST github/disconnect': return await integrations.githubDisconnect()
     case 'GET aws': return await integrations.awsStatus()
     case 'POST aws/credentials': return await integrations.awsSetCredentials(await body(AwsCredentialsBody)())
-    case 'POST aws/disconnect': return await integrations.awsDisconnect()
+    case 'POST aws/disconnect': return await integrations.awsDisconnect(byOwner)
     default: throw new CommandRefused('not_found', `no such account action: ${method} ${action}`)
   }
 }

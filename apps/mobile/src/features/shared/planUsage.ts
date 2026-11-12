@@ -26,15 +26,6 @@ export const NO_READING_YET = 'No reading yet'
 /** Signed in to a Claude subscription, so there are plan limits to read (an API key has none). */
 export const isClaudeOnPlan = (claude: ClaudeIntegrationState | null) => claude?.status === 'signed_in' && claude.account.method === 'plan'
 
-/**
- * Settings' "Plan usage" rows. The server learns Claude's windows from its turns, so before the first one there is
- * nothing to show but that. Null: no section, as when Claude isn't on a plan and nothing was ever read.
- */
-export function claudePlanRows(usage: PlanUsage | null, claudeOnPlan: boolean, now: number): PlanWindowRow[] | null {
-  if (usage) return planWindowRows(usage, now)
-  return claudeOnPlan ? [{ key: 0, label: 'Usage', valueText: NO_READING_YET }] : null
-}
-
 function windowName(windowMinutes: number) {
   if (windowMinutes === FIVE_HOURS) return '5-hour'
   if (windowMinutes === WEEK) return 'Weekly'
@@ -74,6 +65,3 @@ function part(name: string, usage: PlanUsage | null, now: number): string | null
   const longest = usage?.windows.reduce<PlanWindow | null>((found, window) => (found && found.windowMinutes >= window.windowMinutes ? found : window), null)
   return longest ? `${name}: ${capPct(usedNow(longest, now))}` : null
 }
-
-export const planUsageFooter = (machineName: string) =>
-  `The subscription's 5-hour and weekly limits as ${machineName} last saw them (it learns them from agents' turns).`

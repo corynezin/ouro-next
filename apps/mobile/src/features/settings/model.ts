@@ -2,8 +2,8 @@
 import { ago } from '../../design/format.ts'
 import { MASTER_AGENT_NAME } from '@ouro/contract'
 import type {
-  ChatgptIntegrationState, ClaudeIntegrationState, DeviceEntity, GithubIntegrationState, NotificationSettings, NotificationSettingsEntity, OpenrouterIntegrationState, PersonEntity,
-  ServerEntity, TailscaleState,
+  AwsIntegrationState, ChatgptIntegrationState, ClaudeIntegrationState, DeviceEntity, GithubIntegrationState, NotificationSettings, NotificationSettingsEntity, OpenrouterIntegrationState, PersonEntity,
+  ServerEntity, SpritesIntegrationState, TailscaleState,
 } from '@ouro/contract'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
 
@@ -45,10 +45,20 @@ export const NOTIFICATIONS_COPY = {
   savingFailed: 'saving failed',
 } as const
 
-/** What Settings changes: on or off (as a mode), and urgent asks through Focus. */
+/** A mode that notifies: what the switch turns on to. */
+export type NotifyingMode = Exclude<NotificationSettings['mode'], 'nothing'>
+
+/**
+ * What Settings changes: on or off, and urgent asks through Focus. Turning on restores `lastOnMode`, the mode in use before
+ * it was turned off: Settings offers no mode picker, so one lost here couldn't be chosen again.
+ */
 export type NotificationChange =
-  | { kind: 'mode'; mode: NotificationSettings['mode'] }
+  | { kind: 'on'; on: boolean; lastOnMode: NotifyingMode }
   | { kind: 'urgent_breaks_through'; on: boolean }
+
+/** The mode to remember as notifications are turned off: the one in use, or the one remembered already. */
+export const notifyingModeOf = (settings: NotificationSettings, remembered: NotifyingMode): NotifyingMode =>
+  settings.mode === 'nothing' ? remembered : settings.mode
 
 /**
  * The full settings to save: the command replaces them all, so everything not changed is carried over. Quiet hours take
@@ -61,7 +71,7 @@ export function changedNotificationSettings(current: NotificationSettings, chang
 
 function changedField(settings: NotificationSettings, change: NotificationChange): NotificationSettings {
   switch (change.kind) {
-    case 'mode': return { ...settings, mode: change.mode }
+    case 'on': return { ...settings, mode: change.on ? notifyingModeOf(settings, change.lastOnMode) : 'nothing' }
     case 'urgent_breaks_through': return { ...settings, urgentBreaksThrough: change.on }
   }
 }
@@ -90,7 +100,6 @@ export function peopleRows(people: Iterable<PersonEntity>, devices: Iterable<Dev
     })
 }
 
-export const BASE_FOOTER = 'Updates keep your own changes. They merge beside the live code and switch only once everything builds.'
 export const BASE_UPDATE_STARTED = 'Updating. Your agents restart when it finishes.'
 
 /**
@@ -101,12 +110,12 @@ export interface BaseSection {
   versionText: string
   updatingText: string | null
   note: { text: string; color: 'orange' | 'red' } | null
-  /** The newest base's release notes while it's newer, else what updates do. */
-  footer: string
+  /** The newest base's release notes while it's newer. */
+  footer: string | null
   /** The base the button takes, offered when newer and nothing is under way. */
   take: { n: number; label: string } | null
   /** After a conflict no agent is resolving yet, the owner's choice: have the master agent merge it, or drop the update. */
-  conflict: { resolveLabel: string; dropLabel: string; dropTitle: string; dropMessage: string } | null
+  conflict: { resolveLabel: string; dropLabel: string; dropTitle: string; dropMessage: string; dropConfirmLabel: string } | null
 }
 
 export function baseSection(base: ServerEntity['release']['base'], isOwner: boolean): BaseSection | null {
@@ -122,13 +131,14 @@ export function baseSection(base: ServerEntity['release']['base'], isOwner: bool
       : update.state === 'failed'
         ? { text: `Base ${update.n} didn't go in: ${update.why}. Nothing live changed unless it says so.`, color: 'red' }
         : null,
-    footer: newer?.notes ?? BASE_FOOTER,
+    footer: newer?.notes ?? null,
     take: takeable ? { n: newer.n, label: `Update to base ${newer.n}` } : null,
     conflict: update.state === 'conflict' && update.resolver === null && isOwner ? {
       resolveLabel: 'Have your master agent merge it',
       dropLabel: 'Not now',
       dropTitle: `Skip base ${update.n} for now?`,
       dropMessage: 'The merge is thrown away and nothing changes. You can update again later.',
+      dropConfirmLabel: 'Skip',
     } : null,
   }
 }
@@ -204,7 +214,12 @@ export function backupSection(backup: ServerEntity['sourceBackup'], isOwner: boo
   }
 }
 
-// ---- the reworked page: one-line summaries ----
+// ---- one-line summaries ----
+
+/** A status read from its own route rather than sync: being asked, the route failed, or its answer. */
+export type RouteStatus<T> = { kind: 'checking' } | { kind: 'failed' } | { kind: 'loaded'; value: T }
+
+const CHECKING_TEXT = 'Checking…'
 
 export interface IntegrationRow { key: 'claude' | 'chatgpt' | 'openrouter' | 'github'; title: string; status: string; route: 'Claude' | 'ChatGPT' | 'OpenRouter' | 'GitHub' }
 
@@ -212,7 +227,8 @@ export interface IntegrationRow { key: 'claude' | 'chatgpt' | 'openrouter' | 'gi
 export function integrationRows(states: {
   claude: ClaudeIntegrationState | null; chatgpt: ChatgptIntegrationState | null; openrouter: OpenrouterIntegrationState | null; github: GithubIntegrationState | null
 }): IntegrationRow[] {
-  const status = (state: { status: string } | null, connected: string) => (!state ? 'Checking…' : state.status === connected ? 'Connected' : 'Not set up')
+  // Typed per provider, so a misspelt or renamed status doesn't compile.
+  const status = <S extends { status: string }>(state: S | null, connected: S['status']) => (!state ? CHECKING_TEXT : state.status === connected ? 'Connected' : 'Not set up')
   return [
     { key: 'claude', title: 'Claude Code', status: status(states.claude, 'signed_in'), route: 'Claude' },
     { key: 'chatgpt', title: 'ChatGPT', status: status(states.chatgpt, 'signed_in'), route: 'ChatGPT' },
@@ -222,15 +238,28 @@ export function integrationRows(states: {
 }
 
 /** AWS's row: its state comes from its own route, not sync. Null when that route failed: the row then shows no status. */
-export function awsStatusText(aws: { status: 'not_connected' | 'connected' } | null, failed: boolean): string | null {
-  if (failed) return null
-  return !aws ? 'Checking…' : aws.status === 'connected' ? 'Connected' : 'Not set up'
+export function awsStatusText(aws: RouteStatus<AwsIntegrationState>): string | null {
+  switch (aws.kind) {
+    case 'checking': return CHECKING_TEXT
+    case 'failed': return null
+    case 'loaded': return aws.value.status === 'connected' ? 'Connected' : 'Not set up'
+  }
+}
+
+/** Sprites' row, like AWS's: Connected (or what the Sprites API said about the token), or Not set up. */
+export function spritesStatusText(sprites: RouteStatus<SpritesIntegrationState>): string | null {
+  switch (sprites.kind) {
+    case 'checking': return CHECKING_TEXT
+    case 'failed': return null
+    case 'loaded': return sprites.value.status === 'connected' ? (sprites.value.problem ? 'Not working' : 'Connected') : 'Not set up'
+  }
 }
 
 /** Tailscale's row, like AWS's from its own route: Connected or Not set up, or what it's in the middle of. */
-export function tailscaleStatusText(tailscale: TailscaleState | null, failed: boolean): string | null {
-  if (failed) return null
-  if (!tailscale) return 'Checking…'
+export function tailscaleStatusText(status: RouteStatus<TailscaleState>): string | null {
+  if (status.kind === 'checking') return CHECKING_TEXT
+  if (status.kind === 'failed') return null
+  const tailscale = status.value
   switch (tailscale.state) {
     case 'connected': return 'Connected'
     case 'not_connected': return 'Not set up'

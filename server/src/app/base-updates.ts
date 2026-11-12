@@ -12,7 +12,7 @@ import {
 import type { BaseRelease, BaseSource } from '../adapters/base-source.ts'
 import { deploymentOutcome } from '../adapters/guardian-client.ts'
 import type { GuardianClient } from '../adapters/guardian-client.ts'
-import { baseUpdateOf, conflictBrief, continueDecision, dropDecision, resolveDecision, takeRefusal } from '../domain/base-update.ts'
+import { baseUpdateOf, conflictBrief, conflictWaitingNotice, continueDecision, droppedBrief, dropDecision, resolveDecision, takeRefusal } from '../domain/base-update.ts'
 import type { BaseUpdateRecord } from '../domain/base-update.ts'
 import { NotPublished } from './app-publishing.ts'
 import type { PublishedApp } from './app-publishing.ts'
@@ -42,6 +42,10 @@ export interface BaseUpdatesConfig {
   publishApp: (() => Promise<PublishedApp>) | null
   /** Tells the master agent; called inside a transaction. */
   tellMasterAgent: (text: string) => void
+  /** Tells the agent of that name, if it is on this machine; called inside a transaction. */
+  tellAgent: (name: string, text: string) => void
+  /** Tells the owner with a notice in their chat; called inside a transaction. */
+  tellOwner: (text: string) => void
   log: (event: string, fields: Record<string, unknown>) => void
 }
 
@@ -130,13 +134,21 @@ export class BaseUpdates {
     this.config.tellMasterAgent(conflictBrief(n, notes, files, besideDirOf(this.config.sourceRoot!, n)))
   }
 
-  /** After a conflict, the person's other choice: the merge is thrown away and the base stays offered. Called inside a transaction. */
+  /**
+   * After a conflict, the person's other choice: the base stays offered and the merge beside is thrown away. Allowed while
+   * an agent is resolving it, and that agent is told to stop. Called inside a transaction: only the record is saved here;
+   * the merge is removed once the command commits, so a rollback can't leave a conflict without its merge. A quick re-take
+   * is safe, as `merge` removes any merge beside before it merges again.
+   */
   drop(): void {
     const decision = dropDecision(this.config.readRecord())
     if (decision.kind === 'refused') throw new CommandRefused(decision.refusal.code, decision.refusal.message)
-    removeBeside(this.config.sourceRoot!, decision.n)
+    const { n, stopping } = decision
     this.config.saveRecord({ state: 'idle' })
-    this.config.log('base_update_dropped', { n: decision.n })
+    if (stopping !== null) this.config.tellAgent(stopping, droppedBrief(n))
+    this.config.log('base_update_dropped', { n, stopped: stopping })
+    const root = this.config.sourceRoot!
+    setImmediate(() => removeBeside(root, n))
   }
 
   private async failingOnError(n: number, step: () => Promise<void>): Promise<void> {
@@ -158,8 +170,12 @@ export class BaseUpdates {
       removeBeside(root, n)
       const merged = mergeBeside(root, n)
       if (merged.kind === 'conflicted') {
-        // The person chooses whether an agent resolves it.
-        this.config.commit(() => this.config.saveRecord({ state: 'conflict', n, files: merged.files, notes, resolver: null }))
+        // The person chooses whether an agent resolves it. The owner is told too, since an app from before this choice
+        // shows no buttons for it.
+        this.config.commit(() => {
+          this.config.saveRecord({ state: 'conflict', n, files: merged.files, notes, resolver: null })
+          this.config.tellOwner(conflictWaitingNotice(n, merged.files))
+        })
         return
       }
     }
