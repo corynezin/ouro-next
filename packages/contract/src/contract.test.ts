@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { randomUUID } from 'node:crypto'
 import {
-  AgentState, Change, CommandRequest, commands, displayStateOf, parseAddress, PeerMessage, receiptOf, SyncFrame,
+  AgentState, Change, CommandRequest, commands, displayStateOf, parseAddress, PeerMessage, PROVIDER_SESSION_ID_PATTERN, receiptOf, SyncFrame,
 } from './index.ts'
 import type { MessageEntity } from './index.ts'
 
@@ -73,4 +74,9 @@ test('a message from a peer older than protocol 3 answers no ask', () => {
   const fromProtocol2 = { messageId: 'm1', from: { kind: 'owner' }, to: 'helper', text: 'yes', wake: 'wake', purpose: 'message', sentAt: 1 }
   assert.equal(PeerMessage.parse(fromProtocol2).answersAskId, null)
   assert.equal(PeerMessage.parse({ ...fromProtocol2, answersAskId: 'ask-1' }).answersAskId, 'ask-1')
+})
+
+test("a moved conversation's session id is a plain name: one that could leave its folder is refused", () => {
+  assert.ok(PROVIDER_SESSION_ID_PATTERN.test(randomUUID()))
+  for (const id of ['../x', 'a/b', 'a\\b', '', '..']) assert.equal(PROVIDER_SESSION_ID_PATTERN.test(id), false, id)
 })

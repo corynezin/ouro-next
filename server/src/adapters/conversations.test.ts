@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
-import { conversationFilesOf, installConversation, rewriteRanIn } from './conversations.ts'
+import { claudeTranscriptPathOf, conversationFilesOf, installConversation, rewriteRanIn } from './conversations.ts'
 
 const root = mkdtempSync(join(tmpdir(), 'ouro-conversations-'))
 after(() => rmSync(root, { recursive: true, force: true }))
@@ -41,4 +41,10 @@ test('only folders at or under the old one are rewritten', () => {
 test('a file path that would leave its store is refused', () => {
   const stores = { agentStateDir: join(root, 'c-state'), claudeConfigDir: join(root, 'c-claude') }
   assert.throws(() => installConversation('stand_in', { providerSessionId: 's', ranIn: '/w', files: [{ path: '../../escape', content: Buffer.from('x') }] }, '/w', stores))
+})
+
+test('a session id that could name a file outside the projects folder has no transcript path', () => {
+  assert.equal(claudeTranscriptPathOf('/c', 'a1b2-c3', '/w'), '/c/projects/-w/a1b2-c3.jsonl')
+  for (const sessionId of ['../../secrets', 'a/b', '', '..']) assert.equal(claudeTranscriptPathOf('/c', sessionId, '/w'), null, sessionId)
+  assert.equal(conversationFilesOf('claude_code', '../escape', '/w', { agentStateDir: '/s', claudeConfigDir: '/c' }), null)
 })

@@ -10,7 +10,7 @@ import {
   AGENT_NAME_PATTERN, Change, turnFailureText, chatHandle, commands, SEARCH_MAX_LIMIT, WATCH_LEASE_MS, DEFAULT_GOAL_INTERVAL_SECONDS, MASTER_AGENT_NAME, MAX_ASK_SNOOZE_MS, OWNER_ADDRESS, parseAddress, PEER_ASK_SNOOZE_PROTOCOL, PEER_OWNER_ASKS_PROTOCOL, PEER_OWNER_MESSAGES_PROTOCOL, personAddress, RESERVED_AGENT_NAMES, updateMarkOf,
 } from '@ouro/contract'
 import type {
-  AgentEntity, AskEntity, AskSnooze, AttachmentRef, ChatEntity, CommandName, GoalEntity, CommandOutput, DeliveryWake, EntityKind, LogPage, LogRecord, MessageEntity, MessagePurpose, PairResponse, PlanUsage, PlanWindow,
+  AgentEntity, AskEntity, AskSnooze, AttachmentRef, ChatEntity, CommandName, GoalEntity, CommandOutput, DeliveryWake, EntityKind, ContextBlockPlace, ContextBlockText, ContextDetail, ContextList, ContextUnavailable, LogPage, LogRecord, MessageEntity, MessagePurpose, PairResponse, PlanUsage, PlanWindow,
   IntegrationProvider, NotificationSettings, PushTokenRegistration, SearchPage, ServerEntity, ServerIdentity, Snapshot, SummaryPage, Viewer,
 } from '@ouro/contract'
 import { journalSize, readJournalBackward, readJournalForward } from '../adapters/journal-file.ts'
@@ -20,7 +20,10 @@ import { RunnerSupervisor } from '../adapters/runner-supervisor.ts'
 import type { SendPush } from '../adapters/apns.ts'
 import { checkoutIdentityOf, mainCheckoutOf, mergeThreeWay } from '../adapters/checkouts.ts'
 import type { IntegrationTools } from '../adapters/integrations.ts'
-import { conversationFilesOf, installConversation } from '../adapters/conversations.ts'
+import { claudeTranscriptPathOf, conversationFilesOf, installConversation } from '../adapters/conversations.ts'
+import { transcriptAt } from '../adapters/transcript-requests.ts'
+import { contextBlockText, contextDetail, contextRows } from '../domain/context.ts'
+import type { TranscriptState } from '../domain/context.ts'
 import type { ConversationStores } from '../adapters/conversations.ts'
 import { loadOrCreateMachineKey } from '../adapters/peer-transport.ts'
 import { pushTokenHash } from './notifier.ts'
@@ -182,6 +185,8 @@ const SEED_RECENT_MESSAGES = 20
 const minutesOf = (ms: number) => Math.floor(ms / 60_000)
 const MASTER_TASK = "The person's front door: route each request to an agent and bring back the result."
 const SUMMARY_PAGE_LIMIT_MAX = 100
+/** A page of the Context list: a screenful or two; a long-lived agent has thousands of requests. */
+const CONTEXT_PAGE_LIMIT_MAX = 100
 const STAND_IN_MODEL = 'stand-in'
 const NO_NAME_SUGGESTION: NameSuggestion = { name: null, costUsd: 0 }
 const GOAL_CHECK_TIMEOUT_MS = 10 * 60_000
@@ -1540,6 +1545,47 @@ export class OuroCore {
     const end = request.before ?? journalSize(path)
     const { records, start } = readJournalBackward(path, end, LOG_PAGE_BYTES)
     return { records: toLogRecords(records), startCursor: start, endCursor: end, hasEarlier: start > 0 }
+  }
+
+  /**
+   * The agent's current Claude Code conversation, read from its transcript, or why there is none. Only the owner reads
+   * it: it holds the system prompt, memory and every tool result whole, often file contents and secrets, so neither an
+   * invited person nor any agent (this one included) may.
+   */
+  private async contextTranscriptOf(caller: Caller, agentId: string): Promise<{ kind: 'transcript'; state: TranscriptState } | { kind: 'unavailable'; reason: ContextUnavailable }> {
+    if (caller.kind !== 'person' || !caller.person.isOwner) throw new CommandRefused('forbidden', "only the owner reads an agent's context")
+    const row = this.requireAgentRow(agentId)
+    const runtime = runtimeOf(launchModelFor(row.model, { openrouter: this.openrouterConfigured() }).model.provider)
+    if (runtime !== 'claude_code') return { kind: 'unavailable', reason: 'not_claude_code' }
+    if (row.providerSessionId === null) return { kind: 'unavailable', reason: 'no_conversation' }
+    const path = claudeTranscriptPathOf(this.claudeConfigDir, row.providerSessionId, row.folder)
+    const state = path === null ? null : await transcriptAt(path)
+    return state === null ? { kind: 'unavailable', reason: 'transcript_missing' } : { kind: 'transcript', state }
+  }
+
+  /** The model requests of the agent's current conversation, newest first, with their exact input and output tokens. */
+  async agentContextList(caller: Caller, agentId: string, page: { before: number | null; limit: number }): Promise<ContextList> {
+    const found = await this.contextTranscriptOf(caller, agentId)
+    switch (found.kind) {
+      case 'unavailable': return { requests: [], hasOlder: false, unavailable: found.reason }
+      case 'transcript': return { ...contextRows(found.state, page.before, Math.min(Math.max(page.limit, 1), CONTEXT_PAGE_LIMIT_MAX)), unavailable: null }
+    }
+  }
+
+  /** Everything sent with one model request, and the reply. */
+  async agentContext(caller: Caller, agentId: string, n: number): Promise<ContextDetail> {
+    const found = await this.contextTranscriptOf(caller, agentId)
+    const detail = found.kind === 'transcript' ? contextDetail(found.state, n) : null
+    if (detail === null) throw new CommandRefused('not_found', 'no such request')
+    return detail
+  }
+
+  /** One block of a request, uncut: the phone shows long ones cut and fetches the rest on demand. */
+  async agentContextText(caller: Caller, agentId: string, n: number, where: ContextBlockPlace): Promise<ContextBlockText> {
+    const found = await this.contextTranscriptOf(caller, agentId)
+    const text = found.kind === 'transcript' ? contextBlockText(found.state, n, where) : null
+    if (text === null) throw new CommandRefused('not_found', 'no such block')
+    return { text }
   }
 
   agentSummaries(agentId: string, before: number | null, limit: number): SummaryPage {
