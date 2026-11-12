@@ -1,5 +1,6 @@
-// Automatic compaction, through the real server and runners: an idle agent with a large context on a warm 1 hour cache is
-// compacted before it exits idle, once, and is told where its full history is. One on a 5 minute cache just exits.
+// Automatic compaction, through the real server and runners: an idle agent with a large context on a warm 1 hour cache
+// stays up past its idle exit, is compacted just before the cache expires, once, then exits, and is told where its full
+// history is. One on a 5 minute cache just exits.
 import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import type { AgentEntity } from '@ouro/contract'
@@ -16,6 +17,8 @@ after(() => run.cleanup())
 
 const MINUTE = 60_000
 const IDLE_EXIT_MS = 30 * MINUTE
+/** After its turn: within 5 minutes of its 1 hour cache expiring, when an idle agent is compacted. */
+const COMPACTION_DUE_AFTER = 56 * MINUTE
 const LARGE = standInScript({ do: 'context', tokens: 120_000 }, { do: 'text', text: 'read the whole codebase' })
 
 async function startedWith(name: string, promptCacheLifetime: '5m' | '1h'): Promise<AgentEntity> {
@@ -28,28 +31,28 @@ async function startedWith(name: string, promptCacheLifetime: '5m' | '1h'): Prom
 
 const stateOf = async (name: string) => (await phone.agent(name)).state
 
-test('a large context on a warm 1 hour cache is compacted instead of exiting idle, once; then the agent exits', async () => {
+test('a large context on a warm 1 hour cache stays up past idle exit, is compacted just before expiry, once; then the agent exits', async () => {
   const started = await startedWith('scribe', '1h')
   assert.equal(started.cache?.tokens, 120_000)
   assert.equal(started.cache?.compacted, false)
   assert.ok(started.cache.expiresAt - Date.now() > 55 * MINUTE, 'a 1 hour cache')
 
+  // At its idle exit the whole context is still cached: a message now would find it warm, so it stays up as it is.
   run.advanceClock(IDLE_EXIT_MS)
-  const compacted = await waitFor('scribe to compact', async () => {
-    const agent = await phone.agent('scribe')
-    return agent.cache?.compacted ? agent : null
-  })
-  assert.deepEqual(compacted.cache && { tokens: compacted.cache.tokens, compacted: compacted.cache.compacted }, { tokens: 5_000, compacted: true })
-  await waitFor('scribe to be idle again', async () => (await stateOf('scribe')).state === 'idle')
+  await new Promise((done) => setTimeout(done, 1_500)) // many server ticks at the new time
+  const atIdleExit = await phone.agent('scribe')
+  assert.equal(atIdleExit.state.state, 'idle')
+  assert.equal(atIdleExit.cache?.compacted, false)
 
-  // Compacted, it isn't compacted again: the next idle period ends in an idle exit.
-  run.advanceClock(IDLE_EXIT_MS)
-  const stopped = await waitFor('scribe to exit idle', async () => {
+  // Shortly before the cache expires it is compacted, and then has nothing left to wait for: it exits.
+  run.advanceClock(COMPACTION_DUE_AFTER - IDLE_EXIT_MS)
+  const stopped = await waitFor('scribe to compact and exit idle', async () => {
     const state = await stateOf('scribe')
     return state.state === 'stopped' ? state : null
   })
   assert.deepEqual(stopped.state === 'stopped' && stopped.stopped, { reason: 'idle' })
-  assert.equal((await phone.agent('scribe')).cache?.compacted, true)
+  const compacted = await phone.agent('scribe')
+  assert.deepEqual(compacted.cache && { tokens: compacted.cache.tokens, compacted: compacted.cache.compacted }, { tokens: 5_000, compacted: true })
 
   // Its compacted context says where the full history is.
   await phone.command('send_message', { to: 'scribe', text: standInScript({ do: 'run', command: 'ouro reply "$(printf %s "$OURO_STANDIN_HISTORY" | grep compacted)"' }), attachmentIds: [], wake: 'wake', answersAskId: null })

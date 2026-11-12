@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { request } from 'node:http'
-import { chatHandle, displayStateOf } from '@ouro/contract'
+import { chatHandle, displayStateOf, PromptCacheLifetime } from '@ouro/contract'
 import { DEFAULT_EXPORT_COMMAND, NotPublished, publishCommittedApp } from '../app/app-publishing.ts'
 import type { PublishedApp } from '../app/app-publishing.ts'
 import type { RegisterUpdateInput } from '../app/app-updates.ts'
@@ -25,8 +25,8 @@ const HELP = `ouro: talk to your agents, and to the other agents if you are one
   ouro goal [show] [--for <agent>]                              the goal, its state and notes
   ouro goals                                                     every agent's goal
   ouro done "summary"                                            report to your parent and finish
-  ouro spawn <new-name>[@computer] [--folder <dir>] [--model <m>] "task"    start a helper, here or on another computer
-  ouro new [--name <n>] [--computer <c>] [--folder <dir>] [--model <m>] "task"    start an agent, naming it from the task if unnamed
+  ouro spawn <new-name>[@computer] [--folder <dir>] [--model <m>] [--cache 5m|1h] "task"    start a helper, here or on another computer
+  ouro new [--name <n>] [--computer <c>] [--folder <dir>] [--model <m>] [--cache 5m|1h] "task"    start an agent, naming it from the task if unnamed
   ouro list                                                      all agents, their state and what they did lately
   ouro chats                                                     the groups here; * = you're in it
   ouro chats read '#group' [-n <count>]                          its latest messages
@@ -169,6 +169,15 @@ function parseArguments(args: string[], valueFlags: readonly string[], switchFla
     }
   }
   return parsed
+}
+
+/** `--cache 5m|1h`: how long a new agent's prompt cache lives, for models with a timed one. Absent: nothing is sent, and
+ * the server's default applies. */
+export function promptCacheLifetimeFlag(value: string | undefined): PromptCacheLifetime | undefined {
+  if (value === undefined) return undefined
+  const parsed = PromptCacheLifetime.safeParse(value)
+  if (!parsed.success) throw new CliFailure(`--cache is 5m or 1h, not ${value}`)
+  return parsed.data
 }
 
 /** Whether a hook's input says a file in the memory folder was written. Input without a file (a session starting) says
@@ -623,10 +632,10 @@ export async function runCli(args: string[], environment: NodeJS.ProcessEnv, std
       return
     }
     case 'spawn': {
-      const parsed = parseArguments(rest, ['--folder', '--model'], [])
+      const parsed = parseArguments(rest, ['--folder', '--model', '--cache'], [])
       const [name, ...words] = parsed.positionals
       if (!name) throw new CliFailure('spawn what? ouro spawn <new-name> "task"')
-      const request = { task: messageText(words, stdin, 'the task'), model: parsed.flags.get('--model')?.[0] ?? null, folder: parsed.flags.get('--folder')?.[0] ?? null }
+      const request = { task: messageText(words, stdin, 'the task'), model: parsed.flags.get('--model')?.[0] ?? null, folder: parsed.flags.get('--folder')?.[0] ?? null, promptCacheLifetime: promptCacheLifetimeFlag(parsed.flags.get('--cache')?.[0]) }
       const [localName, computerName] = name.split('@')
       if (computerName !== undefined) {
         const { remoteAgent } = await client.command('create_remote_agent', { ...request, name: localName!, computerId: (await requireComputer(client, computerName)).id })
@@ -638,8 +647,8 @@ export async function runCli(args: string[], environment: NodeJS.ProcessEnv, std
       return
     }
     case 'new': {
-      const parsed = parseArguments(rest, ['--name', '--computer', '--folder', '--model'], [])
-      const request = { name: parsed.flags.get('--name')?.[0] ?? null, task: messageText(parsed.positionals, stdin, 'the task'), model: parsed.flags.get('--model')?.[0] ?? null, folder: parsed.flags.get('--folder')?.[0] ?? null }
+      const parsed = parseArguments(rest, ['--name', '--computer', '--folder', '--model', '--cache'], [])
+      const request = { name: parsed.flags.get('--name')?.[0] ?? null, task: messageText(parsed.positionals, stdin, 'the task'), model: parsed.flags.get('--model')?.[0] ?? null, folder: parsed.flags.get('--folder')?.[0] ?? null, promptCacheLifetime: promptCacheLifetimeFlag(parsed.flags.get('--cache')?.[0]) }
       const computerName = parsed.flags.get('--computer')?.[0]
       if (computerName !== undefined) {
         const { remoteAgent } = await client.command('create_remote_agent', { ...request, computerId: (await requireComputer(client, computerName)).id })

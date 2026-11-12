@@ -194,7 +194,8 @@ export type ModelOption = z.infer<typeof ModelOption>
 export const ServerEntity = z.object({
   id: z.literal('server'),
   machineName: z.string(),
-  release: z.object({ id: z.string(), base: BaseStatus }),
+  /** `version`: the Ouro version this server runs (`0.5.0`), from its package.json; null before versions, absent from an older server. */
+  release: z.object({ id: z.string(), base: BaseStatus, version: z.string().nullable().optional() }),
   sourceBackup: SourceBackup,
   defaultModel: ModelId,
   models: z.array(ModelOption),

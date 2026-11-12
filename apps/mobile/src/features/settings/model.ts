@@ -203,8 +203,8 @@ export const BASE_FOOTER = 'Updates keep your own changes. They merge beside the
 export const BASE_UPDATE_STARTED = 'Updating. Your agents restart when it finishes.'
 
 /**
- * The "Ouro" section: which base this server's source has merged and how taking the next one is going. Null where the
- * server takes no bases (it publishes them, or has no copy of the source). Only the owner may take one.
+ * The "Ouro" section: which version this server runs and how taking the next base is going. A base is named by its
+ * version (`0.6.0`) when it has one, else by its number, from before versions. Null where the server takes no bases (it publishes them, or has no copy of the source). Only the owner may take one.
  */
 export interface BaseSection {
   versionText: string
@@ -216,21 +216,26 @@ export interface BaseSection {
   take: { n: number; label: string } | null
 }
 
-export function baseSection(base: ServerEntity['release']['base'], isOwner: boolean): BaseSection | null {
+export function baseSection(release: Pick<ServerEntity['release'], 'base' | 'version'>, isOwner: boolean): BaseSection | null {
+  const { base } = release
   if (base.kind === 'not_taking') return null
   const { offered, update } = base
   const newer = offered !== null && offered.n > base.integrated ? offered : null
   const takeable = newer !== null && isOwner && (update.state === 'idle' || update.state === 'failed')
+  // Only the offered base's version is known; any other is named by its number.
+  const version = (n: number) => (offered?.n === n ? offered.version ?? null : null)
+  const named = (n: number) => { const v = version(n); return v ? `Ouro ${v}` : `Base ${n}` }
+  const target = (n: number) => version(n) ?? `base ${n}`
   return {
-    versionText: `Base ${base.integrated}`,
-    updatingText: update.state === 'updating' ? `Updating to base ${update.n}…` : null,
+    versionText: release.version ?? `Base ${base.integrated}`,
+    updatingText: update.state === 'updating' ? `Updating to ${target(update.n)}…` : null,
     note: update.state === 'conflict'
-      ? { text: `Base ${update.n} touches files you changed (${update.files.join(', ')}). Your master agent is working it out; nothing has changed yet.`, color: 'orange' }
+      ? { text: `${named(update.n)} touches files you changed (${update.files.join(', ')}). Your master agent is working it out; nothing has changed yet.`, color: 'orange' }
       : update.state === 'failed'
-        ? { text: `Base ${update.n} didn't go in: ${update.why}. Nothing live changed unless it says so.`, color: 'red' }
+        ? { text: `${named(update.n)} didn't go in: ${update.why}. Nothing live changed unless it says so.`, color: 'red' }
         : null,
     footer: newer?.notes ?? BASE_FOOTER,
-    take: takeable ? { n: newer.n, label: `Update to base ${newer.n}` } : null,
+    take: takeable ? { n: newer.n, label: `Update to ${target(newer.n)}` } : null,
   }
 }
 
