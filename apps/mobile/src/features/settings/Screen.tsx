@@ -1,7 +1,7 @@
 // Settings: integrations (connected or not, Tailscale among them), servers by short name, people and an invite page (the
 // owner's), computers, notifications (on or off, and urgent), updates (Ouro, backup and the app), archived agents, and signing out or
 // unpairing. Notifications are in NotificationsSection. Renders settings/model.ts.
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { Linking } from 'react-native'
 import { Button, Form, Host, HStack, Menu, Picker, Section, Spacer, Text, Toggle } from '@expo/ui/swift-ui'
 import { foregroundStyle, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers'
@@ -17,13 +17,13 @@ import type { ScreenProps } from '../../navigation/routes.ts'
 import { useUpdateFlow } from '../../navigation/UpdateBanner.tsx'
 import { NotificationsSection } from './NotificationsSection.tsx'
 import { StatusRow } from './StatusRow.tsx'
+import { useRouteStatus } from './useRouteStatus.ts'
 import {
   BACKUP_MADE_TOAST, backupSection, BASE_UPDATE_STARTED, baseSection, awsStatusText, tailscaleStatusText, integrationRows, leaveAction, peopleRows, serverShortName,
   updateHomeIndex, updateHomeOptions,
 } from './model.ts'
-import type { PersonRow } from './model.ts'
+import type { BaseSection, PersonRow } from './model.ts'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
-import type { AwsIntegrationState, TailscaleState } from '@ouro/contract'
 
 export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
   const updates = useUpdateFlow()
@@ -44,20 +44,13 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
   /** Signed up through the hub; someone running their own server has none. */
   const account = core.hostedAccount
   useEffect(() => { core.servers.list().then(setSavedServers, () => {}) }, [core, coreVersion])
-  // AWS isn't synced: ask its route now, and again on coming back (from its own screen, say).
-  const [aws, setAws] = useState<{ state: AwsIntegrationState | null; failed: boolean }>({ state: null, failed: false })
-  useEffect(() => {
-    const load = () => { void session.api.awsStatus().then((result) => setAws(result.ok ? { state: result.value, failed: false } : { state: null, failed: true })) }
-    load()
-    return navigation.addListener('focus', load)
-  }, [navigation, session])
-  const [tailscale, setTailscale] = useState<{ state: TailscaleState | null; failed: boolean }>({ state: null, failed: false })
-  useEffect(() => {
-    if (!isOwner) return undefined
-    const load = () => { void session.api.tailscale('GET').then((result) => setTailscale(result.ok ? { state: result.value.tailscale, failed: false } : { state: null, failed: true })) }
-    load()
-    return navigation.addListener('focus', load)
-  }, [navigation, session, isOwner])
+  // AWS and Tailscale aren't synced: each is asked of its own route.
+  const aws = useRouteStatus(navigation, useCallback(() => session.api.awsStatus(), [session]))
+  const loadTailscale = useCallback(async () => {
+    const result = await session.api.tailscale('GET')
+    return result.ok ? { ok: true as const, value: result.value.tailscale } : result
+  }, [session])
+  const tailscale = useRouteStatus(navigation, isOwner ? loadTailscale : null)
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: 'Settings', headerRight: () => <HeaderButton title="Done" bold onPress={() => navigation.goBack()} /> })
@@ -86,7 +79,7 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
     if (!started.ok) setBaseTakeOutcome({ text: failureText(started.failure), color: 'red' })
   }
 
-  const dropBase = (conflict: { dropTitle: string; dropMessage: string; dropLabel: string }) => confirm(conflict.dropTitle, conflict.dropMessage, 'Skip', async () => {
+  const dropBase = (conflict: NonNullable<BaseSection['conflict']>) => confirm(conflict.dropTitle, conflict.dropMessage, conflict.dropConfirmLabel, async () => {
     setBaseTakeOutcome(null)
     const dropped = await session.command('drop_base_update', {})
     if (!dropped.ok) setBaseTakeOutcome({ text: failureText(dropped.failure), color: 'red' })
@@ -124,8 +117,8 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
       <Form>
         <Section title="Integrations">
           {integrations.map((row) => <StatusRow key={row.key} title={row.title} status={row.status} onPress={() => navigation.navigate(row.route)} />)}
-          <StatusRow title="AWS" status={awsStatusText(aws.state, aws.failed)} onPress={() => navigation.navigate('AWS')} />
-          {isOwner ? <StatusRow title="Tailscale" status={tailscaleStatusText(tailscale.state, tailscale.failed)} onPress={() => navigation.navigate('Computers')} /> : null}
+          <StatusRow title="AWS" status={awsStatusText(aws)} onPress={() => navigation.navigate('AWS')} />
+          {isOwner ? <StatusRow title="Tailscale" status={tailscaleStatusText(tailscale)} onPress={() => navigation.navigate('Computers')} /> : null}
         </Section>
 
         <Section title="Servers">
@@ -160,7 +153,7 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
 
         <NotificationsSection />
 
-        <Section title="Updates" footer={base?.take ? <Text>{base.footer}</Text> : undefined}>
+        <Section title="Updates" footer={base?.footer ? <Text>{base.footer}</Text> : undefined}>
           {base ? <KV k="Ouro" v={base.updatingText ?? base.versionText} /> : null}
           {base?.note ? <Note text={base.note.text} color={base.note.color} /> : null}
           {base?.take ? <Button label={base.take.label} onPress={() => { void takeBase(base.take!.n) }} /> : null}

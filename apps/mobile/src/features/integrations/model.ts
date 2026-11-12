@@ -91,15 +91,6 @@ export function openRouterSpentText(openrouter: OpenrouterIntegrationState) {
   return `${money(openrouter.spentUsd)}${openrouter.availableUsd !== null ? `, ${money(openrouter.availableUsd)} left` : ''}`
 }
 
-/** Settings' "OpenRouter credits": what the key spent, of what it may spend in all. Null until OpenRouter has said (SET-15). */
-export function openRouterCreditsText(openrouter: OpenrouterIntegrationState | null): string | null {
-  if (openrouter?.status !== 'configured' || openrouter.spentUsd === null) return null
-  const total = openrouter.availableUsd === null ? null : openrouter.spentUsd + openrouter.availableUsd
-  return `${money(openrouter.spentUsd)}${total === null ? '' : ` of ${money(total)}`}`
-}
-
-export const OPENROUTER_CREDITS_FOOTER = 'What this OpenRouter key has spent, and what is left of its limit (the model provider for agents using the deepseek, haiku, qwen-coder, and gemini-flash aliases).'
-
 /** Removing the key: refused in the server's words, as the reference (INT-18). */
 export function keyRemovalOutcome(result: ApiResult<IntegrationActionResult>): ActionOutcome {
   if (result.ok && !result.value.accepted) return { kind: 'failed', text: result.value.why.trim() || KEY_REMOVAL_FAILED }

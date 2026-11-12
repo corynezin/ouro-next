@@ -3,7 +3,8 @@ import { test } from 'node:test'
 import { DEFAULT_NOTIFICATION_SETTINGS } from '@ouro/contract'
 import type { NotificationSettings } from '@ouro/contract'
 import {
-  backupSection, BACKUP_WARNING, baseSection, BASE_FOOTER, changedNotificationSettings, leaveAction, notificationSettingsOf, peopleRows, updateHomeIndex, updateHomeOptions,
+  awsStatusText, backupSection, BACKUP_WARNING, baseSection, changedNotificationSettings, integrationRows, leaveAction, notificationSettingsOf, notifyingModeOf, peopleRows,
+  serverShortName, tailscaleStatusText, updateHomeIndex, updateHomeOptions,
 } from './model.ts'
 import type { NotificationChange } from './model.ts'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
@@ -21,10 +22,22 @@ const settings: NotificationSettings = { ...DEFAULT_NOTIFICATION_SETTINGS, muted
 const change = (c: NotificationChange) => changedNotificationSettings(settings, c, 'America/New_York')
 
 test('a notification change saves every other setting as it was', () => {
-  assert.deepEqual(change({ kind: 'mode', mode: 'needs_me' }), { ...settings, mode: 'needs_me', quietHours: { start: '23:00', end: '06:30', timeZone: 'America/New_York' } })
+  assert.deepEqual(change({ kind: 'on', on: false, lastOnMode: 'needs_me' }), { ...settings, mode: 'nothing', quietHours: { start: '23:00', end: '06:30', timeZone: 'America/New_York' } })
   assert.equal(change({ kind: 'urgent_breaks_through', on: false }).urgentBreaksThrough, false)
-  assert.deepEqual(change({ kind: 'mode', mode: 'nothing' }).mutedAgentIds, ['a1'], 'what Settings no longer offers is kept')
-  assert.equal(changedNotificationSettings({ ...settings, quietHours: null }, { kind: 'mode', mode: 'nothing' }, 'UTC').quietHours, null)
+  assert.deepEqual(change({ kind: 'on', on: false, lastOnMode: 'needs_me' }).mutedAgentIds, ['a1'], 'what Settings no longer offers is kept')
+  assert.equal(changedNotificationSettings({ ...settings, quietHours: null }, { kind: 'on', on: false, lastOnMode: 'needs_me' }, 'UTC').quietHours, null)
+})
+
+test('turning notifications off and on again brings back the mode they had, every message included', () => {
+  const everyMessage: NotificationSettings = { ...settings, mode: 'every_message' }
+  const remembered = notifyingModeOf(everyMessage, 'needs_me')
+  assert.equal(remembered, 'every_message', 'the mode in use is what is remembered as it turns off')
+  const off = changedNotificationSettings(everyMessage, { kind: 'on', on: false, lastOnMode: remembered }, 'UTC')
+  assert.equal(off.mode, 'nothing')
+  assert.equal(notifyingModeOf(off, remembered), 'every_message', 'turning off again keeps what was remembered')
+  assert.equal(changedNotificationSettings(off, { kind: 'on', on: true, lastOnMode: remembered }, 'UTC').mode, 'every_message')
+  assert.equal(changedNotificationSettings(off, { kind: 'on', on: true, lastOnMode: 'needs_me' }, 'UTC').mode, 'needs_me')
+  assert.equal(changedNotificationSettings({ ...settings, mode: 'needs_me' }, { kind: 'on', on: true, lastOnMode: 'every_message' }, 'UTC').mode, 'needs_me', 'on while on keeps the mode')
 })
 
 test('the command gets the settings without the entity id', () => {
@@ -65,7 +78,7 @@ test('the Ouro section shows the merged base, the update under way, a conflict o
   assert.equal(baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'idle' } }, false)!.take, null, 'only the owner takes one')
 
   const current = baseSection({ kind: 'taker', integrated: 4, offered, update: { state: 'idle' } }, true)!
-  assert.equal(current.footer, BASE_FOOTER)
+  assert.equal(current.footer, null, 'no footer once nothing newer is offered')
   assert.equal(current.take, null)
 
   const updating = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'updating', n: 4 } }, true)!
@@ -81,6 +94,7 @@ test('the Ouro section shows the merged base, the update under way, a conflict o
   assert.deepEqual(waiting.note, { text: 'Base 4 touches files you changed (a.ts). Nothing has changed yet. Your master agent can merge it, keeping what your changes were for.', color: 'orange' })
   assert.equal(waiting.conflict?.resolveLabel, 'Have your master agent merge it')
   assert.equal(waiting.conflict?.dropLabel, 'Not now')
+  assert.equal(waiting.conflict?.dropConfirmLabel, 'Skip')
   assert.equal(baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts'], resolver: null } }, false)!.conflict, null, 'only the owner chooses')
   const resolving = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts'], resolver: 'master' } }, true)!
   assert.match(resolving.note!.text, /Your master agent is working it out/)
@@ -131,8 +145,7 @@ test('a private copy shows where it is, opening on GitHub, when it was last push
   assert.equal(failed.action, null)
 })
 
-test('integrations read Connected or Not set up, whatever kind of not', async () => {
-  const { integrationRows } = await import('./model.ts')
+test('integrations read Connected or Not set up, whatever kind of not', () => {
   const rows = integrationRows({
     claude: { status: 'signed_in', account: { method: 'plan', email: null } } as never,
     chatgpt: { status: 'not_installed' },
@@ -144,27 +157,25 @@ test('integrations read Connected or Not set up, whatever kind of not', async ()
   assert.ok(integrationRows({ claude: null, chatgpt: null, openrouter: null, github: null }).every((row) => row.status === 'Checking…'))
 })
 
-test('a server goes by its label on this phone, else its machine name', async () => {
-  const { serverShortName } = await import('./model.ts')
+test('a server goes by its label on this phone, else its machine name', () => {
   const saved = [{ id: 's1', label: 'Home', url: 'https://a.test', deviceName: 'phone', deviceId: 'd', personName: null, hostedServerId: null }]
   assert.equal(serverShortName(saved, 's1', 'ip-10-0-0-1'), 'Home')
   assert.equal(serverShortName(saved, 's2', 'ip-10-0-0-1'), 'ip-10-0-0-1')
   assert.equal(serverShortName([], 's2', null), 'This server')
 })
 
-test('AWS reads like the others, and shows nothing when its route failed', async () => {
-  const { awsStatusText } = await import('./model.ts')
-  assert.equal(awsStatusText({ status: 'connected' }, false), 'Connected')
-  assert.equal(awsStatusText({ status: 'not_connected' }, false), 'Not set up')
-  assert.equal(awsStatusText(null, false), 'Checking…')
-  assert.equal(awsStatusText(null, true), null)
+test('AWS reads like the others, and shows nothing when its route failed', () => {
+  const connected = { status: 'connected', accessKeyId: 'AKIA…MPLE', region: null, accountId: null, arn: null, problem: null } as const
+  assert.equal(awsStatusText({ kind: 'loaded', value: connected }), 'Connected')
+  assert.equal(awsStatusText({ kind: 'loaded', value: { status: 'not_connected' } }), 'Not set up')
+  assert.equal(awsStatusText({ kind: 'checking' }), 'Checking…')
+  assert.equal(awsStatusText({ kind: 'failed' }), null)
 })
 
-test('Tailscale reads Connected or Not set up, or what it is doing', async () => {
-  const { tailscaleStatusText } = await import('./model.ts')
-  assert.equal(tailscaleStatusText({ state: 'connected', ip: '100.1.2.3' }, false), 'Connected')
-  assert.equal(tailscaleStatusText({ state: 'not_connected' }, false), 'Not set up')
-  assert.equal(tailscaleStatusText({ state: 'logging_in', loginUrl: 'https://x' }, false), 'Waiting for approval')
-  assert.equal(tailscaleStatusText(null, false), 'Checking…')
-  assert.equal(tailscaleStatusText(null, true), null)
+test('Tailscale reads Connected or Not set up, or what it is doing', () => {
+  assert.equal(tailscaleStatusText({ kind: 'loaded', value: { state: 'connected', ip: '100.1.2.3' } }), 'Connected')
+  assert.equal(tailscaleStatusText({ kind: 'loaded', value: { state: 'not_connected' } }), 'Not set up')
+  assert.equal(tailscaleStatusText({ kind: 'loaded', value: { state: 'logging_in', loginUrl: 'https://x' } }), 'Waiting for approval')
+  assert.equal(tailscaleStatusText({ kind: 'checking' }), 'Checking…')
+  assert.equal(tailscaleStatusText({ kind: 'failed' }), null)
 })
