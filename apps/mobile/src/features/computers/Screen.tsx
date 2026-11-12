@@ -15,8 +15,8 @@ import { toast } from '../../design/Toast.tsx'
 import { useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
 import type { ScreenProps } from '../../navigation/routes.ts'
 import {
-  computerRows, COMPUTERS_COPY, inviteFooter, isTailscaleChanging, removeConfirm, someOffline, TAILSCALE_COPY, TAILSCALE_POLL_MS, tailscaleBlocksComputers,
-  tailscaleConnectedFooter, tailscaleGateOf,
+  computerRows, COMPUTERS_COPY, inviteFooter, isTailscaleChanging, offersTailscaleRemove, removeConfirm, someOffline, TAILSCALE_COPY, TAILSCALE_POLL_MS,
+  tailscaleBlocksComputers, tailscaleConnectedFooter, tailscaleGateOf, tailscalePlacementOf,
 } from './model.ts'
 import type { ComputerRow } from './model.ts'
 
@@ -45,8 +45,7 @@ export function ComputersScreen({ navigation }: ScreenProps<'Computers'>) {
   // Unknown until the first answer: neither the Tailscale section nor an invite shows yet.
   const gate = tailscale === null ? null : tailscaleGateOf(tailscale.tailscale)
   const canAdd = tailscale !== null && !tailscaleBlocksComputers(tailscale)
-  // Where Tailscale is optional, connecting it comes after adding a computer rather than before.
-  const optional = tailscale?.neededForComputers === false
+  const optional = tailscale !== null && tailscalePlacementOf(tailscale) === 'after_add'
   const tailscaleFailure = tailscale?.lastFailure?.message ?? null
   const removeTailscale = () => confirm(TAILSCALE_COPY.removeTitle, TAILSCALE_COPY.removeMessage, 'Remove', () => { void askTailscale('DELETE') })
 
@@ -126,7 +125,7 @@ export function ComputersScreen({ navigation }: ScreenProps<'Computers'>) {
             {rows.map((row) => <Button key={row.id} label={`Remove ${row.name}`} role="destructive" onPress={() => remove(row)} />)}
           </Section>
         ) : null}
-        {tailscale?.tailscale.state === 'connected' && (optional || !rows.length) ? (
+        {tailscale?.tailscale.state === 'connected' && offersTailscaleRemove(tailscale, rows.length) ? (
           <Section title={TAILSCALE_COPY.connectedTitle} footer={<Text>{tailscaleConnectedFooter(tailscale.tailscale.ip)}</Text>}>
             {tailscaleFailure !== null ? <Note text={tailscaleFailure} /> : null}
             <Button label={TAILSCALE_COPY.remove} role="destructive" onPress={removeTailscale} />

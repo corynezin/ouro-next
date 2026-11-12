@@ -71,6 +71,20 @@ export function tailscaleGateOf(tailscale: TailscaleState): TailscaleGate | null
 /** Whether adding a computer must wait for Tailscale: only on a server that reaches computers through it alone. */
 export const tailscaleBlocksComputers = (status: TailscaleStatus) => status.neededForComputers && tailscaleGateOf(status.tailscale) !== null
 
+/**
+ * Where the Tailscale section goes. Where computers wait for it (a Sprite), it comes first; where it is optional (a server
+ * with its own public address), after "Add a computer", so the screen leads with what the person came for.
+ */
+export type TailscalePlacement = 'before_add' | 'after_add'
+export const tailscalePlacementOf = (status: TailscaleStatus): TailscalePlacement => (status.neededForComputers ? 'before_add' : 'after_add')
+
+/**
+ * Whether the screen offers to take a connected Tailscale off this server. Not while computers are linked over it: that
+ * would cut them off. Where computers don't need it, it can always go.
+ */
+export const offersTailscaleRemove = (status: TailscaleStatus, linkedComputers: number) =>
+  status.tailscale.state === 'connected' && (!status.neededForComputers || linkedComputers === 0)
+
 /** The server moves through these by itself, so the screen asks again every 2 seconds while one lasts. */
 export const isTailscaleChanging = (tailscale: TailscaleState) =>
   tailscale.state === 'installing' || tailscale.state === 'logging_in' || tailscale.state === 'removing'
