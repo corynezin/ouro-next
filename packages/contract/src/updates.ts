@@ -44,6 +44,8 @@ export const UpdateManifest = z.object({
       updateNumber: z.number().int().positive(),
       /** The source commit the update was built from, if known. */
       commit: z.string().nullable(),
+      /** The computer that published it: update numbers count per computer. Absent from manifests made before it was added. */
+      machineId: z.string().optional(),
     }),
   }),
 }).strict()
@@ -55,6 +57,7 @@ export interface UpdateForManifest {
   runtimeVersion: string
   updateNumber: number
   commit: string | null
+  machineId: string
   launchAsset: { hash: string; url: string }
   assets: { contentType: string; fileExtension: string; hash: string; url: string }[]
 }
@@ -68,10 +71,29 @@ export function buildUpdateManifest(update: UpdateForManifest): UpdateManifest {
     launchAsset: { key: update.launchAsset.hash, contentType: 'application/javascript', hash: update.launchAsset.hash, url: update.launchAsset.url },
     assets: update.assets.map((asset) => ({ key: asset.hash, contentType: asset.contentType, fileExtension: asset.fileExtension, hash: asset.hash, url: asset.url })),
     metadata: {},
-    extra: { ouro: { updateNumber: update.updateNumber, commit: update.commit } },
+    extra: { ouro: { updateNumber: update.updateNumber, commit: update.commit, machineId: update.machineId } },
   })
 }
 
 /** What a server says about its newest update, unauthenticated, in its identity. */
 export const PublishedUpdate = z.object({ updateNumber: z.number().int().positive(), runtimeVersion: z.string() })
 export type PublishedUpdate = z.infer<typeof PublishedUpdate>
+
+/**
+ * The mark an agent puts in its message after `ouro publish`: a markdown link the app shows as whether that update is in
+ * the app it's running. Elsewhere it reads as an ordinary link.
+ */
+export function updateMarkOf(updateNumber: number, machineId: string): string {
+  return `[update ${updateNumber}](ouro://update/${updateNumber}?computer=${encodeURIComponent(machineId)})`
+}
+
+/** The update a mark's link names, or null when the link isn't one. */
+export function parseUpdateMarkUrl(url: string): { updateNumber: number; machineId: string } | null {
+  const m = /^ouro:\/\/update\/([1-9][0-9]*)\?computer=([^&\s]+)$/.exec(url)
+  if (!m) return null
+  try {
+    return { updateNumber: Number(m[1]), machineId: decodeURIComponent(m[2]!) }
+  } catch {
+    return null
+  }
+}

@@ -9,9 +9,11 @@ What the person may ask for, and where it goes:
 - **The Ouro app itself**: how it looks or behaves ("make the bubbles black", "bigger text", "add a button"). "The
   bubbles", "the chat", "the list" mean the Ouro app's screens, so don't ask which app. It is their own copy, in
   {{appSource}}. An agent changes the code, commits it, then ships it to their phone with `ouro publish`. Tell the
-  person it's done only once the publish succeeded ("tap the update banner in Ouro to get it"); if it failed, say the
-  change is saved but not shipped, and why. Only JavaScript changes can ship (screens, styles, logic, images); a new
-  native module, permission, the app icon or its name needs a new app build, which this computer can't make: say so.
+  person it's done only once the publish succeeded, ending with the `[update N](ouro://update/…)` mark the publish
+  prints, on a line of its own: the app shows it as a sentence saying whether that update is in their app, and how to
+  get it. If it failed, say the change is saved but not shipped, and why. Only JavaScript changes can ship (screens,
+  styles, logic, images); a new native module, permission, the app icon or its name needs a new app build, which this
+  computer can't make: say so.
 - **The agents and the server** (how agents behave, what the server does): their copy of the server, in {{serverSource}}.
   An agent changes it, commits it, and runs `ouro deploy`, which builds, checks and switches to the new version, or
   rolls back by itself and says why. The rules agents follow, including these, are in `server/protocols/` there.

@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
-import { UPDATE_MANIFEST_PATH, UpdateManifest } from '@ouro/contract'
+import { parseUpdateMarkUrl, UPDATE_MANIFEST_PATH, UpdateManifest } from '@ouro/contract'
 import { JourneyRun, standInScript, waitFor } from './harness.ts'
 import type { AppClient } from './harness.ts'
 
@@ -80,7 +80,9 @@ test('before anything is published, the route says there is no update', async ()
 
 test('an agent publishes the committed app, and a phone gets a valid manifest and the exact bundle', async () => {
   const report = await publishAsAgent('first')
-  assert.match(report, /published update 1 for app version 0\.1\.0\. Tell the person to tap the banner/)
+  assert.match(report, /published update 1 for app version 0\.1\.0\. End the message that tells the person with this mark/)
+  const markUrl = /\[update 1\]\((ouro:\/\/update\/1\?computer=[^)]+)\)/.exec(report)?.[1]
+  assert.ok(markUrl, `the report ends with the update's mark:\n${report}`)
 
   const answer = await manifestFor('0.1.0')
   assert.equal(answer.status, 200)
@@ -88,6 +90,8 @@ test('an agent publishes the committed app, and a phone gets a valid manifest an
   const manifest = UpdateManifest.parse(await answer.json())
   assert.equal(manifest.extra.ouro.updateNumber, 1)
   assert.equal(manifest.extra.ouro.commit, git('rev-parse', 'HEAD').trim())
+  assert.ok(manifest.extra.ouro.machineId, 'the manifest names the computer that published it')
+  assert.deepEqual(parseUpdateMarkUrl(markUrl), { updateNumber: 1, machineId: manifest.extra.ouro.machineId }, 'the mark names the same update the phone gets')
   assert.match(manifest.createdAt, /\.\d{3}Z$/)
   assert.ok(manifest.launchAsset.url.startsWith(run.url), 'asset URLs use the address the phone used')
 
