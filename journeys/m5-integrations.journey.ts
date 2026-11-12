@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
-import { AwsActionResult, AwsIntegrationState, ChatgptLoginStart, ClaudeLoginStart, IntegrationActionResult } from '@ouro/contract'
+import { AwsActionResult, AwsIntegrationState, ChatgptLoginStart, ClaudeLoginStart, IntegrationActionResult, SpritesActionResult, SpritesIntegrationState } from '@ouro/contract'
 import type { IntegrationEntity, IntegrationProvider } from '@ouro/contract'
 import { AppClient as Client, JourneyRun, standInScript, waitFor } from './harness.ts'
 import type { AppClient } from './harness.ts'
@@ -153,9 +153,23 @@ test('OpenRouter keys and GitHub tokens: refused, taken and removed; bad request
   assert.deepEqual(AwsActionResult.parse(await awsOf('POST', 'aws/disconnect')), { accepted: true, state: { status: 'not_connected' } })
   assert.equal((await phone.integration('POST', 'aws/credentials', { accessKeyId: 'AKIA' })).status, 400)
 
+  // Sprites, like AWS, has its own routes; its token makes servers, so only the owner sees or changes it.
+  const SPRITES_TOKEN = 'sprites-token-taken-0123456789'
+  assert.deepEqual(SpritesIntegrationState.parse(await awsOf('GET', 'sprites')), { status: 'not_connected' })
+  assert.equal(SpritesActionResult.parse(await awsOf('POST', 'sprites/token', { token: SPRITES_TOKEN })).accepted, false)
+  accept(SPRITES_TOKEN)
+  assert.deepEqual(SpritesActionResult.parse(await awsOf('POST', 'sprites/token', { token: SPRITES_TOKEN })), {
+    accepted: true, state: { status: 'connected', token: 'sprite…6789', problem: null },
+  })
+  for (const [method, action] of [['GET', 'sprites'], ['POST', 'sprites/token'], ['POST', 'sprites/disconnect']] as const) {
+    const answer = await guest.integration(method, action, method === 'POST' ? { token: SPRITES_TOKEN } : undefined)
+    assert.equal(answer.status, 403, `${method} ${action}: ${JSON.stringify(answer.body)}`)
+  }
+  assert.deepEqual(SpritesActionResult.parse(await awsOf('POST', 'sprites/disconnect')), { accepted: true, state: { status: 'not_connected' } })
+
   assert.equal((await phone.integration('POST', 'github/token', { nothing: true })).status, 400)
   assert.equal((await phone.integration('POST', 'github/teleport')).status, 404)
   const anonymous = await fetch(`${run.url}/v2/integrations/claude/login/start`, { method: 'POST' })
   assert.equal(anonymous.status, 401)
-  assert.ok(!run.log().includes('sk-or-taken') && !run.log().includes('right-code') && !run.log().includes(AWS_SECRET), 'no secret is ever logged')
+  assert.ok(!run.log().includes('sk-or-taken') && !run.log().includes('right-code') && !run.log().includes(AWS_SECRET) && !run.log().includes('sprites-token-taken'), 'no secret is ever logged')
 })

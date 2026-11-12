@@ -1,8 +1,7 @@
 // The part of the EC2 API that making a server on AWS uses, over its Query API signed with Signature Version 4 (aws.ts),
 // with the key AWS is connected with in Settings: the default profile of `~/.aws`. Answers are XML; the few values read
 // are picked out of it by their tags.
-import { existsSync, readFileSync } from 'node:fs'
-import { iniSection, sigV4Authorization } from './aws.ts'
+import { iniSection, readText, sigV4Authorization } from './aws.ts'
 import type { AwsFiles } from './aws.ts'
 
 export class Ec2Error extends Error {
@@ -19,9 +18,8 @@ export interface Ec2Credentials { accessKeyId: string; secretAccessKey: string; 
 
 /** The connected key and its region, or null when AWS isn't connected. */
 export function ec2CredentialsOf(files: AwsFiles): Ec2Credentials | null {
-  const read = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8') : '')
-  const keys = iniSection(read(files.credentials), 'default')
-  const region = iniSection(read(files.config), 'default').region
+  const keys = iniSection(readText(files.credentials), 'default')
+  const region = iniSection(readText(files.config), 'default').region
   if (!keys.aws_access_key_id || !keys.aws_secret_access_key) return null
   return { accessKeyId: keys.aws_access_key_id, secretAccessKey: keys.aws_secret_access_key, region: region ?? 'us-east-1' }
 }
@@ -31,8 +29,14 @@ export interface Ec2Instance { instanceId: string; state: string; publicIp: stri
 export interface Ec2Api {
   /** The newest Ubuntu 24.04 LTS image for x86-64 in the region, from Canonical's own account. */
   latestUbuntuImage(): Promise<string>
-  /** The id of a security group named so in the default VPC, open to the internet on these TCP ports; made if missing. */
-  ensureSecurityGroup(name: string, description: string, ports: readonly number[]): Promise<string>
+  /** The id of a security group named so in the default VPC; made, with no rules, if missing. */
+  ensureSecurityGroup(name: string, description: string): Promise<string>
+  /** Lets TCP on `port` in from `cidr`; a rule already there is as good. */
+  allowIngress(groupId: string, port: number, cidr: string): Promise<void>
+  /** Stops letting TCP on `port` in from `cidr`; a rule not there is as good. */
+  revokeIngress(groupId: string, port: number, cidr: string): Promise<void>
+  /** Every instance with this tag, in any state, terminated ones included while AWS still lists them. */
+  instancesTagged(key: string, value: string): Promise<Ec2Instance[]>
   /** One instance. `clientToken` makes it idempotent: asked again with the same token, AWS answers with the same instance. */
   runInstance(request: RunInstanceRequest): Promise<string>
   /** Null when AWS doesn't know the instance (any more). */
@@ -53,6 +57,11 @@ export interface RunInstanceRequest {
 
 const VERSION = '2016-11-15'
 
+const ingressParams = (groupId: string, port: number, cidr: string): Record<string, string> => ({
+  GroupId: groupId, 'IpPermissions.1.IpProtocol': 'tcp', 'IpPermissions.1.FromPort': String(port), 'IpPermissions.1.ToPort': String(port),
+  'IpPermissions.1.IpRanges.1.CidrIp': cidr,
+})
+
 /** The text of each element with this tag, in order. */
 export const tagValues = (xml: string, tag: string): string[] => [...xml.matchAll(new RegExp(`<${tag}>([^<]*)</${tag}>`, 'g'))].map((match) => match[1]!)
 const tagValue = (xml: string, tag: string): string | null => tagValues(xml, tag)[0] ?? null
@@ -67,10 +76,16 @@ export function imagesOf(xml: string): { imageId: string; createdAt: string }[] 
 }
 
 export function instanceOf(xml: string): Ec2Instance | null {
-  const instanceId = tagValue(xml, 'instanceId')
-  if (!instanceId) return null
-  const state = /<instanceState>\s*<code>\d+<\/code>\s*<name>([a-z-]+)<\/name>/.exec(xml)?.[1] ?? 'unknown'
-  return { instanceId, state, publicIp: tagValue(xml, 'ipAddress') }
+  return instancesOf(xml)[0] ?? null
+}
+
+/** Each instance in a DescribeInstances answer: its state and public IP come after its id, within its item. */
+export function instancesOf(xml: string): Ec2Instance[] {
+  return xml.split('<instanceId>').slice(1).map((chunk) => {
+    const instanceId = chunk.slice(0, chunk.indexOf('<'))
+    const state = /<instanceState>\s*<code>\d+<\/code>\s*<name>([a-z-]+)<\/name>/.exec(chunk)?.[1] ?? 'unknown'
+    return { instanceId, state, publicIp: tagValue(chunk, 'ipAddress') }
+  })
 }
 
 export class HttpEc2Api implements Ec2Api {
@@ -91,7 +106,7 @@ export class HttpEc2Api implements Ec2Api {
     return newest.imageId
   }
 
-  async ensureSecurityGroup(name: string, description: string, ports: readonly number[]): Promise<string> {
+  async ensureSecurityGroup(name: string, description: string): Promise<string> {
     let groupId: string | null
     try {
       groupId = tagValue(await this.call('CreateSecurityGroup', { GroupName: name, GroupDescription: description }), 'groupId')
@@ -100,17 +115,27 @@ export class HttpEc2Api implements Ec2Api {
       groupId = tagValue(await this.call('DescribeSecurityGroups', { 'Filter.1.Name': 'group-name', 'Filter.1.Value.1': name }), 'groupId')
     }
     if (!groupId) throw new Ec2Error(null, `AWS didn't say which security group ${name} is`)
-    for (const port of ports) {
-      try {
-        await this.call('AuthorizeSecurityGroupIngress', {
-          GroupId: groupId, 'IpPermissions.1.IpProtocol': 'tcp', 'IpPermissions.1.FromPort': String(port), 'IpPermissions.1.ToPort': String(port),
-          'IpPermissions.1.IpRanges.1.CidrIp': '0.0.0.0/0',
-        })
-      } catch (error) {
-        if (!(error instanceof Ec2Error && error.code === 'InvalidPermission.Duplicate')) throw error
-      }
-    }
     return groupId
+  }
+
+  async allowIngress(groupId: string, port: number, cidr: string): Promise<void> {
+    try {
+      await this.call('AuthorizeSecurityGroupIngress', ingressParams(groupId, port, cidr))
+    } catch (error) {
+      if (!(error instanceof Ec2Error && error.code === 'InvalidPermission.Duplicate')) throw error
+    }
+  }
+
+  async revokeIngress(groupId: string, port: number, cidr: string): Promise<void> {
+    try {
+      await this.call('RevokeSecurityGroupIngress', ingressParams(groupId, port, cidr))
+    } catch (error) {
+      if (!(error instanceof Ec2Error && error.code === 'InvalidPermission.NotFound')) throw error
+    }
+  }
+
+  async instancesTagged(key: string, value: string): Promise<Ec2Instance[]> {
+    return instancesOf(await this.call('DescribeInstances', { 'Filter.1.Name': `tag:${key}`, 'Filter.1.Value.1': value }))
   }
 
   async runInstance(request: RunInstanceRequest): Promise<string> {

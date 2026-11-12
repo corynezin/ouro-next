@@ -178,7 +178,8 @@ export function awsFilesOf(environment: Record<string, string | undefined>): Aws
   }
 }
 
-const readText = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8') : '')
+/** A file's text, or nothing when it isn't there. */
+export const readText = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8') : '')
 
 function writeText(path: string, text: string, mode: number): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 })

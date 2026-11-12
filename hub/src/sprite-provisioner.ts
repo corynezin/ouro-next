@@ -2,10 +2,7 @@
 // up by the same `scripts/install-run-sprite.sh` that sets up a run Sprite by hand. The commit goes to the Sprite as a
 // git bundle, which the installer clones as the person's copy of the source.
 //
-// Work on the Sprite runs as jobs: a script started detached that writes its exit status to a file, which the hub
-// polls. A job outlives the request that started it and a hub restart; a job started again waits for the one before
-// it, and every job is safe to run twice. A Sprite with no session open pauses, freezing a detached job, so each job
-// holds its Sprite awake through the Sprite's Tasks API while it runs.
+// Work on the Sprite runs as jobs (packages/contract/src/sprites/jobs.ts), and every job is safe to run twice.
 import { execFile } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -14,7 +11,8 @@ import { promisify } from 'node:util'
 import { BASE_BRANCH } from './distribution.ts'
 import type { ComputerOrder, Provisioner } from './provisioning.ts'
 import type { PairingRecord } from './store.ts'
-import type { SpriteInfo, SpritesApi } from './sprites-api.ts'
+import { runSpriteJob, spriteLauncher } from '@ouro/contract/sprites'
+import type { SpriteInfo, SpritesApi } from '@ouro/contract/sprites'
 
 const execFileAsync = promisify(execFile)
 
@@ -44,37 +42,11 @@ const BUNDLE = `${HUB_DIR}/source.bundle`
 const SETTINGS = `${HUB_DIR}/settings.env`
 const QUERY_PROGRAM = `${HUB_DIR}/query.mjs`
 const SOURCE = `${OURO_ROOT}/source`
-/** The Tasks API's socket, on every Sprite. */
-const SPRITE_TASKS_SOCKET = '/.sprite/api.sock'
-/** A hold lasts 5 minutes unless renewed. */
-const HOLD_RENEW_SECONDS = 60
 /** The filesystem API's limit on one write. */
 const MAX_WRITE_BYTES = 16 * 1024 * 1024
 
-/**
- * `launch <job> <tasks socket> <renew seconds>` starts `<job>.sh` detached and returns at once. The job takes
- * `<job>.lock` before it runs, so one started again waits for the earlier one. While it runs it holds the Sprite awake
- * as the task `ouro-hub-<job name>`, renewed on the interval and let go at the end, and it writes `<job>.exit` only
- * when it has ended. The renewer finishes a hold it has begun before it stops, so no hold lands after the let-go.
- * Before it returns, the launcher itself holds the Sprite for 5 minutes as `ouro-hub-<job name>-launch`: a new Sprite
- * pauses as soon as the session that launched the job ends, which can be before the detached job's first hold lands,
- * and the job then stays frozen until something wakes the Sprite. That hold just expires.
- */
-export const LAUNCHER = String.raw`rm -f "$1.exit" "$1.out"
-curl -sS --max-time 20 --unix-socket "$2" -X PUT -H "content-type: application/json" -d "{\"expire\":\"5m\"}" "http://sprite/v1/tasks/ouro-hub-$(basename "$1")-launch" > /dev/null 2>&1 || true
-setsid bash -c '
-exec 9>"$0.lock"; flock 9
-task="http://sprite/v1/tasks/ouro-hub-$(basename "$0")"
-hold() { curl -sS --max-time 20 --unix-socket "$1" -X PUT -H "content-type: application/json" -d "{\"expire\":\"5m\"}" "$task" > /dev/null 2>&1; }
-hold "$@"
-(trap exit TERM; while sleep "$2" & wait $!; do hold "$@"; done) & renewer=$!
-bash "$0.sh" > "$0.log" 2>&1; status=$?
-kill "$renewer"; wait "$renewer"
-curl -sS --unix-socket "$1" -X DELETE "$task" > /dev/null 2>&1
-echo "$status" > "$0.exit.partial"; mv "$0.exit.partial" "$0.exit"' "$1" "$2" "$3" < /dev/null > /dev/null 2>&1 &`
-
-/** The launcher's arguments, after the job's path. */
-export const launcherArgsOnSprite = (): string[] => [SPRITE_TASKS_SOCKET, String(HOLD_RENEW_SECONDS)]
+/** The shared launcher (packages/contract/src/sprites/jobs.ts), with the hub's tasks named `ouro-hub-<job>`. */
+export const LAUNCHER = spriteLauncher('ouro-hub-')
 
 const shellQuoted = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`
 
@@ -228,25 +200,12 @@ bash ${SOURCE}/scripts/install-run-sprite.sh ${order.distributionCommit}
 
   private async runJob(name: string, job: JobName, script: string, deadlineMs: number): Promise<void> {
     const { api, pollIntervalMs } = this.config
-    const path = this.jobPath(job)
-    await api.writeFile(name, `${path}.sh`, Buffer.from(script), '0755')
-    await api.exec(name, ['bash', '-c', LAUNCHER, 'launch', path, ...launcherArgsOnSprite()])
-    const deadline = Date.now() + deadlineMs
-    for (;;) {
-      const exit = await api.readFile(name, `${path}.exit`)
-      if (exit) {
-        const status = Number(exit.toString('utf8').trim())
-        if (status === 0) return
-        throw new SpriteStepFailure(`the ${job} job exited ${status}: ${await this.logTail(name, path)}`)
-      }
-      if (Date.now() >= deadline) throw new SpriteStepFailure(`the ${job} job didn't end within ${deadlineMs} ms: ${await this.logTail(name, path)}`)
-      await new Promise((done) => setTimeout(done, pollIntervalMs))
+    const outcome = await runSpriteJob({ api, sprite: name, path: this.jobPath(job), script, launcher: LAUNCHER, deadlineMs, pollIntervalMs })
+    switch (outcome.kind) {
+      case 'succeeded': return
+      case 'failed': throw new SpriteStepFailure(`the ${job} job exited ${outcome.status}: ${outcome.logTail || 'no log'}`)
+      case 'timed_out': throw new SpriteStepFailure(`the ${job} job didn't end within ${deadlineMs} ms: ${outcome.logTail || 'no log'}`)
     }
-  }
-
-  private async logTail(name: string, path: string): Promise<string> {
-    const log = await this.config.api.readFile(name, `${path}.log`).catch(() => null)
-    return log ? log.toString('utf8').slice(-1500) : 'no log'
   }
 
   /** The commit as `main` in a bundle of its own history: what the installer clones and fetches. */
