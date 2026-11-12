@@ -1,5 +1,5 @@
 // The root of the app: startup, damaged-setup recovery, pairing, and then the active server's screens.
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ActivityIndicator, Button, Linking, LogBox, Text, View, useColorScheme } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
@@ -16,8 +16,9 @@ import type { LockGate } from '../core/lock/lockGate.ts'
 import type { PushCenter } from '../core/push/pushCenter.ts'
 import type { OtherServersUnread } from '../core/servers/otherServersUnread.ts'
 import { LockCover } from './LockCover.tsx'
-import { useUpdatesDownloadedAtLaunch } from '../native/updates.ts'
-import { ModelAvatarsEnabled } from '../design/Avatar.tsx'
+import { runningCode, useUpdatesDownloadedAtLaunch } from '../native/updates.ts'
+import { updateMarkView } from '../core/updates/updateFlow.ts'
+import { UpdateMarkProvider, type UpdateMarkReader } from '../design/UpdateMarks.tsx'
 import { C } from '../design/colors.ts'
 import { accent } from '../design/theme.ts'
 import { toast, ToastHost } from '../design/Toast.tsx'
@@ -133,6 +134,9 @@ export function AppRoot({ core, hostedServers, updates, lock, push, otherServers
   const [navigationReadyFor, setNavigationReadyFor] = useState<string | null>(null)
   usePushOpenings(push, core, navigationReadyFor)
   const updateBannerShown = useReadyToRestart(updates)
+  // What the app runs changes only with a restart, so it is read once; the banner's coming changes what a mark says.
+  const running = useMemo(runningCode, [])
+  const readUpdateMark = useCallback<UpdateMarkReader>((mark) => updateMarkView(mark, running, updateBannerShown), [running, updateBannerShown])
   const view = savedPlace.stage === 'reading' ? { kind: 'loading' as const } : rootView(core.startup, session?.serverId ?? null, core.hostedAccount !== null)
   // A Pair form chosen, or opened by a link, is done with once a server is active: kept, it would open again with its
   // old, spent link after the next unpair or removal.
@@ -151,7 +155,7 @@ export function AppRoot({ core, hostedServers, updates, lock, push, otherServers
           <UpdateFlowProvider value={updates}>
           <PushProvider value={push}>
           <OtherServersUnreadProvider value={otherServersUnread}>
-          <ModelAvatarsEnabled.Provider value={core.preferences.current.modelAvatars}>
+          <UpdateMarkProvider value={readUpdateMark}>
             <UpdateBanner flow={updates} onHeight={setBannerHeight} />
             {banner && (
               <BelowStatusBar updateBannerShown={updateBannerShown}>
@@ -216,7 +220,7 @@ export function AppRoot({ core, hostedServers, updates, lock, push, otherServers
             )}
             <ToastHost />
             <LockCover gate={lock} />
-          </ModelAvatarsEnabled.Provider>
+          </UpdateMarkProvider>
           </OtherServersUnreadProvider>
           </PushProvider>
           </UpdateFlowProvider>

@@ -9,6 +9,8 @@ import { chatsToSample, compareHistoryPage } from './probe.ts'
 import { schemaRefusal } from './schema-gate.ts'
 import { judgeFailedCheck } from './watchdog.ts'
 import { holdingHostAwake, hostHoldSocket } from './host-hold.ts'
+import { DEFAULT_LISTEN_HOST, loadConfig } from './config.ts'
+import { startProxy } from './proxy.ts'
 import { createServer } from 'node:http'
 
 const dir = mkdtempSync(join(tmpdir(), 'guardian-test-'))
@@ -144,4 +146,20 @@ test('a deploy holds a Sprite awake from start to end, through its Tasks API, an
   assert.equal(hostHoldSocket({ OURO_HOST_HOLD: 'none' }), null)
   assert.equal(hostHoldSocket({ OURO_HOST_HOLD: 'sprite', OURO_SPRITE_API_SOCKET: '/x.sock' }), '/x.sock')
   assert.equal(await holdingHostAwake(null, 'ouro-guardian-deploy', async () => 1), 1, 'no Sprite: just the work')
+})
+
+test('the listening port binds everywhere unless the configuration names an address, as a server behind its own proxy does', async () => {
+  const path = join(dir, 'guardian-listen.json')
+  writeFileSync(path, JSON.stringify({ home: dir, listenPort: 8080, sourceDir: dir }))
+  assert.equal(loadConfig(path).listenHost, DEFAULT_LISTEN_HOST)
+  writeFileSync(path, JSON.stringify({ home: dir, listenPort: 8080, sourceDir: dir, listenHost: '127.0.0.1' }))
+  assert.equal(loadConfig(path).listenHost, '127.0.0.1')
+
+  const server = await new Promise<ReturnType<typeof startProxy>>((resolve) => {
+    const started = startProxy({ host: '127.0.0.1', port: 0, upstreamSocket: join(dir, 'no-such.sock'), onListening: () => resolve(started) })
+  })
+  const address = server.address()
+  assert.ok(address !== null && typeof address === 'object')
+  assert.equal(address.address, '127.0.0.1')
+  await new Promise((resolve) => server.close(resolve))
 })

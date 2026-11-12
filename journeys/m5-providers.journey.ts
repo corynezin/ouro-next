@@ -48,7 +48,7 @@ const accept = (secret: string) => {
 
 test('a Claude model runs on Claude as it is', async () => {
   const launch = await startAgent('on-claude', 'sonnet')
-  assert.equal(argAfter(launch, '--model'), 'sonnet')
+  assert.equal(argAfter(launch, '--model'), 'claude-sonnet-5-5')
   assert.deepEqual(launch.env, {}, 'no provider variables')
 })
 
@@ -56,9 +56,9 @@ test('an OpenRouter model without OpenRouter set up runs on the fallback, and th
   const models = (await phone.snapshot()).server.models
   assert.equal(models.find((model) => model.id === 'deepseek')?.available, false)
   const launch = await startAgent('wants-deepseek', 'deepseek')
-  assert.equal(argAfter(launch, '--model'), 'sonnet')
+  assert.equal(argAfter(launch, '--model'), 'claude-sonnet-5-5')
   assert.deepEqual(launch.env, {})
-  assert.match(argAfter(launch, '--append-system-prompt')!, /set to run on DeepSeek V4 Pro, but OpenRouter isn't set up on this machine, so you are running on Claude Sonnet instead/)
+  assert.match(argAfter(launch, '--append-system-prompt')!, /set to run on DeepSeek V4 Pro, but OpenRouter isn't set up on this machine, so you are running on Claude Sonnet 5.5 instead/)
 })
 
 test('with an OpenRouter key, its models run on OpenRouter, and the key never sits in a runner config', async () => {

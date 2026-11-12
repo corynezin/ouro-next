@@ -8,7 +8,7 @@ const ENDPOINT = { manifestUrl: 'https://home.test/updates/manifest', headers: {
 const RUNTIME = { runtimeVersion: '0.1.0', platform: 'ios' as const }
 // Built the way the server builds every manifest it serves.
 const good = buildUpdateManifest({
-  id: '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d', createdAt: new Date('2026-11-09T10:00:00.000Z'), runtimeVersion: '0.1.0', updateNumber: 3, commit: null,
+  id: '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d', createdAt: new Date('2026-11-09T10:00:00.000Z'), runtimeVersion: '0.1.0', updateNumber: 3, commit: null, machineId: 'machine-1',
   launchAsset: { hash: 'A'.repeat(43), url: 'https://home.test/updates/assets/bundle.js' },
   assets: [],
 })

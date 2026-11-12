@@ -52,9 +52,10 @@ export class TailscaleConnection {
 
   async status(): Promise<TailscaleStatus> {
     const { setup } = this.config
-    if (setup.kind === 'not_needed') return { tailscale: { state: 'not_needed' }, lastFailure: null }
-    if (this.stepInProgress) return { tailscale: { state: this.stepInProgress }, lastFailure: null }
-    return { tailscale: stateOf(this.noted(await setup.host.observe())), lastFailure: this.lastFailure }
+    if (setup.kind === 'not_needed') return { tailscale: { state: 'not_needed' }, lastFailure: null, neededForComputers: false }
+    const { neededForComputers } = setup
+    if (this.stepInProgress) return { tailscale: { state: this.stepInProgress }, lastFailure: null, neededForComputers }
+    return { tailscale: stateOf(this.noted(await setup.host.observe())), lastFailure: this.lastFailure, neededForComputers }
   }
 
   /** Whether this has work the host mustn't pause under: a step running, or a login waiting for the person, for a while. */

@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, linkSync } from 'no
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative } from 'node:path'
 import {
-  AGENT_NAME_PATTERN, Change, turnFailureText, chatHandle, commands, SEARCH_MAX_LIMIT, WATCH_LEASE_MS, DEFAULT_GOAL_INTERVAL_SECONDS, MASTER_AGENT_NAME, MAX_ASK_SNOOZE_MS, OWNER_ADDRESS, parseAddress, PEER_ASK_SNOOZE_PROTOCOL, PEER_OWNER_ASKS_PROTOCOL, PEER_OWNER_MESSAGES_PROTOCOL, personAddress, RESERVED_AGENT_NAMES,
+  AGENT_NAME_PATTERN, Change, turnFailureText, chatHandle, commands, SEARCH_MAX_LIMIT, WATCH_LEASE_MS, DEFAULT_GOAL_INTERVAL_SECONDS, MASTER_AGENT_NAME, MAX_ASK_SNOOZE_MS, OWNER_ADDRESS, parseAddress, PEER_ASK_SNOOZE_PROTOCOL, PEER_OWNER_ASKS_PROTOCOL, PEER_OWNER_MESSAGES_PROTOCOL, personAddress, RESERVED_AGENT_NAMES, updateMarkOf,
 } from '@ouro/contract'
 import type {
   AgentEntity, AskEntity, AskSnooze, AttachmentRef, ChatEntity, CommandName, GoalEntity, CommandOutput, DeliveryWake, EntityKind, ContextBlockPlace, ContextBlockText, ContextDetail, ContextList, ContextUnavailable, LogPage, LogRecord, MessageEntity, MessagePurpose, PairResponse, PlanUsage, PlanWindow,
@@ -97,6 +97,8 @@ export interface CoreConfig {
   clock: Clock
   policy: AgentPolicy
   releaseId: string
+  /** The Ouro version this server runs (`0.5.0`), from its package.json; null before versions. */
+  version: string | null
   machineName: string
   /** Where the person's other computers reach this one's API; null: they can't. */
   peerAddress: string | null
@@ -1256,6 +1258,8 @@ export class OuroCore {
         if (state.state !== 'in_turn' && state.state !== 'interrupting') return
         if (record.failure === 'logged_out') this.recordSignedOut(this.accountOf(row))
         const retryAt = this.turnRetryAt(row, record)
+        // How much of the context the failed turn changed is unknown.
+        this.store.savePromptCache(agentId, null)
         this.applyAgentEvent(agentId, { type: 'turn_failed', generation, turnId: state.turnId, failure: record.failure, detail: record.detail, retryAt })
         return
       }
@@ -1304,9 +1308,10 @@ export class OuroCore {
     const account = this.accountOf(row)
     if (account !== null && record.costUsd > 0) this.store.addPlanTurnCost(row.id, account, record.at, record.costUsd)
     this.refreshUsageAfterTurn(row)
-    // Records from a runner of an earlier release carry no context.
+    // Records from a runner of an earlier release, and some providers, carry no context: it is then unknown, and a record
+    // from before this turn (say, compacted) no longer describes it.
     const context = record.context ?? null
-    if (context !== null) this.store.savePromptCache(row.id, promptCacheAfterTurn(context, record.at))
+    this.store.savePromptCache(row.id, context === null ? null : promptCacheAfterTurn(context, record.at))
 
     if (state.state === 'interrupting') {
       this.applyAgentEvent(row.id, { type: 'turn_finished', generation: record.generation, turnId: state.turnId, continuation: { kind: 'no_unacknowledged_deliveries' } })
@@ -1347,10 +1352,10 @@ export class OuroCore {
   }
 
   /** Asked by `ouro publish` on this machine, after it has exported the app. */
-  registerAppUpdate(input: RegisterUpdateInput): { updateNumber: number; runtimeVersion: string } {
+  registerAppUpdate(input: RegisterUpdateInput): { updateNumber: number; runtimeVersion: string; mark: string } {
     const row = this.appUpdates.register(input)
     this.notifier.updatePublished(row.updateNumber)
-    return { updateNumber: row.updateNumber, runtimeVersion: row.runtimeVersion }
+    return { updateNumber: row.updateNumber, runtimeVersion: row.runtimeVersion, mark: updateMarkOf(row.updateNumber, this.appUpdates.machineId()) }
   }
 
   /** Publishes the app in the person's source as `ouro publish` does, registering it here directly. */
@@ -1363,7 +1368,7 @@ export class OuroCore {
     return {
       id: 'server',
       machineName: this.config.machineName,
-      release: { id: this.config.releaseId, base: this.baseUpdates.status() },
+      release: { id: this.config.releaseId, base: this.baseUpdates.status(), version: this.config.version },
       sourceBackup: this.sourceBackup.status(),
       defaultModel: this.config.defaultModel,
       models: this.modelOptions(),
@@ -1905,7 +1910,8 @@ export class OuroCore {
       return this.commit(() => {
         const earlier = this.store.idempotentResult(callerKey, request.idempotencyKey)
         if (earlier) return JSON.parse(earlier.resultJson) as PeerCreateAgentResult
-        const agentId = this.startAgent(request, `${callerKey}:${request.idempotencyKey}`, { parent, createdBy: OWNER_ADDRESS, parentAgentId: null, folder: request.folder ?? this.config.defaultFolder }, nameSuggestion)
+        // Files don't travel between computers yet, so a request from one names none.
+        const agentId = this.startAgent({ ...request, attachmentIds: [] }, `${callerKey}:${request.idempotencyKey}`, { parent, createdBy: OWNER_ADDRESS, parentAgentId: null, folder: request.folder ?? this.config.defaultFolder }, nameSuggestion)
         if (request.from.kind === 'owner') this.store.addOwnerChatPeer(agentId, peer.machineId, this.config.clock.now())
         const result: PeerCreateAgentResult = { outcome: 'created', agent: this.agentCard(this.requireAgentRow(agentId), 'full') }
         this.store.saveIdempotentResult(callerKey, request.idempotencyKey, 'create_agent', hashSecret(JSON.stringify(request)), JSON.stringify(result), this.config.clock.now())
@@ -1922,6 +1928,8 @@ export class OuroCore {
   private startAgent(input: NewAgentRequest, clientKey: string, origin: NewAgentOrigin, nameSuggestion: NameSuggestion = NO_NAME_SUGGESTION): string {
     const now = this.config.clock.now()
     const name = this.chooseAgentName(input.name, input.task, nameSuggestion.name)
+    // Resolved first, so a missing file refuses the command before anything is made.
+    const attachments = this.resolveAttachments(input.attachmentIds)
     const { parent } = origin
     const agentId = shortId()
     const preLaunchLifecycle: AgentLifecycle = { state: { state: 'stopped', since: now, stopped: { reason: 'idle' } }, instanceGeneration: 0, consecutiveCrashes: 0, consecutiveCreditFailures: 0, ownershipEpoch: 0, consecutiveStalls: 0 }
@@ -1948,7 +1956,7 @@ export class OuroCore {
     if (admission.kind === 'refused' && admission.hold === 'budget') throw new CommandRefused('budget_spent', `the budget of $${this.budgetUsd()} is spent: raise it to start agents`)
     this.placeInOwnWorktree(created)
 
-    this.postDirect({ from: parent, fromAgentId: origin.parentAgentId, toAgent: created, text: input.task, attachments: [], purpose: 'task', wake: 'wake', clientKey, answersAskId: null, relayedBy: null })
+    this.postDirect({ from: parent, fromAgentId: origin.parentAgentId, toAgent: created, text: input.task, attachments, purpose: 'task', wake: 'wake', clientKey, answersAskId: null, relayedBy: null })
     this.applyAgentEvent(agentId, { type: 'wake_requested', admission, reason: 'created' })
     return agentId
   }
@@ -3279,7 +3287,7 @@ type ParticipantKey = `agent:${string}` | `person:${string}` | `remote:${string}
 
 interface DirectPost { from: string; fromAgentId: string | null; toAgent: AgentRow; text: string; attachments: AttachmentRef[]; purpose: MessagePurpose; wake: DeliveryWake; clientKey: string | null; answersAskId: string | null; relayedBy: string | null }
 
-interface NewAgentRequest { task: string; name: string | null; model: string | null; folder: string | null; promptCacheLifetime: PromptCacheLifetime }
+interface NewAgentRequest { task: string; name: string | null; model: string | null; folder: string | null; promptCacheLifetime: PromptCacheLifetime; attachmentIds: string[] }
 
 /** Who starts a new agent, and where it works. `parentAgentId`: the parent's id when it is an agent of this machine. */
 interface NewAgentOrigin { parent: string; createdBy: string; parentAgentId: string | null; folder: string }

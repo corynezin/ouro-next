@@ -55,7 +55,7 @@ function replyStarting(outgoing: ServerResponse, message: string): void {
   outgoing.end(JSON.stringify({ error: { code: 'server_starting', message, retryable: true } }))
 }
 
-export function startProxy(input: { port: number; upstreamSocket: string; onListening: () => void }): Server {
+export function startProxy(input: { host: string; port: number; upstreamSocket: string; onListening: () => void }): Server {
   /** `body` is the whole request body for a request safe to repeat, and null for one that streams through once. */
   const forward = (incoming: IncomingMessage, outgoing: ServerResponse, body: Buffer | null, attempt: number): void => {
     connectWhenAvailable(input.upstreamSocket, Date.now() + HOLD_LIMIT_MS).then((socket) => {
@@ -91,6 +91,6 @@ export function startProxy(input: { port: number; upstreamSocket: string; onList
       forward(incoming, outgoing, body, 0)
     }).catch(() => outgoing.destroy())
   })
-  server.listen(input.port, '0.0.0.0', input.onListening)
+  server.listen(input.port, input.host, input.onListening)
   return server
 }

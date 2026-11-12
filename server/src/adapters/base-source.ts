@@ -1,10 +1,22 @@
 // Where bases come from: a git repository (git-bases.ts), where a release is an annotated tag. Bases are made there, not on a server.
 
-/** A base as it was released: `commit` is what its tag points to, `notes` the tag's message. */
+/** A base as it was released: `commit` is what its tag points to, `notes` the tag's message, `version` the Ouro version in
+ * its server/package.json (null before versions). */
 export interface BaseRelease {
   n: number
   notes: string
   commit: string
+  version: string | null
+}
+
+/** The version a package.json says, or null when it has none worth showing (absent, or the placeholder 0.0.0). */
+export function versionOf(packageJson: string): string | null {
+  try {
+    const { version } = JSON.parse(packageJson) as { version?: unknown }
+    return typeof version === 'string' && version !== '' && version !== '0.0.0' ? version : null
+  } catch {
+    return null
+  }
 }
 
 export interface BaseSource {

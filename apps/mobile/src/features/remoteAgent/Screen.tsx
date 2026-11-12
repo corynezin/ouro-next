@@ -11,6 +11,7 @@ import { C } from '../../design/colors.ts'
 import { Composer } from '../../design/Composer.tsx'
 import type { ComposerFile } from '../../design/composerFiles.ts'
 import { actionSheet, barMenu, confirm } from '../../design/menus.tsx'
+import { useSteady } from '../../design/steady.ts'
 import { useNow, useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
 import type { ScreenProps } from '../../navigation/routes.ts'
 import { useBannerHeight } from '../../navigation/UpdateBanner.tsx'
@@ -49,6 +50,7 @@ export function RemoteChatScreen({ navigation, route }: ScreenProps<'RemoteChat'
   }), [version, chatId, remoteAgentId])
 
   const header = remote && computer ? remoteChatModel(remote, computer) : null
+  const statusText = useSteady(header?.statusText ?? '', (text) => text)
   const asks = remote ? remoteAsksOf(store, remote) : []
   const panel = asksPanel(asks.map(openCopyOf), answeringAskId, Date.now())
   const actions = remote && computer ? remoteActionsOf(remote, computer) : []
@@ -140,7 +142,7 @@ export function RemoteChatScreen({ navigation, route }: ScreenProps<'RemoteChat'
         ) : undefined}
       />
       {note !== null && <Text style={{ color: C.orange, fontSize: 12, paddingHorizontal: 18, paddingVertical: 3, backgroundColor: C.bar }} numberOfLines={2}>{note}</Text>}
-      <Text style={{ color: C.secondary, fontSize: 12, paddingHorizontal: 18, paddingVertical: 4, backgroundColor: C.bar }} numberOfLines={2}>{header.statusText}</Text>
+      <Text style={{ color: C.secondary, fontSize: 12, paddingHorizontal: 18, paddingVertical: 4, backgroundColor: C.bar }} numberOfLines={2}>{statusText}</Text>
       <AsksPanel rows={panel.rows} hint={panel.hint} setAnsweringAskId={setAnsweringAskId} onChoose={chooseAnswer}
         onOptions={(ask, toggle) => openSnoozeSheet(session, ask, setNote, [{ title: ask.answering ? 'Reply to all instead' : 'Answer just this', onPress: toggle }])} />
       <Composer initialText={session.drafts.textOf(remoteAgentId)} onTextChange={(text) => session.drafts.setText(remoteAgentId, text)}
