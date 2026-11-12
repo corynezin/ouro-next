@@ -1,5 +1,5 @@
-// Taking bases: which one is offered, and taking it. The base is merged beside the live source; a conflict goes to the
-// master agent, and nothing live changes. The merge goes live through the guardian, which builds, checks and switches to
+// Taking bases: which one is offered, and taking it. The base is merged beside the live source; a conflict goes to an
+// agent started for it, and nothing live changes. The merge goes live through the guardian, which builds, checks and switches to
 // it, rolling back if it turns out unhealthy; only then does the person's branch move to it. The ourod that starts a deploy
 // is replaced by it, so the update's state is stored and the next ourod follows the deployment to its end.
 import type { BaseStatus } from '@ouro/contract'
@@ -38,8 +38,11 @@ export interface BaseUpdatesConfig {
   offerChanged: () => void
   /** Publishes the app as committed in the person's source, as `ouro publish` does; null when the server has no app folder. */
   publishApp: (() => Promise<PublishedApp>) | null
-  /** Tells the master agent; called inside a transaction. */
-  tellMasterAgent: (text: string) => void
+  /**
+   * Starts an agent of the owner's for work the update needs, and returns its name; null when none could start and the
+   * owner was told instead. Called inside a transaction.
+   */
+  handOff: (work: { name: string; task: string }) => string | null
   log: (event: string, fields: Record<string, unknown>) => void
 }
 
@@ -138,9 +141,10 @@ export class BaseUpdates {
       removeBeside(root, n)
       const merged = mergeBeside(root, n)
       if (merged.kind === 'conflicted') {
+        // One transaction: a conflict recorded with nobody told would wait for ever, refusing every retake.
         this.config.commit(() => {
-          this.config.saveRecord({ state: 'conflict', n, files: merged.files })
-          this.config.tellMasterAgent(conflictBrief(n, notes, merged.files, besideDirOf(root, n)))
+          const resolver = this.config.handOff({ name: `base-${n}`, task: conflictBrief(n, notes, merged.files, besideDirOf(root, n)) })
+          this.config.saveRecord({ state: 'conflict', n, files: merged.files, resolver })
         })
         return
       }
@@ -188,7 +192,7 @@ export class BaseUpdates {
 
   /**
    * Live: the person's branch takes the merge, and if the base changes the app the phone gets it. Publishing is after the
-   * deploy and can't undo it: when it fails, the master agent is told why and the update still counts as done.
+   * deploy and can't undo it: when it fails, an agent is started to fix it and the update still counts as done.
    */
   private async finish(n: number, commit: string): Promise<void> {
     const root = this.config.sourceRoot!
@@ -208,7 +212,7 @@ export class BaseUpdates {
   private async publishApp(n: number): Promise<void> {
     const failed = (why: string) => {
       this.config.log('base_update_app_not_published', { n, why })
-      this.config.commit(() => this.config.tellMasterAgent(`Ouro base ${n} is live on this computer and changes the app, but the app didn't reach the phone: ${why}. Fix that, then publish it: ouro publish`))
+      this.config.commit(() => this.config.handOff({ name: `base-${n}-publish`, task: `Ouro base ${n} is live on this computer and changes the app, but the app didn't reach the phone: ${why}. Fix that, publish it with \`ouro publish\`, then tell the person in one line whether it worked ("tap the update banner in Ouro to get it"), and finish.` }))
     }
     if (this.config.publishApp === null) return failed('this server has no app folder to publish from')
     try {

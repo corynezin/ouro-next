@@ -3,8 +3,8 @@
 import type { ChatEntity, SearchHit, SearchPage } from '@ouro/contract'
 import { ago, foldForSearch } from '../../design/format.ts'
 import { memberLabel } from '../shared/agentFacts.ts'
-import type { StoreView } from '../shared/agentFacts.ts'
-import { chatRow, chatTime, chatTitle, isMember, isPersonAddress, otherMember } from './model.ts'
+import type { PinView, StoreView } from '../shared/agentFacts.ts'
+import { chatRow, pinRanksOfChats, chatTime, chatTitle, isMember, isPersonAddress, otherMember } from './model.ts'
 import type { ChatRowModel } from './model.ts'
 
 /** Typing pauses this long before the server is asked: each word would otherwise search every message. */
@@ -56,13 +56,14 @@ export const SEARCH_COPY = {
 /** The query's words, as the server splits them. */
 const queryWords = (query: string) => [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))]
 
-export function chatSearchModel(store: StoreView, query: string, search: MessageSearch, now: number): ChatSearchModel {
+export function chatSearchModel(store: StoreView & PinView, query: string, search: MessageSearch, now: number): ChatSearchModel {
   const words = queryWords(query).map(foldForSearch)
   const viewer = store.viewer?.address
+  const ranks = pinRanksOfChats(store)
   const named = [...store.chats.values()]
     .filter((chat) => { const title = foldForSearch(chatTitle(store, chat)); return words.every((word) => title.includes(word)) })
     .sort((x, y) => Number(isMember(y, viewer)) - Number(isMember(x, viewer)) || chatTime(y) - chatTime(x))
-    .map((chat): SearchRow => ({ kind: 'chat', chat: chatRow(store, chat, now) }))
+    .map((chat): SearchRow => ({ kind: 'chat', chat: chatRow(store, chat, now, ranks.has(chat.id)) }))
   const hits = search.kind === 'found' ? search.page.hits : []
   const inMine = (hit: SearchHit) => { const chat = store.chats.get(hit.chatId); return chat !== undefined && isMember(chat, viewer) }
   const hitRows = (list: SearchHit[]) => list.map((hit): SearchRow => ({ kind: 'hit', hit: hitRow(store, hit, query, now) }))

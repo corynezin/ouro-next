@@ -12,7 +12,7 @@ import { C } from './colors.ts'
 import { timeOfDay } from './format.ts'
 import { Markdown } from './Markdown.tsx'
 import { actionSheet } from './menus.tsx'
-import { bubbleActions, textActions } from './bubbleActions.ts'
+import { bubbleActions } from './bubbleActions.ts'
 import type { BubbleAction } from './bubbleActions.ts'
 import { segments } from './messageText.ts'
 import { Symbol } from './Symbol.tsx'
@@ -37,7 +37,7 @@ export interface BubbleFile {
 }
 
 
-export function Bubble({ text, sentAt, mine, sender, files = [], receipt, footnote, failed, faded, doneReport, choices, avatar, onPress, extraActions, onSelectText }: {
+export function Bubble({ text, sentAt, mine, sender, files = [], receipt, footnote, failed, faded, choices, avatar, onPress, extraActions, onSelectText }: {
   text: string
   sentAt: number
   mine: boolean
@@ -48,8 +48,6 @@ export function Bubble({ text, sentAt, mine, sender, files = [], receipt, footno
   footnote?: string
   failed?: boolean
   faded?: boolean
-  /** A done report folded under this message. */
-  doneReport?: { at: number; summary: string } | null
   /** Tappable answers to the ask this message posed. */
   choices?: { options: readonly string[]; onChoose: ChooseChoice } | null
   /** A small element left of the bubble, only on others' messages. */
@@ -58,7 +56,6 @@ export function Bubble({ text, sentAt, mine, sender, files = [], receipt, footno
   extraActions?: readonly BubbleAction[]
   onSelectText: (text: string) => void
 }) {
-  const [showDone, setShowDone] = useState(false)
   const senderHue = sender ? senderColor(sender) : null
   const handlers = { copyText, selectText: onSelectText }
   const menu = () => actionSheet(undefined, bubbleActions(extraActions ?? [], text, handlers))
@@ -75,18 +72,6 @@ export function Bubble({ text, sentAt, mine, sender, files = [], receipt, footno
       )}
       {choices ? <AskChoices choices={choices.options} onChoose={choices.onChoose} /> : null}
       <Text style={s.meta} onPress={onPress}>{timeOfDay(sentAt)}{footnote ? <Text style={{ color: failed ? C.red : C.secondary }}>  {footnote}</Text> : receipt ? `  ${receipt}` : ''}</Text>
-      {doneReport && (
-        <Pressable onPress={() => setShowDone(!showDone)} style={s.done} accessibilityLabel={showDone ? 'Done, hide summary' : 'Done, show summary'}>
-          <Symbol name="checkmark.circle.fill" size={11} color="secondary" />
-          <Text style={s.meta}>done {timeOfDay(doneReport.at)}</Text>
-          <Symbol name={showDone ? 'chevron.down' : 'chevron.right'} size={8} color="secondary" />
-        </Pressable>
-      )}
-      {doneReport && showDone && (
-        <View style={s.doneBox}>
-          <Markdown text={doneReport.summary} color={C.secondary} fontSize={14} onLongPress={() => actionSheet(undefined, textActions(doneReport.summary, handlers))} />
-        </View>
-      )}
     </View>
   )
   if (avatar && !mine) return <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6 }}>{avatar}{col}</View>
@@ -156,8 +141,6 @@ const s = StyleSheet.create({
   multilineBubble: { alignSelf: 'stretch' },
   meta: { fontSize: 11, color: C.secondary },
   person: { fontSize: 12, fontWeight: '600', color: C.secondary },
-  done: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  doneBox: { borderWidth: StyleSheet.hairlineWidth, borderColor: C.separator, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6 },
   code: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, gap: 4, alignSelf: 'stretch' },
   codeHead: { flexDirection: 'row', alignItems: 'center' },
   lang: { fontSize: 11, fontWeight: '500', flex: 1 },

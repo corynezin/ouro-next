@@ -8,7 +8,9 @@ import type { BaseOffer, BaseUpdate } from '@ouro/contract'
 export type BaseUpdateRecord =
   | { state: 'idle' }
   | { state: 'merging'; n: number }
-  | { state: 'conflict'; n: number; files: string[] }
+  /** `resolver`: the agent started to resolve it; null when none could start and the owner was told. Records from before it
+   * have none: null. */
+  | { state: 'conflict'; n: number; files: string[]; resolver: string | null }
   | { state: 'deploying'; n: number; deploymentId: string; commit: string }
   | { state: 'failed'; n: number; why: string }
 
@@ -19,7 +21,7 @@ export function baseUpdateOf(record: BaseUpdateRecord): BaseUpdate {
     case 'idle': return { state: 'idle' }
     case 'merging':
     case 'deploying': return { state: 'updating', n: record.n }
-    case 'conflict': return { state: 'conflict', n: record.n, files: record.files }
+    case 'conflict': return { state: 'conflict', n: record.n, files: record.files, resolver: record.resolver ?? null }
     case 'failed': return { state: 'failed', n: record.n, why: record.why }
   }
 }
@@ -51,7 +53,7 @@ export function continueDecision(record: BaseUpdateRecord, unresolvedIn: (n: num
   return { kind: 'continues', n: record.n }
 }
 
-/** What the master agent is told when a base and the person's changes touch the same files. */
+/** The task of the agent started when a base and the person's changes touch the same files. */
 export function conflictBrief(n: number, notes: string, files: string[], besideDir: string): string {
   return `Ouro base ${n} conflicts with this computer's own changes in: ${files.join(', ')}. Nothing live has changed. What the base changes: ${notes}\n`
     + `Resolve it in ${besideDir}, a worktree with the merge in progress. Rule: keep what the person's change was for, and take the base's change. `

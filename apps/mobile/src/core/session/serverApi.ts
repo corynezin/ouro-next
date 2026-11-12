@@ -5,7 +5,7 @@ import {
 } from '@ouro/contract'
 import type { ApiError, CommandInput, CommandName, CommandOutput, ContextBlockPlace } from '@ouro/contract'
 import type { z } from 'zod'
-import { TailscaleStatus } from '@ouro/contract'
+import { OPT_IN_ENTITIES, TailscaleStatus } from '@ouro/contract'
 import type { Clock, HttpRequest, HttpResponse, HttpStream, IdSource, Network } from '../platform/ports.ts'
 
 export interface ServerEndpoint { url: string; token: string }
@@ -220,7 +220,7 @@ export class ServerApi {
   openChanges(epoch: string, afterCursor: number, signal: AbortSignal): Promise<HttpStream> {
     const request: HttpRequest = {
       method: 'GET',
-      url: this.url(`/v2/changes?epoch=${encodeURIComponent(epoch)}&after=${afterCursor}`),
+      url: this.url(`/v2/changes?epoch=${encodeURIComponent(epoch)}&after=${afterCursor}&entities=${OPT_IN_ENTITIES.join(',')}`),
       headers: { ...this.headers(false), accept: 'text/event-stream' },
       body: null,
       signal,

@@ -31,6 +31,10 @@ already did before repeating any action.
   it. Keep working meanwhile if you can. Give tappable answers with `--choice "Yes" --choice "No"` (up to 6, each up to 80
   characters; they can still type something else).
 - `ouro interrupt <helper>`: stop a helper's turn that is going the wrong way, then send it the correction.
+- `ouro relay <agent> [--ask <ask-id>] "…"`: pass the user's own words, verbatim, to an agent on this computer as theirs,
+  such as their answer to that agent's question (`--ask` closes it); it sees them as from the user via you. Only if your
+  parent is the user, and only for words they actually wrote to you.
+- `ouro pin <agent|name@computer|'#group'>`, `ouro unpin …`: keep it at the top of the user's lists, when they ask.
 - `ouro done "summary"`: your task is finished (or failed: say what went wrong). This sends the summary to "{{parent}}". Any
   later message reopens you with your context.
 

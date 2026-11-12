@@ -1,11 +1,11 @@
 // The chats list as data: yours, then others' you can read. A direct chat you're in opens the agent's conversation;
 // everything else opens the room. Pure: Screen.tsx only draws this.
 import { parseAddress } from '@ouro/contract'
-import type { ChatEntity, ComputerEntity, RemoteAgentEntity } from '@ouro/contract'
+import type { ChatEntity, ComputerEntity, PinTarget, RemoteAgentEntity } from '@ouro/contract'
 import type { MentionOption } from '../../design/messageText.ts'
 import { ago, foldForSearch, oneLine } from '../../design/format.ts'
-import { listedAgents, memberLabel, shownConnection } from '../shared/agentFacts.ts'
-import type { StoreView } from '../shared/agentFacts.ts'
+import { listedAgents, memberLabel, shownConnection, sortedPins } from '../shared/agentFacts.ts'
+import type { PinView, StoreView } from '../shared/agentFacts.ts'
 import type { ConnectionStatus } from '../../core/session/syncEngine.ts'
 
 export const isPersonAddress = (address: string) => parseAddress(address).kind !== 'agent'
@@ -45,12 +45,44 @@ export interface ChatRowModel {
   avatarIsPerson: boolean
   title: string
   memberCount: number
+  /** "3 members". */
+  membersText: string
   timeText: string
   previewText: string | null
   unread: number
+  pinned: boolean
 }
 
-export function chatRow(store: StoreView, chat: ChatEntity, now: number): ChatRowModel {
+export const membersText = (count: number) => (count === 1 ? '1 member' : `${count} members`)
+
+/**
+ * Each pinned chat of the viewer's, by its place among their pins: a group pinned itself, or a direct chat with a pinned
+ * agent. Worked out once for a whole list.
+ */
+export function pinRanksOfChats(store: StoreView & PinView): ReadonlyMap<string, number> {
+  const viewer = store.viewer?.address
+  const directWith = new Map<string, string>()
+  for (const chat of store.chats.values()) if (chat.kind === 'direct' && isMember(chat, viewer)) directWith.set(otherMember(chat, viewer), chat.id)
+  const chatOf = (target: PinTarget): string | undefined => {
+    switch (target.kind) {
+      case 'chat': return target.chatId
+      case 'remote_agent': return directWith.get(target.address)
+      case 'agent': {
+        const agent = store.agents.get(target.agentId)
+        return agent && directWith.get(agent.name)
+      }
+    }
+  }
+  const ranks = new Map<string, number>()
+  sortedPins(store).forEach((pin, rank) => {
+    const chatId = chatOf(pin.target)
+    if (chatId !== undefined && !ranks.has(chatId)) ranks.set(chatId, rank)
+  })
+  return ranks
+}
+
+/** `pinned`: from pinRanksOfChats. */
+export function chatRow(store: StoreView, chat: ChatEntity, now: number, pinned: boolean): ChatRowModel {
   const other = otherMember(chat, store.viewer?.address)
   const preview = chatPreview(store, chat)
   return {
@@ -60,20 +92,33 @@ export function chatRow(store: StoreView, chat: ChatEntity, now: number): ChatRo
     avatarIsPerson: isPersonAddress(other),
     title: chatTitle(store, chat),
     memberCount: chat.members.length,
+    membersText: membersText(chat.members.length),
     timeText: ago(chatTime(chat), now),
     previewText: preview === null ? null : oneLine(preview),
     unread: store.readStateOfChat(chat.id)?.unreadCount ?? 0,
+    pinned,
   }
 }
 
 export interface ChatsListModel { mine: ChatRowModel[]; others: ChatRowModel[]; emptyText: string | null }
 
-export function chatsListModel(store: StoreView, connection: ConnectionStatus, now: number): ChatsListModel {
+/** Yours with pinned ones first, in pin order, then latest first; then others' you can read, the same way. */
+export function chatsListModel(store: StoreView & PinView, connection: ConnectionStatus, now: number): ChatsListModel {
   const viewer = store.viewer?.address
-  const latestFirst = (chats: ChatEntity[]) => chats.sort((x, y) => chatTime(y) - chatTime(x)).map((chat) => chatRow(store, chat, now))
+  const ranks = pinRanksOfChats(store)
+  const byPinThenLatest = (x: ChatEntity, y: ChatEntity): number => {
+    const rankX = ranks.get(x.id)
+    const rankY = ranks.get(y.id)
+    if (rankX !== undefined && rankY !== undefined) return rankX - rankY
+    if (rankX !== undefined) return -1
+    if (rankY !== undefined) return 1
+    return chatTime(y) - chatTime(x)
+  }
+  const rows = (chats: ChatEntity[]) => chats.sort(byPinThenLatest).map((chat) => chatRow(store, chat, now, ranks.has(chat.id)))
   const all = [...store.chats.values()]
-  const mine = latestFirst(all.filter((chat) => isMember(chat, viewer)))
-  const others = latestFirst(all.filter((chat) => !isMember(chat, viewer)))
+  const mine = rows(all.filter((chat) => isMember(chat, viewer)))
+  // pinTargetOfChat offers no pin for others' chats, but a pin of one made elsewhere (by an agent) still leads.
+  const others = rows(all.filter((chat) => !isMember(chat, viewer)))
   const emptyText = mine.length ? null
     : others.length ? 'You aren’t in any chats yet.'
     : shownConnection(connection, now) === 'live' ? 'No chats yet.' : 'Connecting…'
@@ -90,6 +135,21 @@ export function chatDestination(store: StoreView, chat: ChatEntity): ChatDestina
     if (agent) return { screen: 'Chat', agentRef: agent.id }
   }
   return { screen: 'ChatRoom', chatId: chat.id }
+}
+
+/** What pinning a chat pins: a group itself, or the agent on the other side of your direct chat. Null for a chat between
+ * people, or one you aren't in: the lists keep only your own chats at the top. */
+export function pinTargetOfChat(store: StoreView, chat: ChatEntity): PinTarget | null {
+  const viewer = store.viewer?.address
+  if (!isMember(chat, viewer)) return null
+  if (chat.kind === 'group') return { kind: 'chat', chatId: chat.id }
+  const other = otherMember(chat, viewer)
+  if (isPersonAddress(other)) return null
+  const parsed = parseAddress(other)
+  if (parsed.kind !== 'agent') return null
+  if (parsed.machine !== null) return { kind: 'remote_agent', address: other }
+  const agent = [...store.agents.values()].find((candidate) => candidate.name === parsed.agentName && candidate.state.state !== 'archived')
+  return agent ? { kind: 'agent', agentId: agent.id } : null
 }
 
 function parseAgentName(address: string) {

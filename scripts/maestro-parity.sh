@@ -105,7 +105,7 @@ for f in "$flows"/${~OURO_PARITY_FLOWS:-[0-9]*.yaml}; do
           cli send helper 'standin: [{"do":"run","command":"ouro send \"#team\" \"Hello team\""},{"do":"run","command":"ouro ask human \"Need a hand?\""}]' >/dev/null
           cli new --name sleeper --model stand-in "Sleep" >/dev/null
           cli stop sleeper >/dev/null
-          cli send master 'standin: [{"do":"run","command":"ouro reply \"Ask zulu, alpha, mybot@maestro and asker, then formatter; not mybots.\""},{"do":"run","command":"ouro ask human \"Master question?\""}]' >/dev/null
+          cli send concierge 'standin: [{"do":"run","command":"ouro reply \"Ask zulu, alpha, mybot@maestro and asker, then formatter; not mybots.\""},{"do":"run","command":"ouro ask human \"Starter question?\""}]' >/dev/null
           cli new --name alpha --model stand-in "First" >/dev/null
           cli new --name zulu --model stand-in "Second" >/dev/null ;;
     50-*)

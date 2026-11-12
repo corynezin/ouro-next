@@ -48,6 +48,32 @@ export const ReadStateEntity = z.object({
 })
 export type ReadStateEntity = z.infer<typeof ReadStateEntity>
 
+/** What a pin keeps at the top of a person's lists: an agent here, one on another of their computers, or a group chat. */
+export const PinTarget = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('agent'), agentId: z.string() }),
+  /** `name@machine`. */
+  z.object({ kind: z.literal('remote_agent'), address: z.string() }),
+  z.object({ kind: z.literal('chat'), chatId: z.string() }),
+])
+export type PinTarget = z.infer<typeof PinTarget>
+
+/** What a target is, as one string: two targets are the same exactly when their keys are. */
+export function pinTargetKey(target: PinTarget): string {
+  switch (target.kind) {
+    case 'agent': return `agent:${target.agentId}`
+    case 'remote_agent': return `remote_agent:${target.address}`
+    case 'chat': return `chat:${target.chatId}`
+  }
+}
+
+/** One of a person's pins. Visible only to that person. Shown in the order they were pinned: `pinnedAt`, then `id`. */
+export const PinEntity = z.object({
+  id: z.string(),
+  target: PinTarget,
+  pinnedAt: z.number().int(),
+})
+export type PinEntity = z.infer<typeof PinEntity>
+
 export const AskSource = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('agent') }),
   /** Raised by the system for a problem; closed by the system when the cause clears. */
@@ -225,6 +251,7 @@ export const entitySchemas = {
   message: MessageEntity,
   chat: ChatEntity,
   read_state: ReadStateEntity,
+  pin: PinEntity,
   ask: AskEntity,
   goal: GoalEntity,
   summary: SummaryEntity,

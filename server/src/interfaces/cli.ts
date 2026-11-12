@@ -8,7 +8,7 @@ import { chatHandle, displayStateOf, PromptCacheLifetime } from '@ouro/contract'
 import { DEFAULT_EXPORT_COMMAND, NotPublished, publishCommittedApp } from '../app/app-publishing.ts'
 import type { PublishedApp } from '../app/app-publishing.ts'
 import type { RegisterUpdateInput } from '../app/app-updates.ts'
-import type { AgentDisplayState, AgentEntity, ComputerEntity, RemoteAgentEntity, ApiError, AskEntity, ChatEntity, CommandName, CommandOutput, GoalEntity, HistoryPage, MessageEntity, Snapshot, SearchPage, BaseStatus } from '@ouro/contract'
+import type { AgentDisplayState, AgentEntity, ComputerEntity, RemoteAgentEntity, ApiError, AskEntity, ChatEntity, CommandName, CommandOutput, GoalEntity, HistoryPage, MessageEntity, PinTarget, Snapshot, SearchPage, BaseStatus } from '@ouro/contract'
 
 const HELP = `ouro: talk to your agents, and to the other agents if you are one
 
@@ -18,7 +18,8 @@ const HELP = `ouro: talk to your agents, and to the other agents if you are one
   ouro reply [--file <path>]... "message"                        answer the last message, in its chat
   ouro ask <human> [--blocked|--urgent] [--choice "x"]... "question"
   ouro withdraw-ask <ask-id>
-  ouro relay <agent> [--ask <ask-id>] "the person's words"      master only: pass the person's own words on, as theirs
+  ouro relay <agent> [--ask <ask-id>] "the person's words"      agents a person started: pass their words on
+  ouro pin|unpin <agent|agent@computer|'#group'>                 keep it at the top of the person's lists, or stop
   ouro goal set [--open-ended] [--check "<command>"] [--every <seconds>] [--for <agent>] "goal"
   ouro goal pause ["question or reason"] | resume | reopen | clear | done ["summary"] [--for <agent>]
   ouro goal every <seconds|default> [--for <agent>]
@@ -579,6 +580,20 @@ export async function runCli(args: string[], environment: NodeJS.ProcessEnv, std
       const text = messageText(words, stdin, "the person's words")
       const { message } = await client.command('relay_message', { to, text, answersAskId: parsed.flags.get('--ask')?.[0] ?? null })
       print(`${describeMessage(message)}: to ${to}, as ${message.from}'s own words\n`)
+      return
+    }
+    case 'pin':
+    case 'unpin': {
+      const [what] = rest
+      if (!what) throw new CliFailure(`${verb} what? ouro ${verb} <agent|agent@computer|'#group'>`)
+      const target: PinTarget = what.startsWith('#')
+        ? { kind: 'chat', chatId: (await requireGroup(client, what)).id }
+        : what.includes('@')
+          ? { kind: 'remote_agent', address: (await requireRemoteAgent(client, what)).address }
+          : { kind: 'agent', agentId: (await requireAgent(client, what)).id }
+      if (verb === 'pin') await client.command('pin', { target })
+      else await client.command('unpin', { target })
+      print(`${verb === 'pin' ? 'pinned' : 'unpinned'} ${what}\n`)
       return
     }
     case 'computers': return await runComputers(client, rest, print)

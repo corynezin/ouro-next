@@ -61,7 +61,7 @@ test('a computer joins with the invite command, and each lists the other online 
   })
   assert.equal(seenFromAlpha.trust, 'full')
   assert.equal(seenFromAlpha.incompatibility, null)
-  assert.equal(seenFromAlpha.agentCount, 1, "beta's master agent")
+  assert.equal(seenFromAlpha.agentCount, 1, "beta's starter agent")
   const seenFromBeta = await waitFor('alpha online at beta', async () => {
     const alpha = await computerNamed(betaPhone, 'alpha')
     return alpha?.status === 'online' ? alpha : null

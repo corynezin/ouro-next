@@ -229,7 +229,7 @@ export function baseSection(release: Pick<ServerEntity['release'], 'base' | 'ver
     versionText: release.version ?? `Base ${base.integrated}`,
     updatingText: update.state === 'updating' ? `Updating to ${target(update.n)}…` : null,
     note: update.state === 'conflict'
-      ? { text: `${named(update.n)} touches files you changed (${update.files.join(', ')}). Your master agent is working it out; nothing has changed yet.`, color: 'orange' }
+      ? { text: `${named(update.n)} touches files you changed (${update.files.join(', ')}). ${update.resolver === null ? 'No agent could start to work it out, so you were sent what to do' : `An agent, ${update.resolver}, is working it out`}; nothing has changed yet.`, color: 'orange' }
       : update.state === 'failed'
         ? { text: `${named(update.n)} didn't go in: ${update.why}. Nothing live changed unless it says so.`, color: 'red' }
         : null,

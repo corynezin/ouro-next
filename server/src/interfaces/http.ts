@@ -283,11 +283,12 @@ function streamChanges(core: OuroCore, viewer: Viewer, caller: Caller, url: URL,
   }
 
   let cursor = integerParam(url, 'after') ?? 0
+  const optedIn = (url.searchParams.get('entities') ?? '').split(',').filter((kind) => kind !== '')
   let caughtUpSent = false
   const pump = () => {
     if (response.destroyed) return
     for (;;) {
-      const batch = core.changesAfter(cursor, viewer, CHANGES_BATCH)
+      const batch = core.changesAfter(cursor, viewer, CHANGES_BATCH, optedIn)
       for (const change of batch) {
         writeFrame({ frame: 'change', change }, change.cursor)
         cursor = change.cursor
