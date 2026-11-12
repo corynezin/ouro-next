@@ -45,28 +45,44 @@ export interface ChatRowModel {
   avatarIsPerson: boolean
   title: string
   memberCount: number
+  /** "3 members". */
+  membersText: string
   timeText: string
   previewText: string | null
   unread: number
   pinned: boolean
 }
 
-/** Where a chat stands among the viewer's pins: a group pinned itself, or a direct chat with a pinned agent. Null: not pinned. */
-export function pinRankOfChat(store: StoreView & PinView, chat: ChatEntity): number | null {
+export const membersText = (count: number) => (count === 1 ? '1 member' : `${count} members`)
+
+/**
+ * Each pinned chat of the viewer's, by its place among their pins: a group pinned itself, or a direct chat with a pinned
+ * agent. Worked out once for a whole list.
+ */
+export function pinRanksOfChats(store: StoreView & PinView): ReadonlyMap<string, number> {
   const viewer = store.viewer?.address
-  const pins = sortedPins(store)
-  const at = pins.findIndex((pin) => {
-    if (pin.target.kind === 'chat') return pin.target.chatId === chat.id
-    if (chat.kind !== 'direct' || !isMember(chat, viewer)) return false
-    const other = otherMember(chat, viewer)
-    if (pin.target.kind === 'remote_agent') return other === pin.target.address
-    const agent = store.agents.get(pin.target.agentId)
-    return agent !== undefined && other === agent.name
+  const directWith = new Map<string, string>()
+  for (const chat of store.chats.values()) if (chat.kind === 'direct' && isMember(chat, viewer)) directWith.set(otherMember(chat, viewer), chat.id)
+  const chatOf = (target: PinTarget): string | undefined => {
+    switch (target.kind) {
+      case 'chat': return target.chatId
+      case 'remote_agent': return directWith.get(target.address)
+      case 'agent': {
+        const agent = store.agents.get(target.agentId)
+        return agent && directWith.get(agent.name)
+      }
+    }
+  }
+  const ranks = new Map<string, number>()
+  sortedPins(store).forEach((pin, rank) => {
+    const chatId = chatOf(pin.target)
+    if (chatId !== undefined && !ranks.has(chatId)) ranks.set(chatId, rank)
   })
-  return at < 0 ? null : at
+  return ranks
 }
 
-export function chatRow(store: StoreView & Partial<PinView>, chat: ChatEntity, now: number): ChatRowModel {
+/** `pinned`: from pinRanksOfChats. */
+export function chatRow(store: StoreView, chat: ChatEntity, now: number, pinned: boolean): ChatRowModel {
   const other = otherMember(chat, store.viewer?.address)
   const preview = chatPreview(store, chat)
   return {
@@ -76,24 +92,33 @@ export function chatRow(store: StoreView & Partial<PinView>, chat: ChatEntity, n
     avatarIsPerson: isPersonAddress(other),
     title: chatTitle(store, chat),
     memberCount: chat.members.length,
+    membersText: membersText(chat.members.length),
     timeText: ago(chatTime(chat), now),
     previewText: preview === null ? null : oneLine(preview),
     unread: store.readStateOfChat(chat.id)?.unreadCount ?? 0,
-    pinned: store.pins !== undefined && pinRankOfChat(store as StoreView & PinView, chat) !== null,
+    pinned,
   }
 }
 
 export interface ChatsListModel { mine: ChatRowModel[]; others: ChatRowModel[]; emptyText: string | null }
 
-/** Yours with pinned ones first, in pin order, then latest first; then others' you can read. */
+/** Yours with pinned ones first, in pin order, then latest first; then others' you can read, the same way. */
 export function chatsListModel(store: StoreView & PinView, connection: ConnectionStatus, now: number): ChatsListModel {
   const viewer = store.viewer?.address
-  const latestFirst = (chats: ChatEntity[]) => chats.sort((x, y) => chatTime(y) - chatTime(x)).map((chat) => chatRow(store, chat, now))
+  const ranks = pinRanksOfChats(store)
+  const byPinThenLatest = (x: ChatEntity, y: ChatEntity): number => {
+    const rankX = ranks.get(x.id)
+    const rankY = ranks.get(y.id)
+    if (rankX !== undefined && rankY !== undefined) return rankX - rankY
+    if (rankX !== undefined) return -1
+    if (rankY !== undefined) return 1
+    return chatTime(y) - chatTime(x)
+  }
+  const rows = (chats: ChatEntity[]) => chats.sort(byPinThenLatest).map((chat) => chatRow(store, chat, now, ranks.has(chat.id)))
   const all = [...store.chats.values()]
-  const rank = (chat: ChatEntity) => pinRankOfChat(store, chat) ?? Number.POSITIVE_INFINITY
-  const mine = [...all.filter((chat) => isMember(chat, viewer))]
-    .sort((x, y) => rank(x) - rank(y) || chatTime(y) - chatTime(x)).map((chat) => chatRow(store, chat, now))
-  const others = latestFirst(all.filter((chat) => !isMember(chat, viewer)))
+  const mine = rows(all.filter((chat) => isMember(chat, viewer)))
+  // pinTargetOfChat offers no pin for others' chats, but a pin of one made elsewhere (by an agent) still leads.
+  const others = rows(all.filter((chat) => !isMember(chat, viewer)))
   const emptyText = mine.length ? null
     : others.length ? 'You aren’t in any chats yet.'
     : shownConnection(connection, now) === 'live' ? 'No chats yet.' : 'Connecting…'
@@ -112,13 +137,14 @@ export function chatDestination(store: StoreView, chat: ChatEntity): ChatDestina
   return { screen: 'ChatRoom', chatId: chat.id }
 }
 
-/** What pinning a chat from the list pins: a group itself, or the agent on the other side of your direct chat. Null for a
- * chat between people, or one you aren't in. */
+/** What pinning a chat pins: a group itself, or the agent on the other side of your direct chat. Null for a chat between
+ * people, or one you aren't in: the lists keep only your own chats at the top. */
 export function pinTargetOfChat(store: StoreView, chat: ChatEntity): PinTarget | null {
-  if (chat.kind === 'group') return { kind: 'chat', chatId: chat.id }
   const viewer = store.viewer?.address
+  if (!isMember(chat, viewer)) return null
+  if (chat.kind === 'group') return { kind: 'chat', chatId: chat.id }
   const other = otherMember(chat, viewer)
-  if (!isMember(chat, viewer) || isPersonAddress(other)) return null
+  if (isPersonAddress(other)) return null
   const parsed = parseAddress(other)
   if (parsed.kind !== 'agent') return null
   if (parsed.machine !== null) return { kind: 'remote_agent', address: other }

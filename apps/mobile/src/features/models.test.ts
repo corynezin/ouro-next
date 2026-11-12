@@ -19,7 +19,7 @@ import { allSummariesModel, NO_SUMMARY_YET_IN_LIST, SummariesReader, summariesMo
 import { FILE_COPY, sharedFileName } from './file/model.ts'
 import {
   agentByRef, askSnoozeText, listOrder, nextCycleLine, nextUnread, shownConnection, sortAsks, stateDotOf, statusLine, unreadElsewhereCount,
-  memberLabel, quickSnooze, snoozeChoices,
+  memberLabel, pinToggleOf, quickSnooze, snoozeChoices, sortedPins,
 } from './shared/agentFacts.ts'
 
 const NOW = 10_000_000_000
@@ -42,7 +42,7 @@ function storeWith(partial: Parameters<typeof snapshotOf>[0]) {
   return store
 }
 const noUnreadDefaults = { connection: live, fold: { kind: 'never' as const }, query: '', failureNote: null, now: NOW }
-const pinOf = (id: string, target: PinEntity['target'], position: number): PinEntity => ({ id, target, position, pinnedAt: position })
+const pinOf = (id: string, target: PinEntity['target'], pinnedAt: number): PinEntity => ({ id, target, pinnedAt })
 const localRows = (rows: readonly ListedRow[]): AgentRowModel[] => rows.flatMap((listed) => (listed.kind === 'local' ? [listed.row] : []))
 
 test('a row shows only pay-as-you-go spend: an OpenRouter agent\'s cost, never a subscription\'s or a zero', () => {
@@ -256,6 +256,16 @@ test('pinned agents and groups lead, in pin order, and leave the rows below; an 
   assert.deepEqual(swipeActionsOf(store, store.agents.get('z')!)[0], { kind: 'unpin' })
   assert.deepEqual(swipeActionsOf(store, store.agents.get('a')!)[0], { kind: 'pin' })
   assert.equal(agentsListModel(storeWith({ pins: [pinOf('p1', { kind: 'agent', agentId: 'z' }, 1)], agents: [agentOf({ id: 'z', name: 'zed' })] }), noUnreadDefaults).emptyText, null, 'a pinned agent alone is not an empty list')
+})
+
+test('pins are in the order pinned, and toggling one unpins exactly what is pinned', () => {
+  const store = storeWith({ pins: [pinOf('b', { kind: 'chat', chatId: 'g' }, 5), pinOf('a', { kind: 'remote_agent', address: 'bob@mac' }, 5), pinOf('c', { kind: 'agent', agentId: 'z' }, 1)] })
+  assert.deepEqual(sortedPins(store).map((pin) => pin.id), ['c', 'a', 'b'], 'a tie goes by id')
+  assert.equal(pinToggleOf(store, { kind: 'agent', agentId: 'z' }), 'unpin')
+  assert.equal(pinToggleOf(store, { kind: 'chat', chatId: 'g' }), 'unpin')
+  assert.equal(pinToggleOf(store, { kind: 'remote_agent', address: 'bob@mac' }), 'unpin')
+  assert.equal(pinToggleOf(store, { kind: 'chat', chatId: 'z' }), 'pin', 'the same id as another kind is another target')
+  assert.equal(pinToggleOf(store, { kind: 'remote_agent', address: 'bob@pc' }), 'pin')
 })
 
 // ---- search ----
@@ -479,15 +489,16 @@ test('choices show on the message that posed an open ask and vanish when it clos
 
 // ---- agents a message names ----
 
-test('route chips: named agents in order of appearance, whole names only, at most four', () => {
+test('route chips: agents a message mentions with @, → or backticks, in order of appearance, at most four', () => {
   const names = ['ios', 'ios-push', 'api', 'web', 'db', 'ml']
-  const store = storeWith({ agents: [agentOf({ id: 'm', name: 'master' }), ...names.map((name) => agentOf({ id: name, name }))] })
+  const store = storeWith({ agents: [agentOf({ id: 'm', name: 'concierge' }), ...names.map((name) => agentOf({ id: name, name }))] })
   const routed = (text: string) => routedAgents(text, store, 'm').map((a) => a.name)
   assert.deepEqual(routed('→ api is on it, then `ios`'), ['api', 'ios'])
-  assert.deepEqual(routed('asked ios-push'), ['ios-push'], 'not also ios')
-  assert.deepEqual(routed('radios and APIs'), [], 'not inside longer words')
-  assert.deepEqual(routed('ios@mac handles it'), ['ios'])
-  assert.deepEqual(routed('master ios api web db ml'), ['ios', 'api', 'web', 'db'], 'never itself, at most four')
+  assert.deepEqual(routed('asked @ios-push'), ['ios-push'], 'not also ios')
+  assert.deepEqual(routed('the api and ios are fine'), [], 'a bare name is just a word')
+  assert.deepEqual(routed('mail me@ios'), [], 'not the end of an address')
+  assert.deepEqual(routed('@IOS handles it'), ['ios'])
+  assert.deepEqual(routed('@concierge @ios @api @web @db @ml'), ['ios', 'api', 'web', 'db'], 'never itself, at most four')
 })
 
 test('no asks sort to none', () => {

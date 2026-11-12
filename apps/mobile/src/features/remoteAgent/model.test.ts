@@ -139,7 +139,7 @@ test("another computer's agents are rows, its master too; a pinned one leads ins
   store.applySnapshot(snapshotOf({
     computers: [computer()],
     remoteAgents: [remoteOf(), remoteOf({ id: 'c1:master', name: 'master', address: 'master@mac' })],
-    pins: [{ id: 'p', target: { kind: 'remote_agent', address: 'bob@mac' }, position: 0, pinnedAt: 0 }],
+    pins: [{ id: 'p', target: { kind: 'remote_agent', address: 'bob@mac' }, pinnedAt: 0 }],
   }))
   const list = agentsListModel(store, { connection: { phase: 'live', detail: '', downSince: null }, fold: { kind: 'never' }, query: '', failureNote: null, now: NOW })
   assert.deepEqual(list.awake.map((listed) => listed.row.name), ['master'])

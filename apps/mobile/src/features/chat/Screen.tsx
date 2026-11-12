@@ -18,7 +18,7 @@ import { actionSheet, barButton, barMenu, confirm } from '../../design/menus.tsx
 import { useCore, useNow, useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
 import { useBannerHeight } from '../../navigation/UpdateBanner.tsx'
 import type { Routes, ScreenProps } from '../../navigation/routes.ts'
-import { agentByRef, asksOf, directChatOf, isBusy, listOrder, nextUnread, pinOf, stateOf, unreadElsewhereCount } from '../shared/agentFacts.ts'
+import { agentByRef, asksOf, directChatOf, isBusy, listOrder, nextUnread, pinToggleOf, stateOf, unreadElsewhereCount } from '../shared/agentFacts.ts'
 import { StateDot } from '../shared/StateDot.tsx'
 import { HistoryFooter, useHistory } from './History.tsx'
 import { AsksPanel } from './AsksPanel.tsx'
@@ -121,12 +121,13 @@ function Conversation({ agent, session, navigation, at }: {
   const busy = isBusy(agent)
   const hasGoal = session.store.goals.has(agent.id)
   const pinTarget = { kind: 'agent', agentId: agent.id } as const
-  const pinned = pinOf(store, pinTarget) !== undefined
+  const pinCommand = pinToggleOf(store, pinTarget)
+  const pinned = pinCommand === 'unpin'
 
   const onMenu = (action: ChatMenuAction) => {
     const target = { agentId: agent.id }
     switch (action) {
-      case 'pin': return void act(pinned ? 'unpin' : 'pin', { target: pinTarget }, 1, pinned ? `unpinned ${agent.name}` : `pinned ${agent.name}`)
+      case 'pin': return void act(pinCommand, { target: pinTarget }, 1, pinned ? `unpinned ${agent.name}` : `pinned ${agent.name}`)
       case 'log': return navigation.navigate('Log', { agentRef: agent.id })
       case 'goal': return navigation.navigate('Goal', { agentRef: agent.id })
       case 'summaries': return navigation.navigate('Summaries', { agentRef: agent.id })

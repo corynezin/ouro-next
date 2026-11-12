@@ -237,17 +237,20 @@ export class ChoiceTapGuard {
 
 // ---- agents a message names ----
 
-/** Agents an agent's message points at ("→ ios", "`ios`", the bare name), in the order they appear, at most 4. */
+/** An explicit mention of an agent: `@name`, `→ name` or `` `name` ``. A bare name isn't one: agents called `api` or
+ * `test` would get a chip under every message with that word. */
+const AGENT_MENTION = /(?:(?<![\w-])@|→\s*|`)([A-Za-z0-9][\w-]*)/g
+
+/** Agents an agent's message mentions, in the order they appear, at most 4. One pass over the text, whatever the number
+ * of agents. */
 export function routedAgents(text: string, store: StoreView, selfId: string): AgentEntity[] {
-  const candidates = listedAgents(store).filter((agent) => agent.id !== selfId).sort((x, y) => y.name.length - x.name.length)
-  const lower = text.toLowerCase()
+  const byName = new Map(listedAgents(store).filter((agent) => agent.id !== selfId).map((agent) => [agent.name.toLowerCase(), agent]))
   const found: AgentEntity[] = []
-  for (const agent of candidates) {
-    const escaped = agent.name.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
-    const mention = new RegExp(`(^|[^\\w/-])${escaped}(@[\\w-]+)?(?![\\w/-])`, 'i')
-    if (mention.test(text) && !found.some((f) => f.name.includes(agent.name))) found.push(agent)
+  for (const match of text.matchAll(AGENT_MENTION)) {
+    const agent = byName.get(match[1]!.toLowerCase())
+    if (agent && !found.includes(agent)) found.push(agent)
   }
-  return found.sort((x, y) => lower.indexOf(x.name.toLowerCase()) - lower.indexOf(y.name.toLowerCase())).slice(0, 4)
+  return found.slice(0, 4)
 }
 
 /** A posed ask's choices stay on its message only while the ask is open. */

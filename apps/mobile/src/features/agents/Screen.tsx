@@ -20,7 +20,7 @@ import { runningCode } from '../../native/updates.ts'
 import { useCore, useNow, useOtherServersUnread, useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
 import type { ScreenProps } from '../../navigation/routes.ts'
 import { ChoiceTapGuard, directSend } from '../chat/model.ts'
-import { listOrder, nextUnread, pinOf, quickSnooze } from '../shared/agentFacts.ts'
+import { listOrder, nextUnread, pinToggleOf, quickSnooze } from '../shared/agentFacts.ts'
 import type { Asker } from '../shared/agentFacts.ts'
 import type { NewSend } from '../../core/session/outbox.ts'
 import { openSnoozeSheet, snoozeAsk } from '../shared/snoozeSheet.ts'
@@ -37,7 +37,7 @@ type Row =
   | { kind: 'pinned'; pin: PinnedRow }
   | { kind: 'ask'; row: AskRowModel }
   | { kind: 'note'; note: NoteRow | { kind: 'empty'; text: string } }
-interface Sec { key: string; header: { kind: 'idle'; count: number } | { kind: 'asks' | 'pinned'; text: string; tone: 'orange' | 'secondary' } | null; data: Row[] }
+interface Sec { key: string; header: { kind: 'idle'; count: number } | { kind: 'asks'; text: string; tone: 'orange' | 'secondary' } | { kind: 'pinned' } | null; data: Row[] }
 
 const noteColor = { offline: 'orange', unpaired: 'red', failure: 'red', empty: 'secondary' } as const
 
@@ -70,7 +70,7 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
       out.push({ key: 'search', header: null, data: [...model.search.rows, ...empty] })
       return out
     }
-    if (model.pinned.length) out.push({ key: 'pinned', header: { kind: 'pinned', text: 'Pinned', tone: 'secondary' }, data: model.pinned.map((pin) => ({ kind: 'pinned', pin })) })
+    if (model.pinned.length) out.push({ key: 'pinned', header: { kind: 'pinned' }, data: model.pinned.map((pin) => ({ kind: 'pinned', pin })) })
     if (model.asks) out.push({ key: 'asks', header: { kind: 'asks', text: model.asks.headerText, tone: model.asks.headerTone }, data: model.asks.rows.map((row) => ({ kind: 'ask', row })) })
     if (model.awake.length) out.push({ key: 'awake', header: null, data: model.awake })
     if (model.idle.length) out.push({ key: 'idle', header: { kind: 'idle', count: model.idle.length }, data: idleOpen ? model.idle : [] })
@@ -88,7 +88,8 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
     void Haptics.notificationAsync(failure ? Haptics.NotificationFeedbackType.Error : Haptics.NotificationFeedbackType.Success)
   }
 
-  const pinSwipe = (target: PinTarget): SwipeAction => (pinOf(store, target)
+  /** `command`: pinToggleOf's, or the model's, decision. */
+  const pinSwipe = (command: 'pin' | 'unpin', target: PinTarget): SwipeAction => (command === 'unpin'
     ? { title: 'Unpin', color: C.gray, onPress: () => { void act('unpin', { target }) } }
     : { title: 'Pin', color: C.indigo, onPress: () => { void act('pin', { target }) } })
 
@@ -99,7 +100,7 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
       const target = { agentId: agent.id }
       switch (action.kind) {
         case 'pin':
-        case 'unpin': return [pinSwipe({ kind: 'agent', agentId: agent.id })]
+        case 'unpin': return [pinSwipe(action.kind, { kind: 'agent', agentId: agent.id })]
         case 'interrupt': return [{ title: 'Interrupt', color: C.orange, onPress: () => { void act('interrupt_agent', target) } }]
         case 'stop': return [{ title: 'Stop', color: C.red, onPress: () => { void act('stop_agent', target, STOP_ATTEMPTS) } }]
         case 'archive': return [{ title: 'Archive', color: C.gray, onPress: () => confirm(`Archive ${agent.name}?`,
@@ -115,7 +116,8 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
     const computer = remote && store.computers.get(remote.computerId)
     if (!remote || !computer) return []
     const control = (action: RemoteActionModel) => { void act('control_remote_agent', { remoteAgentId, action }) }
-    return [pinSwipe({ kind: 'remote_agent', address: remote.address }), ...remoteActionsOf(remote, computer).map((action): SwipeAction => {
+    const pinTarget: PinTarget = { kind: 'remote_agent', address: remote.address }
+    return [pinSwipe(pinToggleOf(store, pinTarget), pinTarget), ...remoteActionsOf(remote, computer).map((action): SwipeAction => {
       switch (action.kind) {
         case 'interrupt': return { title: 'Interrupt', color: C.orange, onPress: () => control(action) }
         case 'stop': return { title: 'Stop', color: C.red, onPress: () => control(action) }
@@ -230,7 +232,7 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
           const bg = C.secondaryBackground
           if (pin.kind === 'local') return <View style={card}><SwipeRow actions={swipes(pin.row.agentId)} background={bg}><AgentRow {...pin.row} background={bg} onOpen={open} /></SwipeRow></View>
           if (pin.kind === 'remote') return <View style={card}><SwipeRow actions={remoteSwipes(pin.row.remoteAgentId)} background={bg}><RemoteAgentRow {...pin.row} background={bg} onOpen={openRemote} /></SwipeRow></View>
-          return <View style={card}><SwipeRow actions={[pinSwipe({ kind: 'chat', chatId: pin.row.chatId })]} background={bg}><GroupRow {...pin.row} background={bg} onOpen={openGroup} /></SwipeRow></View>
+          return <View style={card}><SwipeRow actions={[pinSwipe(pinToggleOf(store, { kind: 'chat', chatId: pin.row.chatId }), { kind: 'chat', chatId: pin.row.chatId })]} background={bg}><GroupRow {...pin.row} background={bg} onOpen={openGroup} /></SwipeRow></View>
         }
         if (item.kind === 'remote') return <SwipeRow actions={remoteSwipes(item.row.remoteAgentId)}><RemoteAgentRow {...item.row} onOpen={openRemote} /></SwipeRow>
         return <SwipeRow actions={swipes(item.row.agentId)}><AgentRow {...item.row} onOpen={open} /></SwipeRow>
@@ -332,7 +334,7 @@ const GroupRow = memo(function GroupRow(row: ChatRowModel & { background?: Color
             <View style={{ flex: 1 }} />
             <Text style={s.small}>{row.timeText}</Text>
           </View>
-          <Text style={[s.sub, { color: C.secondary }]} numberOfLines={1}>{`${row.memberCount} members`}</Text>
+          <Text style={[s.sub, { color: C.secondary }]} numberOfLines={1}>{row.membersText}</Text>
           {row.previewText !== null && <Text style={s.sub} numberOfLines={2}>{row.previewText}</Text>}
         </View>
         {row.unread > 0 && <View style={s.badge}><Text style={s.badgeText}>{row.unread}</Text></View>}

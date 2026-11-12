@@ -123,8 +123,10 @@ test('the Ouro section shows the merged base, the update under way, a conflict o
   assert.equal(updating.updatingText, 'Updating to base 4…')
   assert.equal(updating.take, null)
 
-  const conflict = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts', 'b.ts'] } }, true)!
-  assert.deepEqual(conflict.note, { text: 'Base 4 touches files you changed (a.ts, b.ts). An agent, base-4, is working it out; nothing has changed yet.', color: 'orange' })
+  const conflict = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts', 'b.ts'], resolver: 'base-4-2' } }, true)!
+  assert.deepEqual(conflict.note, { text: 'Base 4 touches files you changed (a.ts, b.ts). An agent, base-4-2, is working it out; nothing has changed yet.', color: 'orange' }, 'the name the server gave it')
+  const unresolved = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'conflict', n: 4, files: ['a.ts'], resolver: null } }, true)!
+  assert.deepEqual(unresolved.note, { text: 'Base 4 touches files you changed (a.ts). No agent could start to work it out, so you were sent what to do; nothing has changed yet.', color: 'orange' })
   assert.equal(conflict.take, null)
 
   const failed = baseSection({ kind: 'taker', integrated: 3, offered, update: { state: 'failed', n: 4, why: 'the build broke' } }, true)!

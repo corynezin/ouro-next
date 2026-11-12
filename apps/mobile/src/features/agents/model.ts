@@ -5,7 +5,7 @@ import type { IdleFold } from '../../core/accounts/preferences.ts'
 import type { ConnectionStatus } from '../../core/session/syncEngine.ts'
 import {
   activityTime, askSnoozeText, listPlaceOrder, connectionNoteOf, askSymbol, asksOf, directChatOf, directChatWith, isBusy, isSnoozed, lastMessagePreview, listedAgents, listOrder, shownConnection,
-  openCopyOf, pinOf, sortAsks, sortedPins, statusLine, stateOf, topAsk, unreadElsewhereCount, unreadOf,
+  openCopyOf, pinToggleOf, sortAsks, sortedPins, statusLine, stateOf, topAsk, unreadElsewhereCount, unreadOf,
 } from '../shared/agentFacts.ts'
 import type { Asker, AskSymbol, ListPlace, PinView, ShownAsk, StoreView } from '../shared/agentFacts.ts'
 import { chatRow } from '../chats/model.ts'
@@ -222,17 +222,21 @@ export interface IntegrationView { integration<P extends 'claude' | 'openrouter'
 function pinnedRows(store: StoreView & RemoteView & PinView, now: number, remoteRows: ReadonlyMap<string, RemoteAgentRowModel>): PinnedRow[] {
   return sortedPins(store).flatMap((pin): PinnedRow[] => {
     const { target } = pin
-    if (target.kind === 'agent') {
-      const agent = store.agents.get(target.agentId)
-      return agent && agent.state.state !== 'archived' ? [{ pinId: pin.id, kind: 'local', row: agentRow(store, agent, now) }] : []
+    switch (target.kind) {
+      case 'agent': {
+        const agent = store.agents.get(target.agentId)
+        return agent && agent.state.state !== 'archived' ? [{ pinId: pin.id, kind: 'local', row: agentRow(store, agent, now) }] : []
+      }
+      case 'remote_agent': {
+        const remote = [...store.remoteAgents.values()].find((candidate) => candidate.address === target.address)
+        const row = remote && remoteRows.get(remote.id)
+        return row ? [{ pinId: pin.id, kind: 'remote', row }] : []
+      }
+      case 'chat': {
+        const chat = store.chats.get(target.chatId)
+        return chat ? [{ pinId: pin.id, kind: 'group', row: chatRow(store, chat, now, true) }] : []
+      }
     }
-    if (target.kind === 'remote_agent') {
-      const remote = [...store.remoteAgents.values()].find((candidate) => candidate.address === target.address)
-      const row = remote && remoteRows.get(remote.id)
-      return row ? [{ pinId: pin.id, kind: 'remote', row }] : []
-    }
-    const chat = store.chats.get(target.chatId)
-    return chat ? [{ pinId: pin.id, kind: 'group', row: chatRow(store, chat, now) }] : []
   })
 }
 
@@ -295,7 +299,7 @@ export type SwipeActionModel =
 export function swipeActionsOf(store: StoreView & PinView, agent: AgentEntity): SwipeActionModel[] {
   const running = stateOf(agent) === 'running'
   const goal = store.goals.get(agent.id)
-  const actions: SwipeActionModel[] = [{ kind: pinOf(store, { kind: 'agent', agentId: agent.id }) ? 'unpin' : 'pin' }]
+  const actions: SwipeActionModel[] = [{ kind: pinToggleOf(store, { kind: 'agent', agentId: agent.id }) }]
   if (running && isBusy(agent)) actions.push({ kind: 'interrupt' })
   if (goal && goal.status.status !== 'complete') actions.push({ kind: goal.status.status === 'paused' ? 'resume_goal' : 'pause_goal' })
   if (!running) actions.push({ kind: 'archive' })

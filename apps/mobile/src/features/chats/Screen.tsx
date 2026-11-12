@@ -13,6 +13,7 @@ import { failureText } from '../../core/session/serverApi.ts'
 import type { ScreenProps } from '../../navigation/routes.ts'
 import type { MessageAt } from '../chat/model.ts'
 import { chatDestination, chatsListModel, pinTargetOfChat } from './model.ts'
+import { pinToggleOf } from '../shared/agentFacts.ts'
 import type { ChatRowModel } from './model.ts'
 import { chatSearchModel, SEARCH_COPY, SEARCH_PAUSE_MS, searchFor } from './search.ts'
 import type { AnsweredSearch, HitRowModel, SearchRow, SearchSection } from './search.ts'
@@ -67,12 +68,12 @@ export function ChatsScreen({ navigation }: ScreenProps<'Chats'>) {
     const chat = session.store.chats.get(chatId)
     const target = chat && pinTargetOfChat(session.store, chat)
     if (!chat || !target) return
-    const pinned = model.mine.some((row) => row.chatId === chatId && row.pinned)
+    const command = pinToggleOf(session.store, target)
     const toggle = async () => {
-      const failure = await session.commandError(pinned ? 'unpin' : 'pin', { target }, 1)
-      if (failure) Alert.alert(pinned ? 'Couldn’t unpin' : 'Couldn’t pin', failure)
+      const failure = await session.commandError(command, { target }, 1)
+      if (failure) Alert.alert(command === 'unpin' ? 'Couldn’t unpin' : 'Couldn’t pin', failure)
     }
-    actionSheet(undefined, [{ title: pinned ? 'Unpin' : 'Pin to top', onPress: () => { void toggle() } }])
+    actionSheet(undefined, [{ title: command === 'unpin' ? 'Unpin' : 'Pin to top', onPress: () => { void toggle() } }])
   }
   const openHit = (hit: HitRowModel) => open(hit.chatId, { messageId: hit.messageId, seq: hit.seq })
   const refresh = async () => {

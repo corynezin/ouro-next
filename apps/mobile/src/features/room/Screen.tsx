@@ -18,7 +18,7 @@ import type { ChatItem } from '../chat/model.ts'
 import { Marked, useJumpToMessage } from '../chat/useJumpToMessage.tsx'
 import { HistoryFooter, useHistory } from '../chat/History.tsx'
 import { mentionOptions, pinTargetOfChat } from '../chats/model.ts'
-import { pinOf } from '../shared/agentFacts.ts'
+import { pinToggleOf } from '../shared/agentFacts.ts'
 import { groupSend, homeDeliveryNote, ROOM_COPY, roomFooter, roomHeader, senderLabel } from './model.ts'
 
 export function ChatRoomScreen({ navigation, route }: ScreenProps<'ChatRoom'>) {
@@ -49,10 +49,11 @@ export function ChatRoomScreen({ navigation, route }: ScreenProps<'ChatRoom'>) {
   })
 
   const pinTarget = chat ? pinTargetOfChat(store, chat) : null
-  const pinned = pinTarget !== null && pinOf(store, pinTarget) !== undefined
+  const pinCommand = pinTarget === null ? null : pinToggleOf(store, pinTarget)
+  const pinned = pinCommand === 'unpin'
   const togglePin = () => {
-    if (!pinTarget) return
-    void session.commandError(pinned ? 'unpin' : 'pin', { target: pinTarget }, 1).then((failure) => { if (failure) setNote(failure) })
+    if (!pinTarget || !pinCommand) return
+    void session.commandError(pinCommand, { target: pinTarget }, 1).then((failure) => { if (failure) setNote(failure) })
   }
   useLayoutEffect(() => {
     navigation.setOptions({
