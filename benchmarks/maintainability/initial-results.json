@@ -1,0 +1,2570 @@
+{
+  "format_version": 1,
+  "catalog_size": 100,
+  "attempted": 100,
+  "judgement_basis": "Provisional independent agent review; human acceptance pending.",
+  "judgements": {
+    "complete": 64,
+    "partial": 25,
+    "failed": 11
+  },
+  "by_kind": {
+    "change": {
+      "complete": 23,
+      "partial": 9,
+      "failed": 3
+    },
+    "debug": {
+      "complete": 22,
+      "partial": 6,
+      "failed": 2
+    },
+    "feature": {
+      "complete": 19,
+      "partial": 10,
+      "failed": 6
+    }
+  },
+  "by_difficulty": {
+    "easy": {
+      "complete": 24,
+      "failed": 2,
+      "partial": 4
+    },
+    "hard": {
+      "complete": 10,
+      "partial": 14,
+      "failed": 1
+    },
+    "medium": {
+      "complete": 30,
+      "partial": 7,
+      "failed": 8
+    }
+  },
+  "effort_by_kind": {
+    "change": {
+      "attempts": 35,
+      "complete": 23,
+      "usage_reported_attempts": 35,
+      "usage_missing_ids": [],
+      "median_seconds": 145.238,
+      "solver_wall_seconds": 5645.01,
+      "input_tokens": 23627516,
+      "cached_input_tokens": 22032256,
+      "output_tokens": 191081
+    },
+    "debug": {
+      "attempts": 30,
+      "complete": 22,
+      "usage_reported_attempts": 29,
+      "usage_missing_ids": [
+        "T092"
+      ],
+      "median_seconds": 134.788,
+      "solver_wall_seconds": 5204.6990000000005,
+      "input_tokens": 17744750,
+      "cached_input_tokens": 16420608,
+      "output_tokens": 116931
+    },
+    "feature": {
+      "attempts": 35,
+      "complete": 19,
+      "usage_reported_attempts": 35,
+      "usage_missing_ids": [],
+      "median_seconds": 168.37,
+      "solver_wall_seconds": 7380.650000000001,
+      "input_tokens": 36768729,
+      "cached_input_tokens": 34919040,
+      "output_tokens": 273506
+    }
+  },
+  "effort_by_difficulty": {
+    "easy": {
+      "attempts": 30,
+      "complete": 24,
+      "usage_reported_attempts": 30,
+      "usage_missing_ids": [],
+      "median_seconds": 108.0385,
+      "solver_wall_seconds": 3526.305,
+      "input_tokens": 14379631,
+      "cached_input_tokens": 13240192,
+      "output_tokens": 101478
+    },
+    "hard": {
+      "attempts": 25,
+      "complete": 10,
+      "usage_reported_attempts": 25,
+      "usage_missing_ids": [],
+      "median_seconds": 207.699,
+      "solver_wall_seconds": 6272.237,
+      "input_tokens": 35100042,
+      "cached_input_tokens": 33526016,
+      "output_tokens": 221021
+    },
+    "medium": {
+      "attempts": 45,
+      "complete": 30,
+      "usage_reported_attempts": 44,
+      "usage_missing_ids": [
+        "T092"
+      ],
+      "median_seconds": 157.838,
+      "solver_wall_seconds": 8431.817000000001,
+      "input_tokens": 28661322,
+      "cached_input_tokens": 26605696,
+      "output_tokens": 259019
+    }
+  },
+  "effort_by_judgement": {
+    "complete": {
+      "attempts": 64,
+      "complete": 64,
+      "usage_reported_attempts": 64,
+      "usage_missing_ids": [],
+      "median_seconds": 125.51050000000001,
+      "solver_wall_seconds": 8845.693,
+      "input_tokens": 37956335,
+      "cached_input_tokens": 35221504,
+      "output_tokens": 278987
+    },
+    "failed": {
+      "attempts": 11,
+      "complete": 0,
+      "usage_reported_attempts": 10,
+      "usage_missing_ids": [
+        "T092"
+      ],
+      "median_seconds": 167.842,
+      "solver_wall_seconds": 2831.637,
+      "input_tokens": 5989910,
+      "cached_input_tokens": 5549184,
+      "output_tokens": 70628
+    },
+    "partial": {
+      "attempts": 25,
+      "complete": 0,
+      "usage_reported_attempts": 25,
+      "usage_missing_ids": [],
+      "median_seconds": 211.403,
+      "solver_wall_seconds": 6553.029,
+      "input_tokens": 34194750,
+      "cached_input_tokens": 32601216,
+      "output_tokens": 231903
+    }
+  },
+  "solver_wall_seconds": 18230.359,
+  "median_solver_seconds": 153.417,
+  "usage": {
+    "input_tokens": 78140995,
+    "cached_input_tokens": 73371904,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 581518,
+    "reasoning_output_tokens": 37544
+  },
+  "usage_reported_attempts": 99,
+  "usage_missing_ids": [
+    "T092"
+  ],
+  "batches": [
+    {
+      "label": "pilot-02",
+      "model": "CLI default, user config ignored; no explicit model override",
+      "workers": 1,
+      "finished": 10,
+      "judgements": {
+        "complete": 9,
+        "partial": 1
+      }
+    },
+    {
+      "label": "batch-03",
+      "model": {
+        "model": "gpt-6.1-sol",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "finished": 10,
+      "judgements": {
+        "complete": 9,
+        "partial": 1
+      }
+    },
+    {
+      "label": "batch-04",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "finished": 10,
+      "judgements": {
+        "failed": 1,
+        "complete": 7,
+        "partial": 2
+      }
+    },
+    {
+      "label": "batch-05",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "finished": 10,
+      "judgements": {
+        "complete": 4,
+        "partial": 6
+      }
+    },
+    {
+      "label": "batch-06",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "finished": 10,
+      "judgements": {
+        "complete": 6,
+        "failed": 2,
+        "partial": 2
+      }
+    },
+    {
+      "label": "batch-07",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "finished": 10,
+      "judgements": {
+        "partial": 2,
+        "complete": 6,
+        "failed": 2
+      }
+    },
+    {
+      "label": "batch-08",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "finished": 10,
+      "judgements": {
+        "failed": 1,
+        "complete": 7,
+        "partial": 2
+      }
+    },
+    {
+      "label": "batch-09",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "finished": 10,
+      "judgements": {
+        "partial": 4,
+        "complete": 4,
+        "failed": 2
+      }
+    },
+    {
+      "label": "batch-10",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "finished": 10,
+      "judgements": {
+        "complete": 6,
+        "partial": 2,
+        "failed": 2
+      }
+    },
+    {
+      "label": "batch-11",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "finished": 10,
+      "judgements": {
+        "complete": 6,
+        "partial": 3,
+        "failed": 1
+      }
+    }
+  ],
+  "rows": [
+    {
+      "task_id": "T001",
+      "kind": "feature",
+      "difficulty": "easy",
+      "area": "mobile archive",
+      "status": "solver_finished",
+      "solver_wall_seconds": 96.116,
+      "usage": {
+        "input_tokens": 211962,
+        "cached_input_tokens": 178048,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2438,
+        "reasoning_output_tokens": 132
+      },
+      "batch": "batch-03",
+      "model": {
+        "model": "gpt-6.1-sol",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T002",
+      "kind": "feature",
+      "difficulty": "easy",
+      "area": "mobile logs",
+      "status": "solver_finished",
+      "solver_wall_seconds": 109.723,
+      "usage": {
+        "input_tokens": 391674,
+        "cached_input_tokens": 345728,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4407,
+        "reasoning_output_tokens": 577
+      },
+      "batch": "batch-06",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T003",
+      "kind": "feature",
+      "difficulty": "easy",
+      "area": "mobile text",
+      "status": "solver_finished",
+      "solver_wall_seconds": 56.852,
+      "usage": {
+        "input_tokens": 214253,
+        "cached_input_tokens": 198016,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1414,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-04",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "failed"
+    },
+    {
+      "task_id": "T004",
+      "kind": "feature",
+      "difficulty": "easy",
+      "area": "mobile files",
+      "status": "solver_finished",
+      "solver_wall_seconds": 122.583,
+      "usage": {
+        "input_tokens": 232756,
+        "cached_input_tokens": 218496,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2247,
+        "reasoning_output_tokens": 24
+      },
+      "batch": "batch-05",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T005",
+      "kind": "feature",
+      "difficulty": "easy",
+      "area": "mobile feed",
+      "status": "solver_finished",
+      "solver_wall_seconds": 156.888,
+      "usage": {
+        "input_tokens": 668075,
+        "cached_input_tokens": 604160,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5698,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-07",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T006",
+      "kind": "feature",
+      "difficulty": "easy",
+      "area": "duration parsing",
+      "status": "solver_finished",
+      "solver_wall_seconds": 104.574,
+      "usage": {
+        "input_tokens": 275754,
+        "cached_input_tokens": 249856,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3058,
+        "reasoning_output_tokens": 138
+      },
+      "batch": "pilot-02",
+      "model": "CLI default, user config ignored; no explicit model override",
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T007",
+      "kind": "feature",
+      "difficulty": "easy",
+      "area": "file metadata",
+      "status": "solver_finished",
+      "solver_wall_seconds": 96.674,
+      "usage": {
+        "input_tokens": 270643,
+        "cached_input_tokens": 226560,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2490,
+        "reasoning_output_tokens": 201
+      },
+      "batch": "pilot-02",
+      "model": "CLI default, user config ignored; no explicit model override",
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T008",
+      "kind": "feature",
+      "difficulty": "easy",
+      "area": "mobile attachments",
+      "status": "solver_finished",
+      "solver_wall_seconds": 72.745,
+      "usage": {
+        "input_tokens": 171742,
+        "cached_input_tokens": 126208,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1977,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-08",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "failed"
+    },
+    {
+      "task_id": "T009",
+      "kind": "feature",
+      "difficulty": "easy",
+      "area": "mobile goals",
+      "status": "solver_finished",
+      "solver_wall_seconds": 159.0,
+      "usage": {
+        "input_tokens": 295531,
+        "cached_input_tokens": 246272,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5052,
+        "reasoning_output_tokens": 1838
+      },
+      "batch": "batch-09",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T010",
+      "kind": "feature",
+      "difficulty": "easy",
+      "area": "workspace CLI",
+      "status": "solver_finished",
+      "solver_wall_seconds": 320.218,
+      "usage": {
+        "input_tokens": 2046041,
+        "cached_input_tokens": 1987072,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 12283,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-10",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T011",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "mobile archive",
+      "status": "solver_finished",
+      "solver_wall_seconds": 242.242,
+      "usage": {
+        "input_tokens": 690678,
+        "cached_input_tokens": 633984,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 11586,
+        "reasoning_output_tokens": 4
+      },
+      "batch": "batch-07",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "failed"
+    },
+    {
+      "task_id": "T012",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "mobile logs",
+      "status": "solver_finished",
+      "solver_wall_seconds": 179.999,
+      "usage": {
+        "input_tokens": 317101,
+        "cached_input_tokens": 286592,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 6080,
+        "reasoning_output_tokens": 747
+      },
+      "batch": "batch-03",
+      "model": {
+        "model": "gpt-6.1-sol",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T013",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "mobile settings",
+      "status": "solver_finished",
+      "solver_wall_seconds": 314.752,
+      "usage": {
+        "input_tokens": 720427,
+        "cached_input_tokens": 679552,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 16074,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-06",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "failed"
+    },
+    {
+      "task_id": "T014",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "mobile chat",
+      "status": "solver_finished",
+      "solver_wall_seconds": 229.336,
+      "usage": {
+        "input_tokens": 1419067,
+        "cached_input_tokens": 1360640,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 9481,
+        "reasoning_output_tokens": 959
+      },
+      "batch": "batch-08",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T015",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "mobile feed",
+      "status": "solver_finished",
+      "solver_wall_seconds": 167.251,
+      "usage": {
+        "input_tokens": 633635,
+        "cached_input_tokens": 571136,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5806,
+        "reasoning_output_tokens": 284
+      },
+      "batch": "batch-08",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T016",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "CLI reporting",
+      "status": "solver_finished",
+      "solver_wall_seconds": 180.363,
+      "usage": {
+        "input_tokens": 1391527,
+        "cached_input_tokens": 1331712,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4674,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-04",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T017",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "CLI transcript",
+      "status": "solver_finished",
+      "solver_wall_seconds": 211.403,
+      "usage": {
+        "input_tokens": 957212,
+        "cached_input_tokens": 899200,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 7903,
+        "reasoning_output_tokens": 804
+      },
+      "batch": "batch-05",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T018",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "notification settings",
+      "status": "solver_finished",
+      "solver_wall_seconds": 333.893,
+      "usage": {
+        "input_tokens": 887603,
+        "cached_input_tokens": 790016,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 10119,
+        "reasoning_output_tokens": 1558
+      },
+      "batch": "batch-09",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T019",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "mobile composer",
+      "status": "solver_finished",
+      "solver_wall_seconds": 117.479,
+      "usage": {
+        "input_tokens": 322163,
+        "cached_input_tokens": 288256,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2771,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-04",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T020",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "mobile servers",
+      "status": "solver_finished",
+      "solver_wall_seconds": 135.568,
+      "usage": {
+        "input_tokens": 569838,
+        "cached_input_tokens": 501504,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5339,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-10",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T021",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "mobile asks",
+      "status": "solver_finished",
+      "solver_wall_seconds": 130.866,
+      "usage": {
+        "input_tokens": 278847,
+        "cached_input_tokens": 256768,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4164,
+        "reasoning_output_tokens": 262
+      },
+      "batch": "pilot-02",
+      "model": "CLI default, user config ignored; no explicit model override",
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T022",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "goal inspection",
+      "status": "solver_finished",
+      "solver_wall_seconds": 249.316,
+      "usage": {
+        "input_tokens": 899742,
+        "cached_input_tokens": 851840,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 10035,
+        "reasoning_output_tokens": 1921
+      },
+      "batch": "batch-11",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T023",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "mobile accessibility",
+      "status": "solver_finished",
+      "solver_wall_seconds": 152.199,
+      "usage": {
+        "input_tokens": 570284,
+        "cached_input_tokens": 536064,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3518,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-05",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T024",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "mobile agent creation",
+      "status": "solver_finished",
+      "solver_wall_seconds": 157.838,
+      "usage": {
+        "input_tokens": 367679,
+        "cached_input_tokens": 343680,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5067,
+        "reasoning_output_tokens": 830
+      },
+      "batch": "batch-03",
+      "model": {
+        "model": "gpt-6.1-sol",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T025",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "CLI asks",
+      "status": "solver_finished",
+      "solver_wall_seconds": 167.842,
+      "usage": {
+        "input_tokens": 676208,
+        "cached_input_tokens": 638464,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 7487,
+        "reasoning_output_tokens": 269
+      },
+      "batch": "batch-06",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "failed"
+    },
+    {
+      "task_id": "T026",
+      "kind": "feature",
+      "difficulty": "medium",
+      "area": "mobile chat info",
+      "status": "solver_finished",
+      "solver_wall_seconds": 188.809,
+      "usage": {
+        "input_tokens": 640375,
+        "cached_input_tokens": 576000,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 7999,
+        "reasoning_output_tokens": 77
+      },
+      "batch": "batch-11",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T027",
+      "kind": "feature",
+      "difficulty": "hard",
+      "area": "cross-app notes",
+      "status": "solver_finished",
+      "solver_wall_seconds": 515.743,
+      "usage": {
+        "input_tokens": 3632976,
+        "cached_input_tokens": 3539712,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 20365,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-04",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T028",
+      "kind": "feature",
+      "difficulty": "hard",
+      "area": "scheduled messages",
+      "status": "solver_finished",
+      "solver_wall_seconds": 224.154,
+      "usage": {
+        "input_tokens": 1385501,
+        "cached_input_tokens": 1300864,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 9188,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-07",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "failed"
+    },
+    {
+      "task_id": "T029",
+      "kind": "feature",
+      "difficulty": "hard",
+      "area": "cross-app tags",
+      "status": "solver_finished",
+      "solver_wall_seconds": 802.49,
+      "usage": {
+        "input_tokens": 9418594,
+        "cached_input_tokens": 9285760,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 31025,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-05",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T030",
+      "kind": "feature",
+      "difficulty": "hard",
+      "area": "mobile offline search",
+      "status": "solver_finished",
+      "solver_wall_seconds": 211.826,
+      "usage": {
+        "input_tokens": 539318,
+        "cached_input_tokens": 498304,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 7194,
+        "reasoning_output_tokens": 870
+      },
+      "batch": "pilot-02",
+      "model": "CLI default, user config ignored; no explicit model override",
+      "workers": 1,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T031",
+      "kind": "feature",
+      "difficulty": "hard",
+      "area": "cross-app goal history",
+      "status": "solver_finished",
+      "solver_wall_seconds": 168.37,
+      "usage": {
+        "input_tokens": 550727,
+        "cached_input_tokens": 520576,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5323,
+        "reasoning_output_tokens": 556
+      },
+      "batch": "batch-03",
+      "model": {
+        "model": "gpt-6.1-sol",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T032",
+      "kind": "feature",
+      "difficulty": "hard",
+      "area": "CLI batch operations",
+      "status": "solver_finished",
+      "solver_wall_seconds": 125.182,
+      "usage": {
+        "input_tokens": 742894,
+        "cached_input_tokens": 696192,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4896,
+        "reasoning_output_tokens": 1255
+      },
+      "batch": "batch-06",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T033",
+      "kind": "feature",
+      "difficulty": "hard",
+      "area": "cross-app drafts",
+      "status": "solver_finished",
+      "solver_wall_seconds": 423.898,
+      "usage": {
+        "input_tokens": 2005989,
+        "cached_input_tokens": 1919488,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 18245,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-09",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T034",
+      "kind": "feature",
+      "difficulty": "hard",
+      "area": "distributed delivery",
+      "status": "solver_finished",
+      "solver_wall_seconds": 203.721,
+      "usage": {
+        "input_tokens": 967974,
+        "cached_input_tokens": 884224,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 7243,
+        "reasoning_output_tokens": 1171
+      },
+      "batch": "batch-10",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T035",
+      "kind": "feature",
+      "difficulty": "hard",
+      "area": "mobile conversation export",
+      "status": "solver_finished",
+      "solver_wall_seconds": 250.737,
+      "usage": {
+        "input_tokens": 1403939,
+        "cached_input_tokens": 1348096,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 10860,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-11",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T036",
+      "kind": "change",
+      "difficulty": "easy",
+      "area": "mobile wording",
+      "status": "solver_finished",
+      "solver_wall_seconds": 50.523,
+      "usage": {
+        "input_tokens": 154232,
+        "cached_input_tokens": 133248,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1255,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-07",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T037",
+      "kind": "change",
+      "difficulty": "easy",
+      "area": "mobile logs",
+      "status": "solver_finished",
+      "solver_wall_seconds": 40.08,
+      "usage": {
+        "input_tokens": 206910,
+        "cached_input_tokens": 184832,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1319,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-06",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T038",
+      "kind": "change",
+      "difficulty": "easy",
+      "area": "mobile text",
+      "status": "solver_finished",
+      "solver_wall_seconds": 46.907,
+      "usage": {
+        "input_tokens": 131602,
+        "cached_input_tokens": 121728,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 905,
+        "reasoning_output_tokens": 36
+      },
+      "batch": "pilot-02",
+      "model": "CLI default, user config ignored; no explicit model override",
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T039",
+      "kind": "change",
+      "difficulty": "easy",
+      "area": "mobile asks",
+      "status": "solver_finished",
+      "solver_wall_seconds": 111.213,
+      "usage": {
+        "input_tokens": 392317,
+        "cached_input_tokens": 350848,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2110,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-08",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T040",
+      "kind": "change",
+      "difficulty": "easy",
+      "area": "mobile attachments",
+      "status": "solver_finished",
+      "solver_wall_seconds": 76.84,
+      "usage": {
+        "input_tokens": 300286,
+        "cached_input_tokens": 267264,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2404,
+        "reasoning_output_tokens": 97
+      },
+      "batch": "batch-09",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T041",
+      "kind": "change",
+      "difficulty": "easy",
+      "area": "duration formatting",
+      "status": "solver_finished",
+      "solver_wall_seconds": 116.348,
+      "usage": {
+        "input_tokens": 617122,
+        "cached_input_tokens": 571392,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3494,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-04",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T042",
+      "kind": "change",
+      "difficulty": "easy",
+      "area": "notification defaults",
+      "status": "solver_finished",
+      "solver_wall_seconds": 78.912,
+      "usage": {
+        "input_tokens": 199456,
+        "cached_input_tokens": 163072,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1586,
+        "reasoning_output_tokens": 184
+      },
+      "batch": "batch-03",
+      "model": {
+        "model": "gpt-6.1-sol",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T043",
+      "kind": "change",
+      "difficulty": "easy",
+      "area": "mobile archive",
+      "status": "solver_finished",
+      "solver_wall_seconds": 207.129,
+      "usage": {
+        "input_tokens": 1107120,
+        "cached_input_tokens": 1044352,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3815,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-10",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T044",
+      "kind": "change",
+      "difficulty": "easy",
+      "area": "mobile status",
+      "status": "solver_finished",
+      "solver_wall_seconds": 106.354,
+      "usage": {
+        "input_tokens": 395075,
+        "cached_input_tokens": 366720,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4255,
+        "reasoning_output_tokens": 1008
+      },
+      "batch": "batch-11",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T045",
+      "kind": "change",
+      "difficulty": "easy",
+      "area": "file naming",
+      "status": "solver_finished",
+      "solver_wall_seconds": 167.588,
+      "usage": {
+        "input_tokens": 461495,
+        "cached_input_tokens": 416512,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3745,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-05",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T046",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "mobile agents ordering",
+      "status": "solver_finished",
+      "solver_wall_seconds": 40.899,
+      "usage": {
+        "input_tokens": 207812,
+        "cached_input_tokens": 183168,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1421,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-07",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T047",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "mobile agent search",
+      "status": "solver_finished",
+      "solver_wall_seconds": 130.566,
+      "usage": {
+        "input_tokens": 399009,
+        "cached_input_tokens": 338944,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 6086,
+        "reasoning_output_tokens": 1297
+      },
+      "batch": "batch-07",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T048",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "mobile idle grouping",
+      "status": "solver_finished",
+      "solver_wall_seconds": 145.238,
+      "usage": {
+        "input_tokens": 992059,
+        "cached_input_tokens": 907776,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5557,
+        "reasoning_output_tokens": 1085
+      },
+      "batch": "batch-07",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T049",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "mobile feed ordering",
+      "status": "solver_finished",
+      "solver_wall_seconds": 303.459,
+      "usage": {
+        "input_tokens": 669107,
+        "cached_input_tokens": 591488,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 12494,
+        "reasoning_output_tokens": 371
+      },
+      "batch": "batch-08",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T050",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "mobile archive restore",
+      "status": "solver_finished",
+      "solver_wall_seconds": 82.527,
+      "usage": {
+        "input_tokens": 400104,
+        "cached_input_tokens": 351360,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2788,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-08",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T051",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "mobile logs loading",
+      "status": "solver_finished",
+      "solver_wall_seconds": 97.655,
+      "usage": {
+        "input_tokens": 352413,
+        "cached_input_tokens": 313856,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3774,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-09",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "failed"
+    },
+    {
+      "task_id": "T052",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "duration parsing",
+      "status": "solver_finished",
+      "solver_wall_seconds": 114.66,
+      "usage": {
+        "input_tokens": 353038,
+        "cached_input_tokens": 328064,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2902,
+        "reasoning_output_tokens": 115
+      },
+      "batch": "pilot-02",
+      "model": "CLI default, user config ignored; no explicit model override",
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T053",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "snooze parsing",
+      "status": "solver_finished",
+      "solver_wall_seconds": 72.798,
+      "usage": {
+        "input_tokens": 343868,
+        "cached_input_tokens": 319232,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2179,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-04",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T054",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "notifications",
+      "status": "solver_finished",
+      "solver_wall_seconds": 150.128,
+      "usage": {
+        "input_tokens": 573272,
+        "cached_input_tokens": 549248,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5966,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-09",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T055",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "workspace resolution",
+      "status": "solver_finished",
+      "solver_wall_seconds": 111.253,
+      "usage": {
+        "input_tokens": 277903,
+        "cached_input_tokens": 256768,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2620,
+        "reasoning_output_tokens": 119
+      },
+      "batch": "batch-03",
+      "model": {
+        "model": "gpt-6.1-sol",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T056",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "mobile URL entry",
+      "status": "solver_finished",
+      "solver_wall_seconds": 148.389,
+      "usage": {
+        "input_tokens": 410611,
+        "cached_input_tokens": 381568,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4301,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-05",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T057",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "file metadata",
+      "status": "solver_finished",
+      "solver_wall_seconds": 106.648,
+      "usage": {
+        "input_tokens": 473060,
+        "cached_input_tokens": 425216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3799,
+        "reasoning_output_tokens": 590
+      },
+      "batch": "batch-06",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T058",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "mobile code display",
+      "status": "solver_finished",
+      "solver_wall_seconds": 256.674,
+      "usage": {
+        "input_tokens": 1068186,
+        "cached_input_tokens": 1018368,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 11472,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-10",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "failed"
+    },
+    {
+      "task_id": "T059",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "mobile file failures",
+      "status": "solver_finished",
+      "solver_wall_seconds": 154.635,
+      "usage": {
+        "input_tokens": 522913,
+        "cached_input_tokens": 496128,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 6272,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-10",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "failed"
+    },
+    {
+      "task_id": "T060",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "mobile asks",
+      "status": "solver_finished",
+      "solver_wall_seconds": 202.407,
+      "usage": {
+        "input_tokens": 591758,
+        "cached_input_tokens": 540416,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 8718,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-11",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T061",
+      "kind": "change",
+      "difficulty": "medium",
+      "area": "CLI workspace output",
+      "status": "solver_finished",
+      "solver_wall_seconds": 268.119,
+      "usage": {
+        "input_tokens": 2332313,
+        "cached_input_tokens": 2264448,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 9948,
+        "reasoning_output_tokens": 1348
+      },
+      "batch": "batch-11",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T062",
+      "kind": "change",
+      "difficulty": "hard",
+      "area": "mobile search query",
+      "status": "solver_finished",
+      "solver_wall_seconds": 204.863,
+      "usage": {
+        "input_tokens": 690950,
+        "cached_input_tokens": 601600,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 6489,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-08",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T063",
+      "kind": "change",
+      "difficulty": "hard",
+      "area": "notification scope",
+      "status": "solver_finished",
+      "solver_wall_seconds": 373.444,
+      "usage": {
+        "input_tokens": 999128,
+        "cached_input_tokens": 934400,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 14797,
+        "reasoning_output_tokens": 2739
+      },
+      "batch": "batch-09",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T064",
+      "kind": "change",
+      "difficulty": "hard",
+      "area": "mobile server settings",
+      "status": "solver_finished",
+      "solver_wall_seconds": 108.386,
+      "usage": {
+        "input_tokens": 334698,
+        "cached_input_tokens": 305792,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2856,
+        "reasoning_output_tokens": 92
+      },
+      "batch": "pilot-02",
+      "model": "CLI default, user config ignored; no explicit model override",
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T065",
+      "kind": "change",
+      "difficulty": "hard",
+      "area": "goal retries",
+      "status": "solver_finished",
+      "solver_wall_seconds": 207.699,
+      "usage": {
+        "input_tokens": 803631,
+        "cached_input_tokens": 758528,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 7140,
+        "reasoning_output_tokens": 763
+      },
+      "batch": "batch-03",
+      "model": {
+        "model": "gpt-6.1-sol",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T066",
+      "kind": "change",
+      "difficulty": "hard",
+      "area": "CLI message targeting",
+      "status": "solver_finished",
+      "solver_wall_seconds": 359.161,
+      "usage": {
+        "input_tokens": 2111637,
+        "cached_input_tokens": 2057600,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 11715,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-04",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T067",
+      "kind": "change",
+      "difficulty": "hard",
+      "area": "mobile pending messages",
+      "status": "solver_finished",
+      "solver_wall_seconds": 161.755,
+      "usage": {
+        "input_tokens": 801094,
+        "cached_input_tokens": 748288,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4359,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-05",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T068",
+      "kind": "change",
+      "difficulty": "hard",
+      "area": "distributed retry policy",
+      "status": "solver_finished",
+      "solver_wall_seconds": 234.013,
+      "usage": {
+        "input_tokens": 1236410,
+        "cached_input_tokens": 1136896,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 7814,
+        "reasoning_output_tokens": 1514
+      },
+      "batch": "batch-06",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T069",
+      "kind": "change",
+      "difficulty": "hard",
+      "area": "mobile connection behavior",
+      "status": "solver_finished",
+      "solver_wall_seconds": 226.5,
+      "usage": {
+        "input_tokens": 1146396,
+        "cached_input_tokens": 1098240,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 9739,
+        "reasoning_output_tokens": 2271
+      },
+      "batch": "batch-10",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T070",
+      "kind": "change",
+      "difficulty": "hard",
+      "area": "cross-app goal edits",
+      "status": "solver_finished",
+      "solver_wall_seconds": 381.24,
+      "usage": {
+        "input_tokens": 1570531,
+        "cached_input_tokens": 1504896,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 10987,
+        "reasoning_output_tokens": 2584
+      },
+      "batch": "batch-11",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T071",
+      "kind": "debug",
+      "difficulty": "easy",
+      "area": "read tracking",
+      "status": "solver_finished",
+      "solver_wall_seconds": 71.198,
+      "usage": {
+        "input_tokens": 210049,
+        "cached_input_tokens": 193536,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1866,
+        "reasoning_output_tokens": 161
+      },
+      "batch": "pilot-02",
+      "model": "CLI default, user config ignored; no explicit model override",
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T072",
+      "kind": "debug",
+      "difficulty": "easy",
+      "area": "notifications",
+      "status": "solver_finished",
+      "solver_wall_seconds": 127.441,
+      "usage": {
+        "input_tokens": 283918,
+        "cached_input_tokens": 250496,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3457,
+        "reasoning_output_tokens": 243
+      },
+      "batch": "batch-03",
+      "model": {
+        "model": "gpt-6.1-sol",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T073",
+      "kind": "debug",
+      "difficulty": "easy",
+      "area": "snooze parsing",
+      "status": "solver_finished",
+      "solver_wall_seconds": 241.9,
+      "usage": {
+        "input_tokens": 1175710,
+        "cached_input_tokens": 1135232,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5103,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-04",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T074",
+      "kind": "debug",
+      "difficulty": "easy",
+      "area": "file metadata",
+      "status": "solver_finished",
+      "solver_wall_seconds": 83.508,
+      "usage": {
+        "input_tokens": 320529,
+        "cached_input_tokens": 282368,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1951,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-05",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T075",
+      "kind": "debug",
+      "difficulty": "easy",
+      "area": "mobile search",
+      "status": "solver_finished",
+      "solver_wall_seconds": 142.135,
+      "usage": {
+        "input_tokens": 784525,
+        "cached_input_tokens": 748928,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5856,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-06",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T076",
+      "kind": "debug",
+      "difficulty": "easy",
+      "area": "mobile workspace display",
+      "status": "solver_finished",
+      "solver_wall_seconds": 125.839,
+      "usage": {
+        "input_tokens": 648377,
+        "cached_input_tokens": 615936,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5041,
+        "reasoning_output_tokens": 414
+      },
+      "batch": "batch-07",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T077",
+      "kind": "debug",
+      "difficulty": "easy",
+      "area": "mobile draft identity",
+      "status": "solver_finished",
+      "solver_wall_seconds": 98.409,
+      "usage": {
+        "input_tokens": 343364,
+        "cached_input_tokens": 291968,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1981,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-08",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T078",
+      "kind": "debug",
+      "difficulty": "easy",
+      "area": "mobile status",
+      "status": "solver_finished",
+      "solver_wall_seconds": 68.777,
+      "usage": {
+        "input_tokens": 316213,
+        "cached_input_tokens": 264832,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2096,
+        "reasoning_output_tokens": 268
+      },
+      "batch": "batch-09",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T079",
+      "kind": "debug",
+      "difficulty": "easy",
+      "area": "file naming",
+      "status": "solver_finished",
+      "solver_wall_seconds": 119.119,
+      "usage": {
+        "input_tokens": 482516,
+        "cached_input_tokens": 435584,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3199,
+        "reasoning_output_tokens": 168
+      },
+      "batch": "batch-10",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T080",
+      "kind": "debug",
+      "difficulty": "easy",
+      "area": "read merging",
+      "status": "solver_finished",
+      "solver_wall_seconds": 150.712,
+      "usage": {
+        "input_tokens": 1070384,
+        "cached_input_tokens": 1020928,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4976,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-11",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T081",
+      "kind": "debug",
+      "difficulty": "medium",
+      "area": "workspace routing",
+      "status": "solver_finished",
+      "solver_wall_seconds": 109.8,
+      "usage": {
+        "input_tokens": 390052,
+        "cached_input_tokens": 363520,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2557,
+        "reasoning_output_tokens": 242
+      },
+      "batch": "pilot-02",
+      "model": "CLI default, user config ignored; no explicit model override",
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T082",
+      "kind": "debug",
+      "difficulty": "medium",
+      "area": "workspace routing",
+      "status": "solver_finished",
+      "solver_wall_seconds": 110.385,
+      "usage": {
+        "input_tokens": 277505,
+        "cached_input_tokens": 229376,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3061,
+        "reasoning_output_tokens": 322
+      },
+      "batch": "batch-03",
+      "model": {
+        "model": "gpt-6.1-sol",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T083",
+      "kind": "debug",
+      "difficulty": "medium",
+      "area": "mobile storage",
+      "status": "solver_finished",
+      "solver_wall_seconds": 217.112,
+      "usage": {
+        "input_tokens": 1074542,
+        "cached_input_tokens": 1001088,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 8257,
+        "reasoning_output_tokens": 256
+      },
+      "batch": "batch-07",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T084",
+      "kind": "debug",
+      "difficulty": "medium",
+      "area": "mobile recovery",
+      "status": "solver_finished",
+      "solver_wall_seconds": 109.892,
+      "usage": {
+        "input_tokens": 400133,
+        "cached_input_tokens": 375040,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4490,
+        "reasoning_output_tokens": 161
+      },
+      "batch": "batch-08",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T085",
+      "kind": "debug",
+      "difficulty": "medium",
+      "area": "notification priority",
+      "status": "solver_finished",
+      "solver_wall_seconds": 168.883,
+      "usage": {
+        "input_tokens": 802145,
+        "cached_input_tokens": 752896,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2842,
+        "reasoning_output_tokens": 209
+      },
+      "batch": "batch-09",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T086",
+      "kind": "debug",
+      "difficulty": "medium",
+      "area": "snooze synchronization",
+      "status": "solver_finished",
+      "solver_wall_seconds": 168.978,
+      "usage": {
+        "input_tokens": 827349,
+        "cached_input_tokens": 782336,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4614,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-04",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T087",
+      "kind": "debug",
+      "difficulty": "medium",
+      "area": "notification time zones",
+      "status": "solver_finished",
+      "solver_wall_seconds": 44.051,
+      "usage": {
+        "input_tokens": 187589,
+        "cached_input_tokens": 143744,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1384,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-09",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "failed"
+    },
+    {
+      "task_id": "T088",
+      "kind": "debug",
+      "difficulty": "medium",
+      "area": "mobile archive restore",
+      "status": "solver_finished",
+      "solver_wall_seconds": 164.05,
+      "usage": {
+        "input_tokens": 797880,
+        "cached_input_tokens": 748544,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5509,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-10",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T089",
+      "kind": "debug",
+      "difficulty": "medium",
+      "area": "log ingestion",
+      "status": "solver_finished",
+      "solver_wall_seconds": 237.376,
+      "usage": {
+        "input_tokens": 808630,
+        "cached_input_tokens": 753536,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 8149,
+        "reasoning_output_tokens": 1829
+      },
+      "batch": "batch-06",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T090",
+      "kind": "debug",
+      "difficulty": "medium",
+      "area": "remote queue ordering",
+      "status": "solver_finished",
+      "solver_wall_seconds": 187.004,
+      "usage": {
+        "input_tokens": 1034022,
+        "cached_input_tokens": 943104,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4349,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-05",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T091",
+      "kind": "debug",
+      "difficulty": "medium",
+      "area": "mobile pending UI",
+      "status": "solver_finished",
+      "solver_wall_seconds": 117.06,
+      "usage": {
+        "input_tokens": 567816,
+        "cached_input_tokens": 534400,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4064,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-10",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T092",
+      "kind": "debug",
+      "difficulty": "medium",
+      "area": "read address identity",
+      "status": "timeout",
+      "solver_wall_seconds": 1200.035,
+      "usage": null,
+      "batch": "batch-11",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "failed"
+    },
+    {
+      "task_id": "T093",
+      "kind": "debug",
+      "difficulty": "medium",
+      "area": "mobile attachment removal",
+      "status": "solver_finished",
+      "solver_wall_seconds": 51.98,
+      "usage": {
+        "input_tokens": 183847,
+        "cached_input_tokens": 166656,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1343,
+        "reasoning_output_tokens": 102
+      },
+      "batch": "batch-11",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T094",
+      "kind": "debug",
+      "difficulty": "hard",
+      "area": "session retry ordering",
+      "status": "solver_finished",
+      "solver_wall_seconds": 163.239,
+      "usage": {
+        "input_tokens": 1049985,
+        "cached_input_tokens": 977920,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3573,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-04",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T095",
+      "kind": "debug",
+      "difficulty": "hard",
+      "area": "session completion",
+      "status": "solver_finished",
+      "solver_wall_seconds": 126.904,
+      "usage": {
+        "input_tokens": 435905,
+        "cached_input_tokens": 405120,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3320,
+        "reasoning_output_tokens": 101
+      },
+      "batch": "pilot-02",
+      "model": "CLI default, user config ignored; no explicit model override",
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T096",
+      "kind": "debug",
+      "difficulty": "hard",
+      "area": "session duplicate receipts",
+      "status": "solver_finished",
+      "solver_wall_seconds": 115.068,
+      "usage": {
+        "input_tokens": 304981,
+        "cached_input_tokens": 257792,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2394,
+        "reasoning_output_tokens": 246
+      },
+      "batch": "batch-03",
+      "model": {
+        "model": "gpt-6.1-sol",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 1,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T097",
+      "kind": "debug",
+      "difficulty": "hard",
+      "area": "gateway history identity",
+      "status": "solver_finished",
+      "solver_wall_seconds": 160.386,
+      "usage": {
+        "input_tokens": 536939,
+        "cached_input_tokens": 459392,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4715,
+        "reasoning_output_tokens": 1204
+      },
+      "batch": "batch-07",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "complete"
+    },
+    {
+      "task_id": "T098",
+      "kind": "debug",
+      "difficulty": "hard",
+      "area": "gateway duplicate messages",
+      "status": "solver_finished",
+      "solver_wall_seconds": 220.101,
+      "usage": {
+        "input_tokens": 775011,
+        "cached_input_tokens": 730624,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5317,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-05",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T099",
+      "kind": "debug",
+      "difficulty": "hard",
+      "area": "mobile asynchronous state",
+      "status": "solver_finished",
+      "solver_wall_seconds": 154.856,
+      "usage": {
+        "input_tokens": 1053935,
+        "cached_input_tokens": 1009792,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 6172,
+        "reasoning_output_tokens": 0
+      },
+      "batch": "batch-06",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    },
+    {
+      "task_id": "T100",
+      "kind": "debug",
+      "difficulty": "hard",
+      "area": "file upload cleanup",
+      "status": "solver_finished",
+      "solver_wall_seconds": 148.501,
+      "usage": {
+        "input_tokens": 600899,
+        "cached_input_tokens": 545920,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5295,
+        "reasoning_output_tokens": 928
+      },
+      "batch": "batch-08",
+      "model": {
+        "model": "gpt-6-luna",
+        "reasoning": "low",
+        "user_config_ignored": true
+      },
+      "workers": 2,
+      "judgement": "partial"
+    }
+  ]
+}
