@@ -12,12 +12,20 @@ export function useIntegration<P extends IntegrationProvider>(provider: P): Extr
   return session.store.integration(provider)
 }
 
-/** Hosted so its width comes from the form row; a bare TextInput there grows with its text and runs off screen. `shown`: not hidden as it is typed, for the parts of a key that aren't secret, like an id. */
-export function SecretField({ value, onChange, placeholder, onSubmit, shown }: { value: string; onChange: (text: string) => void; placeholder: string; onSubmit: () => void; shown?: boolean }) {
+interface KeyFieldProps { value: string; onChange: (text: string) => void; placeholder: string; onSubmit: () => void }
+
+/** A field for a pasted secret, hidden as it is typed. */
+export const SecretField = (props: KeyFieldProps) => <HostedField {...props} secure />
+
+/** A field for the parts of a key that aren't secret, like its id or region: shown as typed. */
+export const PlainKeyField = (props: KeyFieldProps) => <HostedField {...props} secure={false} />
+
+/** Hosted so its width comes from the form row; a bare TextInput there grows with its text and runs off screen. */
+function HostedField({ value, onChange, placeholder, onSubmit, secure }: KeyFieldProps & { secure: boolean }) {
   return (
     <RNHostView matchContents={{ vertical: true }}>
       <TextInput style={s.input} placeholder={placeholder} value={value} onChangeText={onChange} autoCapitalize="none" autoCorrect={false}
-        secureTextEntry={!shown} returnKeyType="done" onSubmitEditing={onSubmit} placeholderTextColor={C.tertiary} />
+        secureTextEntry={secure} returnKeyType="done" onSubmitEditing={onSubmit} placeholderTextColor={C.tertiary} />
     </RNHostView>
   )
 }

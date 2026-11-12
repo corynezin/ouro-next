@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { AwsActionResult, AwsIntegrationState, ChatgptLoginStart, ClaudeLoginStart, IntegrationActionResult } from '@ouro/contract'
 import type { IntegrationEntity, IntegrationProvider } from '@ouro/contract'
-import { JourneyRun, standInScript, waitFor } from './harness.ts'
+import { AppClient as Client, JourneyRun, standInScript, waitFor } from './harness.ts'
 import type { AppClient } from './harness.ts'
 
 const run = new JourneyRun()
@@ -17,6 +17,9 @@ before(async () => {
   phone = await run.pairDevice()
 })
 after(() => run.cleanup())
+
+/** Shaped like an AWS secret, so the server's format check lets it through to the stand-in. */
+const AWS_SECRET = 'awsSecretTakenK7MDENGbPxRfiCYEXAMPLEKEY'
 
 const accept = (secret: string) => {
   mkdirSync(run.accountsDir, { recursive: true })
@@ -129,14 +132,24 @@ test('OpenRouter keys and GitHub tokens: refused, taken and removed; bad request
     return answer
   }
   assert.deepEqual(AwsIntegrationState.parse(await awsOf('GET', 'aws')), { status: 'not_connected' })
-  const awsKey = { accessKeyId: 'AKIAIOSFODNN7EXAMPLE', secretAccessKey: 'aws-secret-taken', region: 'us-west-2' }
+  const awsKey = { accessKeyId: 'AKIAIOSFODNN7EXAMPLE', secretAccessKey: AWS_SECRET, region: 'us-west-2' }
   assert.equal(AwsActionResult.parse(await awsOf('POST', 'aws/credentials', awsKey)).accepted, false)
-  accept('aws-secret-taken')
+  assert.deepEqual(AwsActionResult.parse(await awsOf('POST', 'aws/credentials', { ...awsKey, accessKeyId: 'ASIAIOSFODNN7EXAMPLE' })), {
+    accepted: false, why: 'that is a temporary key (ASIA…), which expires; make an access key for an IAM user (AKIA…)',
+  }, 'the format is checked before the key goes anywhere')
+  accept(AWS_SECRET)
   const awsConnected = AwsActionResult.parse(await awsOf('POST', 'aws/credentials', awsKey))
   assert.ok(awsConnected.accepted)
   assert.deepEqual(awsConnected.state, { status: 'connected', accessKeyId: 'AKIA…MPLE', region: 'us-west-2', accountId: '123456789012', arn: 'arn:aws:iam::123456789012:user/ouro-agents', problem: null })
   assert.deepEqual(AwsIntegrationState.parse(await awsOf('GET', 'aws')), awsConnected.state)
   assert.ok(!(await phone.snapshot()).integrations.some((integration) => (integration.provider as string) === 'aws'))
+  // Disconnecting removes the machine's default key, which may be the owner's own: an invited person can't.
+  const { code } = await phone.command('start_pairing', { inviteePersonName: 'guest' })
+  const paired = await (await fetch(`${run.url}/v2/pair`, { method: 'POST', body: JSON.stringify({ code, deviceName: 'guest-phone' }) })).json() as { deviceToken: string; deviceId: string }
+  const guest = new Client(run, paired.deviceToken, paired.deviceId)
+  const refused = await guest.integration('POST', 'aws/disconnect')
+  assert.equal(refused.status, 403, JSON.stringify(refused.body))
+  assert.deepEqual(AwsIntegrationState.parse(await awsOf('GET', 'aws')), awsConnected.state, 'still connected')
   assert.deepEqual(AwsActionResult.parse(await awsOf('POST', 'aws/disconnect')), { accepted: true, state: { status: 'not_connected' } })
   assert.equal((await phone.integration('POST', 'aws/credentials', { accessKeyId: 'AKIA' })).status, 400)
 
@@ -144,5 +157,5 @@ test('OpenRouter keys and GitHub tokens: refused, taken and removed; bad request
   assert.equal((await phone.integration('POST', 'github/teleport')).status, 404)
   const anonymous = await fetch(`${run.url}/v2/integrations/claude/login/start`, { method: 'POST' })
   assert.equal(anonymous.status, 401)
-  assert.ok(!run.log().includes('sk-or-taken') && !run.log().includes('right-code') && !run.log().includes('aws-secret-taken'), 'no secret is ever logged')
+  assert.ok(!run.log().includes('sk-or-taken') && !run.log().includes('right-code') && !run.log().includes(AWS_SECRET), 'no secret is ever logged')
 })

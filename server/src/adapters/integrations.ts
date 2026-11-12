@@ -8,13 +8,11 @@ import type {
 } from '@ouro/contract'
 import type { PlanWindowReading } from '../domain/usage.ts'
 import type { AwsTools } from './aws.ts'
-import { shortKeyId } from './aws.ts'
+import { awsCredentialsProblem, shortKeyId } from './aws.ts'
+import type { ActionOutcome } from './provider-outcome.ts'
 
-/** A provider's answer to a code, key or token. `why`: its refusal, fit to show the person. */
-export type ActionOutcome = { accepted: true } | { accepted: false; why: string }
-
-/** The provider or its tool couldn't be reached: nothing changed, and trying again may work. */
-export class ProviderUnreachable extends Error {}
+export { ProviderUnreachable } from './provider-outcome.ts'
+export type { ActionOutcome } from './provider-outcome.ts'
 
 /** What the stand-in's ChatGPT plan may run. */
 export const STAND_IN_CHATGPT_MODELS = ['gpt-6-luna', 'gpt-6.1-sol'] as const
@@ -150,6 +148,8 @@ export function standInIntegrationTools(dir: string, keyFiles: { openrouter: str
     },
     awsStatus: async () => read().aws ?? { status: 'not_connected' },
     awsSetCredentials: async (credentials) => {
+      const problem = awsCredentialsProblem(credentials)
+      if (problem) return { accepted: false, why: problem }
       if (!accepts(credentials.secretAccessKey)) return refused
       update((state) => {
         state.aws = {
