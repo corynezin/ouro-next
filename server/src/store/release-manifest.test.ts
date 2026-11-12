@@ -9,7 +9,8 @@ const manifest = JSON.parse(readFileSync(new URL('../../release-manifest.json', 
 
 /** The oldest code a migration leaves the data readable by: the last value a contracting migration wrote. */
 function dataReadableBySchemaFrom(): number {
-  const contracting = migrations.filter((migration) => migration.includes('data_readable_by_schema_from'))
+  // A step written as a function looks before it changes anything, and only expands.
+  const contracting = migrations.filter((migration): migration is string => typeof migration === 'string' && migration.includes('data_readable_by_schema_from'))
   const written = contracting.map((migration) => /'data_readable_by_schema_from',\s*'(\d+)'/.exec(migration))
   assert.ok(written.every((match) => match !== null), "each contracting migration writes the key as ('data_readable_by_schema_from', 'n')")
   return written.length === 0 ? 1 : Number(written.at(-1)![1])

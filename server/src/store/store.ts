@@ -18,7 +18,7 @@ import type { BaseUpdateRecord } from '../domain/base-update.ts'
 import { LONGEST_WINDOW_MS } from '../domain/usage.ts'
 import type { PlanAccount, PlanReading } from '../domain/usage.ts'
 import type { AgentWorktree } from '../domain/worktree.ts'
-import { migrations, SCHEMA_VERSION } from './schema.ts'
+import { migrations, runMigration, SCHEMA_VERSION } from './schema.ts'
 
 type SqlValue = string | number | null
 
@@ -151,7 +151,7 @@ export class Store {
     // A newer schema is fine by itself (see schema.ts); the guardian refuses releases that can't run on it.
     for (let index = version; index < SCHEMA_VERSION; index++) {
       this.transaction(() => {
-        this.db.exec(migrations[index]!)
+        runMigration(this.db, migrations[index]!)
         this.db.exec(`PRAGMA user_version = ${index + 1}`)
       })
     }
@@ -844,11 +844,11 @@ export class Store {
 
   /** In the order they were pinned. */
   listPins(personId: string): PinEntity[] {
-    return this.all<Record<string, SqlValue>>('SELECT * FROM pins WHERE person_id = ? ORDER BY pinned_at, id', personId).map((row) => pinEntityOf(row))
+    return this.all<Record<string, SqlValue>>('SELECT * FROM pins WHERE person_id = ? AND target_json IS NOT NULL ORDER BY pinned_at, id', personId).map((row) => pinEntityOf(row))
   }
 
   pinById(id: string): { personId: string; pin: PinEntity } | null {
-    const row = this.get<Record<string, SqlValue>>('SELECT * FROM pins WHERE id = ?', id)
+    const row = this.get<Record<string, SqlValue>>('SELECT * FROM pins WHERE id = ? AND target_json IS NOT NULL', id)
     return row ? { personId: row.person_id as string, pin: pinEntityOf(row) } : null
   }
 
@@ -866,7 +866,7 @@ export class Store {
   /** Everyone's pins of agents on one other computer. */
   pinsOfAgentsOn(machineName: string): { personId: string; pin: PinEntity }[] {
     // Pins are few: filtering them here is simpler than matching addresses in SQL.
-    return this.all<Record<string, SqlValue>>('SELECT * FROM pins')
+    return this.all<Record<string, SqlValue>>('SELECT * FROM pins WHERE target_json IS NOT NULL')
       .map((row) => ({ personId: row.person_id as string, pin: pinEntityOf(row) }))
       .filter(({ pin }) => pin.target.kind === 'remote_agent' && pin.target.address.endsWith(`@${machineName}`))
   }
