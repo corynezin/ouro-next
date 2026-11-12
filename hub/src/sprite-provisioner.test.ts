@@ -306,7 +306,10 @@ test('the HTTP client speaks the documented API: bearer token, paths, bodies, an
   for (const prefix of ['', 'ouro', 'ouro-next-h', 'Ouro-h-', 'ouro--h-', 'ouro-h/-']) assert.throws(() => new SpritesHttpApi('token-1', prefix), outOfScope, prefix)
 })
 
-test('what ships in a base includes the installer the service step runs, so a computer made from a base can set up', () => {
+test('what ships in a base includes the installers and what they run and source, so a computer made from a base can set up', () => {
   const rule = JSON.parse(readFileSync(new URL('../../distribution.json', import.meta.url), 'utf8')) as { ships: string[] }
-  assert.ok(rule.ships.some((entry) => entry === 'scripts' || entry === 'scripts/install-run-sprite.sh'), JSON.stringify(rule.ships))
+  const installers = ['install-run.sh', 'install-run-sprite.sh', 'install-run-ubuntu.sh', 'install-run-mac.sh', 'lib/install-common.sh', 'lib/guardian-config.mjs']
+  for (const file of installers) {
+    assert.ok(rule.ships.some((entry) => entry === 'scripts' || entry === `scripts/${file}`), `${file}: ${JSON.stringify(rule.ships)}`)
+  }
 })

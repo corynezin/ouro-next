@@ -1,6 +1,8 @@
 {
   "ships": [
-    "apps", "guardian", "journeys", "packages", "server", "tools", "scripts/install-run-sprite.sh",
+    "apps", "guardian", "journeys", "packages", "server", "tools",
+    "scripts/install-run.sh", "scripts/install-run-sprite.sh", "scripts/install-run-ubuntu.sh", "scripts/install-run-mac.sh",
+    "scripts/lib/install-common.sh", "scripts/lib/guardian-config.mjs",
     ".gitignore", "package.json", "package-lock.json", "README.md", "tsconfig.base.json", "tsconfig.json"
   ],
   "internal": ["docs", "CLAUDE.md", "AGENTS.md"],

@@ -1,5 +1,5 @@
 // Computers on the hub's own machine: each is a directory with the person's copy of the source, a runner host and a
-// guardian on a port of its own, set up as `scripts/install-run-sprite.sh` sets up a Sprite. For development and
+// guardian on a port of its own, set up as `scripts/install-run.sh` sets up a Sprite. For development and
 // journeys, and for a hub that hosts on one large machine. Computers outlive the hub: their processes are detached.
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'

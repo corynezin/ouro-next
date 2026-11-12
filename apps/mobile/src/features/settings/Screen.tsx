@@ -108,7 +108,7 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
   const options = foldOptions(server?.limits.idleFoldMinutes)
   const homeOptions = updateHomeOptions(savedServers)
   const creditsText = openRouterCreditsText(session.store.integration('openrouter')?.state ?? null)
-  const base = server ? baseSection(server.release.base, viewer?.isOwner ?? false) : null
+  const base = server ? baseSection(server.release, viewer?.isOwner ?? false) : null
   const backup = server ? backupSection(server.sourceBackup, viewer?.isOwner ?? false, now) : null
   const planRows = server ? claudePlanRows(server.planUsage.claude, isClaudeOnPlan(session.store.integration('claude')?.state ?? null), now) : null
 
