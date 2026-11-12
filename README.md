@@ -43,8 +43,8 @@ and `scripts/lib/install-common.sh`; `scripts/install-run-sprite.sh` sets up a r
 ## Installing on a Mac
 
 `scripts/install-run-mac.sh` installs the server on a Mac as the person's launch agents: it runs while they're logged in
-and starts again when they log in. It needs Homebrew, and the Tailscale app signed in to the same tailnet as the person's
-other computers, which reach it there. On the Mac, with the person's copy of the source on GitHub:
+and starts again when they log in, so run it while logged in. It needs Homebrew, and the Tailscale app signed in to the
+same tailnet as the person's other computers, which reach it there. On the Mac, with the person's copy of the source on GitHub:
 
 ```sh
 brew install gh && gh auth login

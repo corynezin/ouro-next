@@ -308,7 +308,7 @@ test('the HTTP client speaks the documented API: bearer token, paths, bodies, an
 
 test('what ships in a base includes the installers and what they run and source, so a computer made from a base can set up', () => {
   const rule = JSON.parse(readFileSync(new URL('../../distribution.json', import.meta.url), 'utf8')) as { ships: string[] }
-  const installers = ['install-run.sh', 'install-run-sprite.sh', 'install-run-ubuntu.sh', 'install-run-mac.sh', 'lib/install-common.sh']
+  const installers = ['install-run.sh', 'install-run-sprite.sh', 'install-run-ubuntu.sh', 'install-run-mac.sh', 'lib/install-common.sh', 'lib/guardian-config.mjs']
   for (const file of installers) {
     assert.ok(rule.ships.some((entry) => entry === 'scripts' || entry === `scripts/${file}`), `${file}: ${JSON.stringify(rule.ships)}`)
   }

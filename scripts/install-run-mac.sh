@@ -2,8 +2,8 @@
 # Installs, or moves to another commit, the server on a Mac: what it needs (Node, git, tmux, gh, jq, a current bash,
 # Claude Code) from Homebrew, then the server itself as this user's launch agents through install-run.sh. Other
 # computers and phones reach it over Tailscale, so the Mac needs the Tailscale app, signed in to the person's tailnet.
-# The services run while the person is logged in to the Mac, and start again when they log in. Running it again changes
-# only what differs.
+# The services run while the person is logged in to the Mac, and start again when they log in; so run it while they are
+# logged in (from a Terminal there, or over SSH meanwhile). Running it again changes only what differs.
 #
 #   scripts/install-run-mac.sh [<commit>]
 #
