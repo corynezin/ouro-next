@@ -173,7 +173,7 @@ test('a pulled copy is taken only when it is the agent asked for', async () => {
     here.store.notePeerHello('id-team', here.clock.now, { protocol: PEER_PROTOCOL, minProtocol: PEER_MIN_PROTOCOL, release: 'test', agentsRunning: 0, agentCount: 1, sleeps: false, heldAwake: false, ownerPushTokenHashes: [] })
     const remote = here.peers.noteAnswered('id-team', { name: 'researcher', activity: 'waiting', details: null })
     const copyOf = (name: string): PeerMove => ({
-      moveId: 'pull:1', agent: { name, task: 't', model: 'stand-in', parent: 'human', createdBy: 'human', createdAt: 1, folder: { kind: 'absolute', path: '/etc' }, ownershipEpoch: 1, promptCacheLifetime: '5m' },
+      moveId: 'pull:1', agent: { name, task: 't', model: 'stand-in', parent: 'human', createdBy: 'human', createdAt: 1, folder: { kind: 'absolute', path: '/etc' }, ownershipEpoch: 1, promptCacheLifetime: '5m', instructions: null },
       goal: null, goalNotes: '', conversation: null, waiting: [], memory: null,
     })
 

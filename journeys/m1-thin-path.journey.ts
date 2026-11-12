@@ -297,7 +297,7 @@ test('hostile input is refused with state unchanged', async () => {
   const before = await phone.conversation('taken')
   await assert.rejects(phone.command('send_message', { to: 'nobody', text: 'hi', attachmentIds: [], wake: 'wake', answersAskId: null }), (error: CommandFailed) => error.code === 'not_found')
   assert.equal((await phone.conversation('taken')).length >= before.length, true)
-  assert.deepEqual((await phone.snapshot()).agents.map((agent) => agent.name).sort(), ['master', 'taken'], 'only the master and the one it made')
+  assert.deepEqual((await phone.snapshot()).agents.map((agent) => agent.name).sort(), ['concierge', 'taken'], 'only the starter agent and the one it made')
 
   // A traversal-shaped file name can't pick where bytes are stored, and revoking cuts the stream at once.
   const upload = await fetch(`${run.url}/v2/attachments`, { method: 'POST', headers: { authorization: `Bearer ${phone.token}`, 'x-file-name': encodeURIComponent('../../escape.txt') }, body: 'bytes' })

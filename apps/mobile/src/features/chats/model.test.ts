@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import type { ChatEntity, ComputerEntity, PersonEntity, RemoteAgentEntity } from '@ouro/contract'
 import { EntityStore } from '../../core/session/entityStore.ts'
 import { agentOf, directChatOf, readStateOf, snapshotOf, VIEWER_ADDRESS } from '../../core/testSupport.ts'
-import { addMembersInTurn, agentsElsewhereChoices, chatDestination, chatPreview, chatsListModel, chatsWithMember, chatTitle, chosenMembers, memberChoices, memberPickerDoneTitle, mentionOptions, NEW_CHAT_COPY } from './model.ts'
+import { addMembersInTurn, agentsElsewhereChoices, chatDestination, chatPreview, chatsListModel, chatsWithMember, membersText, pinTargetOfChat, chatTitle, chosenMembers, memberChoices, memberPickerDoneTitle, mentionOptions, NEW_CHAT_COPY } from './model.ts'
 
 const NOW = 10_000_000
 const live = { phase: 'live' as const, detail: '', downSince: null }
@@ -35,6 +35,35 @@ test('previews: a group says who; your direct chat marks yours; others\' direct 
   assert.equal(chatPreview(store, { ...directChatOf('d', 'fixer'), latestMessage: latest('fixer') }), 'hello')
   const theirs = { ...directChatOf('d', 'fixer'), members: [{ address: 'human@sam', joinedAt: 1 }, { address: 'fixer', joinedAt: 1 }], latestMessage: latest('fixer') }
   assert.equal(chatPreview(store, theirs), null)
+})
+
+test('pinned chats lead in pin order: a pinned group, and your direct chat with a pinned agent; long-press pins what it shows', () => {
+  const team = group('team', [VIEWER_ADDRESS, 'a'], 'Team')
+  const newest = group('newest', [VIEWER_ADDRESS, 'a'], 'Newest', { seq: 1, from: 'a', at: 90, text: 'x' })
+  const withFixer = directChatOf('d', 'fixer')
+  const store = storeWith({
+    agents: [agentOf({ id: 'f', name: 'fixer' })],
+    chats: [team, newest, withFixer],
+    pins: [{ id: 'p2', target: { kind: 'chat', chatId: 'team' }, pinnedAt: 2 }, { id: 'p1', target: { kind: 'agent', agentId: 'f' }, pinnedAt: 1 }],
+  })
+  const model = chatsListModel(store, live, NOW)
+  assert.deepEqual(model.mine.map((r) => [r.chatId, r.pinned]), [['d', true], ['team', true], ['newest', false]], 'in the order pinned')
+  assert.deepEqual(pinTargetOfChat(store, withFixer), { kind: 'agent', agentId: 'f' })
+  assert.deepEqual(pinTargetOfChat(store, team), { kind: 'chat', chatId: 'team' })
+  assert.deepEqual(pinTargetOfChat(store, directChatOf('r', 'bob@mac')), { kind: 'remote_agent', address: 'bob@mac' })
+  assert.equal(pinTargetOfChat(store, group('theirs', ['human@sam', 'a'], 'Theirs')), null, "others' chats offer no pin")
+})
+
+test("a pin of others' chat made elsewhere still shows as pinned and leads them", () => {
+  const old = group('old', ['human@sam', 'a'], 'Old')
+  const fresh = group('fresh', ['human@sam', 'a'], 'Fresh', { seq: 1, from: 'a', at: 90, text: 'x' })
+  const store = storeWith({ chats: [old, fresh], pins: [{ id: 'p', target: { kind: 'chat', chatId: 'old' }, pinnedAt: 1 }] })
+  assert.deepEqual(chatsListModel(store, live, NOW).others.map((r) => [r.chatId, r.pinned]), [['old', true], ['fresh', false]])
+})
+
+test('a group says how many members, in words', () => {
+  assert.equal(membersText(1), '1 member')
+  assert.equal(membersText(3), '3 members')
 })
 
 test('yours latest first, then others; unread from the read state; empty text by situation', () => {

@@ -121,6 +121,15 @@ export type ModelId = z.infer<typeof ModelId>
 export const PromptCacheLifetime = z.enum(['5m', '1h'])
 export type PromptCacheLifetime = z.infer<typeof PromptCacheLifetime>
 
+/**
+ * Standing instructions an agent follows after the default rules: a protocol file, by name, read when it launches, so a
+ * base that changes the file reaches agents made before it. `starter`: starter.md, the front door's.
+ */
+export const StandingInstructions = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('protocol'), name: z.enum(['starter']) }),
+])
+export type StandingInstructions = z.infer<typeof StandingInstructions>
+
 /** The agent's prompt cache as of its latest model request, or its latest compaction. */
 export const CacheState = z.object({
   /** When it goes cold, unless another request reads it first. */

@@ -7,11 +7,12 @@ import { C } from './colors.ts'
 
 export interface SwipeAction { title: string; color: ColorValue; onPress: () => void }
 
-export function SwipeRow({ actions, children }: { actions: SwipeAction[]; children: ReactNode }) {
+/** `background`: behind the row as it slides; the list's own by default. */
+export function SwipeRow({ actions, children, background = C.background }: { actions: SwipeAction[]; children: ReactNode; background?: ColorValue }) {
   const ref = useRef<SwipeableMethods>(null)
   if (!actions.length) return <>{children}</>
   return (
-    <ReanimatedSwipeable ref={ref} friction={1.5} childrenContainerStyle={{ backgroundColor: C.background }} rightThreshold={40} overshootRight={false}
+    <ReanimatedSwipeable ref={ref} friction={1.5} childrenContainerStyle={{ backgroundColor: background }} rightThreshold={40} overshootRight={false}
       onSwipeableWillOpen={() => Haptics.selectionAsync()}
       renderRightActions={() => (
         <View style={s.actions}>

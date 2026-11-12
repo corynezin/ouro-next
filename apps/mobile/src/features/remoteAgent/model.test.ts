@@ -4,7 +4,7 @@ import type { AskEntity, ComputerEntity, PeerAgentDetails, RemoteAgentEntity, Re
 import { EntityStore } from '../../core/session/entityStore.ts'
 import { agentOf, directChatOf, messageOf, readStateOf, snapshotOf, VIEWER_ADDRESS } from '../../core/testSupport.ts'
 import { agentsListModel, searchAgents } from '../agents/model.ts'
-import { asksPanel, asksStrip, choicesForMessage } from '../chat/model.ts'
+import { asksPanel, choicesForMessage } from '../chat/model.ts'
 import { openCopyOf } from '../shared/agentFacts.ts'
 import { canPull, remoteActionsOf, remoteAsksOf, remoteChatModel, remoteListEntries, remoteSend, remoteStatusText } from './model.ts'
 import { pulledBar } from '../chat/model.ts'
@@ -61,7 +61,7 @@ test('a limited computer gives no controls; a trusted one gives them as a local 
 })
 
 test('its chat is titled by the bare name over its computer, and a message goes to name@machine', () => {
-  assert.deepEqual(remoteChatModel(remoteOf(), computer(), 0), { title: 'bob', subtitle: '@mac', statusText: 'idle', busy: false, summaryLine: null, canReadLog: true })
+  assert.deepEqual(remoteChatModel(remoteOf(), computer(), 0), { title: 'bob', subtitle: '@mac', statusText: 'idle', statusLabel: 'idle', busy: false, summaryLine: null, canReadLog: true })
   assert.equal(remoteChatModel(remoteOf({ details: null }), computer(), 0).canReadLog, false)
   assert.equal(remoteChatModel(remoteOf({ details: null }), computer(), 0).statusText, 'waiting · That computer trusts this one only to send messages.')
   assert.deepEqual(remoteSend(remoteOf(), 'hi', null), {
@@ -78,7 +78,7 @@ const localAsk = (id: string, level: AskEntity['level'], at: number, snooze: Ask
 })
 const live = { phase: 'live' as const, detail: '', downSince: null }
 
-test("a remote agent's ask shows in Asks and the master's strip by name@machine, ordered with local asks", () => {
+test("a remote agent's ask shows in Asks by name@machine, ordered with local asks", () => {
   const store = new EntityStore()
   store.applySnapshot(snapshotOf({
     agents: [agentOf({ id: 'a', name: 'alice' })],
@@ -96,9 +96,6 @@ test("a remote agent's ask shows in Asks and the master's strip by name@machine,
   assert.equal(remoteRow.timeText, '1m')
   assert.deepEqual(remoteRow.choices, ['Yes', 'No'])
 
-  const strip = asksStrip(store, NOW)
-  assert.deepEqual(strip.map((ask) => [ask.askId, ask.agentName]), [['urgent', 'alice'], ['ask-r', 'bob@mac'], ['waiting', 'alice']])
-  assert.deepEqual(strip[1]!.asker, { kind: 'remote', remoteAgentId: 'c1:bob' })
 })
 
 test("its chat shows its asks' copies with their choices, and an answer goes to name@machine with answersAskId", () => {
@@ -139,15 +136,19 @@ test('search finds agents here and on other computers by bare or full name, task
   assert.deepEqual(names('e'), ['remote:eve', 'local:alice', 'remote:dee', 'remote:bob', 'remote:fay'], 'name prefix, then name containing it, then the rest')
 })
 
-test("another computer's master is not a row: each computer's master is the one there (AG-17)", () => {
+test("another computer's agents are rows, its master too; a pinned one leads instead (AG-17)", () => {
   const store = new EntityStore()
-  store.applySnapshot(snapshotOf({ computers: [computer()], remoteAgents: [remoteOf(), remoteOf({ id: 'c1:master', name: 'master', address: 'master@mac' })] }))
+  store.applySnapshot(snapshotOf({
+    computers: [computer()],
+    remoteAgents: [remoteOf(), remoteOf({ id: 'c1:master', name: 'master', address: 'master@mac' })],
+    pins: [{ id: 'p', target: { kind: 'remote_agent', address: 'bob@mac' }, pinnedAt: 0 }],
+  }))
   const list = agentsListModel(store, { connection: { phase: 'live', detail: '', downSince: null }, fold: { kind: 'never' }, query: '', failureNote: null, now: NOW })
-  assert.deepEqual(list.awake.map((listed) => listed.row.name), ['bob'])
-  assert.equal(list.master, null)
+  assert.deepEqual(list.awake.map((listed) => listed.row.name), ['master'])
+  assert.deepEqual(list.pinned.map((row) => row.kind === 'remote' && row.row.name), ['bob'])
 })
 
-test("a remote ask's copy snoozed from either computer: last in Asks with its wake time, out of the master's strip", () => {
+test("a remote ask's copy snoozed from either computer: last in Asks with its wake time", () => {
   const store = new EntityStore()
   store.applySnapshot(snapshotOf({
     agents: [agentOf({ id: 'a', name: 'alice' })],
@@ -160,7 +161,6 @@ test("a remote ask's copy snoozed from either computer: last in Asks with its wa
   assert.equal(asks.headerText, 'Asks (1)')
   assert.deepEqual(asks.rows.map((row) => [row.askId, row.snoozed]), [['waiting', false], ['ask-r', true]])
   assert.match(asks.rows[1]!.timeText, /^zz /)
-  assert.deepEqual(asksStrip(store, NOW).map((ask) => ask.askId), ['waiting'])
   assert.deepEqual(openCopyOf(remoteAskOf({ snooze: { kind: 'person_back' } })).snooze, { kind: 'person_back' })
 })
 
@@ -175,6 +175,7 @@ test("an agent whose computer is offline has the offline tone: orange line, dimm
 test('its chat runs a timer while it works and shows its latest summary, as a local agent\'s does', () => {
   const working = remoteChatModel(remoteOf({ details: { ...thinking, summaryLine: 'Fixing the build' }, activity: 'running' }), computer(), NOW)
   assert.equal(working.statusText, 'thinking  0:05')
+  assert.equal(working.statusLabel, 'thinking', 'held steady by its status, not the ticking timer')
   assert.equal(working.busy, true)
   assert.equal(working.summaryLine, 'Fixing the build')
   const offline = remoteChatModel(remoteOf({ details: thinking, activity: 'running' }), computer({ status: 'offline' }), NOW)

@@ -30,11 +30,17 @@ export interface CatalogModel {
 
 export const STAND_IN_MODEL_ID = 'stand-in'
 
-/** OpenRouter models run on Claude Code pointed at OpenRouter. `or-haiku` is Haiku billed there; `haiku` is the plan's. */
+/**
+ * OpenRouter models run on Claude Code pointed at OpenRouter. `or-haiku` is Haiku billed there; `haiku` is the plan's.
+ * Claude's own are named by their full model ids, not Claude Code's aliases (`opus`): the label and the app's pickers
+ * say a version, and an alias would run whatever the installed Claude Code takes it to mean. A newer version is a change
+ * here, and in the app's names (apps/mobile/src/features/newAgent/model.ts).
+ */
 export const MODEL_CATALOG: readonly CatalogModel[] = [
-  { id: 'opus', label: 'Claude Opus', provider: 'anthropic', providerModelId: 'opus' },
-  { id: 'sonnet', label: 'Claude Sonnet', provider: 'anthropic', providerModelId: 'sonnet' },
-  { id: 'haiku', label: 'Claude Haiku', provider: 'anthropic', providerModelId: 'haiku' },
+  { id: 'fable', label: 'Claude Fable 5.2', provider: 'anthropic', providerModelId: 'claude-fable-5-2' },
+  { id: 'opus', label: 'Claude Opus 5.5', provider: 'anthropic', providerModelId: 'claude-opus-5-5' },
+  { id: 'sonnet', label: 'Claude Sonnet 5.5', provider: 'anthropic', providerModelId: 'claude-sonnet-5-5' },
+  { id: 'haiku', label: 'Claude Haiku 5.5', provider: 'anthropic', providerModelId: 'claude-haiku-5-5' },
   { id: 'deepseek', label: 'DeepSeek V4 Pro', provider: 'openrouter', providerModelId: 'deepseek/deepseek-v4-pro' },
   { id: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', provider: 'openrouter', providerModelId: 'deepseek/deepseek-v4.1-flash' },
   { id: 'or-haiku', label: 'Haiku via OpenRouter', provider: 'openrouter', providerModelId: 'anthropic/claude-haiku-5.5' },

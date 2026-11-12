@@ -1,7 +1,7 @@
 // A conversation with one agent: your messages with receipts, its replies, live; files both ways; goal, summary and status
 // bars; its open asks; the message box; interrupt and stop; next unread. Renders chat/model.ts.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useHeaderHeight } from '@react-navigation/elements'
 import type { AgentEntity, CommandInput, CommandName, MessageEntity } from '@ouro/contract'
 import { failureText, STOP_ATTEMPTS } from '../../core/session/serverApi.ts'
@@ -15,22 +15,21 @@ import { C } from '../../design/colors.ts'
 import { Composer } from '../../design/Composer.tsx'
 import type { ComposerFile } from '../../design/composerFiles.ts'
 import { actionSheet, barButton, barMenu, confirm } from '../../design/menus.tsx'
-import { Symbol } from '../../design/Symbol.tsx'
+import { useSteady } from '../../design/steady.ts'
 import { useCore, useNow, useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
 import { useBannerHeight } from '../../navigation/UpdateBanner.tsx'
 import type { Routes, ScreenProps } from '../../navigation/routes.ts'
-import { agentByRef, asksOf, directChatOf, isBusy, isMaster, listOrder, nextUnread, stateOf, unreadElsewhereCount } from '../shared/agentFacts.ts'
-import type { Asker } from '../shared/agentFacts.ts'
+import { agentByRef, asksOf, directChatOf, isBusy, listOrder, nextUnread, pinToggleOf, stateOf, unreadElsewhereCount } from '../shared/agentFacts.ts'
 import { StateDot } from '../shared/StateDot.tsx'
 import { HistoryFooter, useHistory } from './History.tsx'
 import { AsksPanel } from './AsksPanel.tsx'
 import { openSnoozeSheet } from '../shared/snoozeSheet.ts'
 import {
-  asksPanel, asksStrip, ChoiceTapGuard, chatItems, choicesForMessage, composedFilesOf, composerPlaceholder, directSend, goalBar, messageFiles, outboxBubble, recipientLastOutputOf,
+  asksPanel, ChoiceTapGuard, chatItems, choicesForMessage, composedFilesOf, composerPlaceholder, directSend, goalBar, messageFiles, outboxBubble, recipientLastOutputOf,
   JUMP_PAGE_SIZE, routedAgents, statusBar, summaryBar,
   chatMoreMenu, FAILED_SEND_ACTIONS, nextUnreadLabel, pulledBar, STOP_COPY,
 } from './model.ts'
-import type { ChatItem, ChatMenuAction, MessageAt } from './model.ts'
+import type { ChatItem, ChatMenuAction, MessageAt, StatusBarModel } from './model.ts'
 import { Marked, useJumpToMessage } from './useJumpToMessage.tsx'
 
 export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
@@ -67,7 +66,6 @@ function Conversation({ agent, session, navigation, at }: {
   const { store } = session
   const chat = directChatOf(store, agent)
   const chatId = chat?.id ?? null
-  const master = isMaster(agent)
   const viewerAddress = store.viewer?.address
 
   useEffect(() => (chatId !== null ? session.openChat(chatId) : undefined), [session, chatId])
@@ -113,7 +111,6 @@ function Conversation({ agent, session, navigation, at }: {
     return { at, order: [...awake, ...idle] }
   }
   const openOther = (agentId: string) => navigation.push('Chat', { agentRef: agentId })
-  const openAsker = (asker: Asker) => (asker.kind === 'local' ? openOther(asker.agentId) : navigation.push('RemoteChat', { remoteAgentId: asker.remoteAgentId }))
   const goToNextUnread = () => {
     const { at, order } = orderNow()
     const next = nextUnread(store, agent, order, at)
@@ -124,11 +121,16 @@ function Conversation({ agent, session, navigation, at }: {
   const running = stateOf(agent) === 'running'
   const busy = isBusy(agent)
   const hasGoal = session.store.goals.has(agent.id)
+  const pinTarget = { kind: 'agent', agentId: agent.id } as const
+  const pinCommand = pinToggleOf(store, pinTarget)
+  const pinned = pinCommand === 'unpin'
 
   const onMenu = (action: ChatMenuAction) => {
     const target = { agentId: agent.id }
     switch (action) {
+      case 'pin': return void act(pinCommand, { target: pinTarget }, 1, pinned ? `unpinned ${agent.name}` : `pinned ${agent.name}`)
       case 'log': return navigation.navigate('Log', { agentRef: agent.id })
+      case 'context': return navigation.navigate('Context', { agentRef: agent.id })
       case 'goal': return navigation.navigate('Goal', { agentRef: agent.id })
       case 'summaries': return navigation.navigate('Summaries', { agentRef: agent.id })
       case 'details': return navigation.navigate('Agent', { agentRef: agent.id })
@@ -142,10 +144,10 @@ function Conversation({ agent, session, navigation, at }: {
       title: agent.name,
       unstable_headerRightItems: () => [
         barButton('chevron.forward.2', nextUnreadLabel(others), goToNextUnread, { disabled: others === 0, badge: others }),
-        barMenu('ellipsis.circle', 'More', chatMoreMenu({ hasGoal, running, busy }).map((item) => ({ ...item, onPress: () => onMenu(item.action) }))),
+        barMenu('ellipsis.circle', 'More', chatMoreMenu({ hasGoal, running, busy, pinned }).map((item) => ({ ...item, onPress: () => onMenu(item.action) }))),
       ],
     })
-  }, [navigation, agent.id, agent.name, others, running, busy, hasGoal])
+  }, [navigation, agent.id, agent.name, others, running, busy, hasGoal, pinned])
 
   const renderMessage = (message: MessageEntity, item: Extract<ChatItem, { kind: 'message' }>) => {
     const choices = choicesForMessage(message, store.asks)
@@ -158,13 +160,12 @@ function Conversation({ agent, session, navigation, at }: {
         receipt={item.receiptText}
         footnote={item.failedText ?? undefined}
         failed={item.failedText !== null}
-        doneReport={item.doneReport}
         choices={choices && { options: choices.options, onChoose: (choice) => chooseAnswer(choices.askId, choice) }}
         avatar={item.mine ? undefined : <Avatar seed={message.from} kind="agent" model={agent.model} size={36} />}
         onSelectText={(text) => navigation.navigate('SelectText', { text })}
       />
     )
-    if (!master || item.mine) return bubble
+    if (item.mine) return bubble
     return <View>{bubble}<RouteChips text={message.text} session={session} selfId={agent.id} onOpen={openOther} /></View>
   }
 
@@ -197,7 +198,6 @@ function Conversation({ agent, session, navigation, at }: {
   const pulled = pulledBar(agent)
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: C.background }} behavior="padding" keyboardVerticalOffset={headerHeight + bannerHeight}>
-      {master && <AsksStrip session={session} onOpen={openAsker} />}
       <FlatList
         ref={list}
         inverted
@@ -267,21 +267,6 @@ function RouteChips({ text, session, selfId, onOpen }: { text: string; session: 
   )
 }
 
-function AsksStrip({ session, onOpen }: { session: ServerSession; onOpen: (asker: Asker) => void }) {
-  const asks = asksStrip(session.store, Date.now())
-  if (!asks.length) return null
-  return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.strip} contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
-      {asks.map((ask) => (
-        <Pressable key={ask.askId} onPress={() => onOpen(ask.asker)} style={({ pressed }) => [s.ask, pressed && { opacity: 0.6 }]}>
-          <View style={s.barRow}><Symbol name={ask.symbol.name} color={ask.symbol.color} size={11} /><Text style={s.askWho} numberOfLines={1}>{ask.agentName}</Text></View>
-          <Text style={s.askText} numberOfLines={2}>{ask.text}</Text>
-        </Pressable>
-      ))}
-    </ScrollView>
-  )
-}
-
 function Bars({ agent, session, note, asks, answeringAskId, setAnsweringAskId, onChoose, onOpenGoal, onOpenSummaries, onError }: {
   agent: AgentEntity
   onOpenGoal: () => void
@@ -298,7 +283,7 @@ function Bars({ agent, session, note, asks, answeringAskId, setAnsweringAskId, o
   const { store } = session
   const goal = goalBar(store.goals.get(agent.id))
   const summary = summaryBar(store.summaries.get(agent.id), agent, now)
-  const status = statusBar(store, agent, session.connection, now)
+  const status = useSteady(statusBar(store, agent, session.connection, now), statusBarKey)
   const panel = asksPanel(asks, answeringAskId, now)
   return (
     <View>
@@ -326,6 +311,9 @@ function Bars({ agent, session, note, asks, answeringAskId, setAnsweringAskId, o
   )
 }
 
+/** The bar holds by everything but the running timer, which stays live. */
+const statusBarKey = (status: StatusBarModel) => (status.kind === 'agent' ? `${status.dot}|${status.busy}|${status.label}` : `lost|${status.text}`)
+
 const s = StyleSheet.create({
   missing: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.background },
   bar: { backgroundColor: C.bar, paddingHorizontal: 18, paddingVertical: 3 },
@@ -334,8 +322,4 @@ const s = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
   chip: { borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: C.tertiaryFill },
   chipText: { fontSize: 13, fontWeight: '600', color: C.indigo },
-  strip: { flexGrow: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.separator },
-  ask: { width: 200, borderRadius: 12, padding: 8, gap: 2, backgroundColor: C.secondaryBackground },
-  askWho: { fontSize: 12, fontWeight: '700', color: C.label, flexShrink: 1 },
-  askText: { fontSize: 13, color: C.secondary },
 })

@@ -1,10 +1,10 @@
-// Remote asks through two real servers: an agent on another computer asks; its ask shows in Asks, the master's strip
+// Remote asks through two real servers: an agent on another computer asks; its ask shows in Asks
 // and its chat here, and a choice answers it there.
 import assert from 'node:assert/strict'
 import { after, test } from 'node:test'
 import { JourneyRun, standInScript, waitFor } from '../../../journeys/harness.ts'
 import { agentsListModel } from '../src/features/agents/model.ts'
-import { asksPanel, asksStrip, choicesForMessage } from '../src/features/chat/model.ts'
+import { asksPanel, choicesForMessage } from '../src/features/chat/model.ts'
 import { remoteAsksOf, remoteSend } from '../src/features/remoteAgent/model.ts'
 import { directChatWith, openCopyOf } from '../src/features/shared/agentFacts.ts'
 import { cleanUp, pairedPhone, runs } from './support.ts'
@@ -39,13 +39,11 @@ test("Remote asks: an agent on another computer asks; its ask shows in Asks and 
     assert.equal(row.agentName, 'asker@beta')
     assert.deepEqual(row.asker, { kind: 'remote', remoteAgentId: remote.id })
     assert.deepEqual(row.choices, ['Yes', 'No'])
-    assert.ok(asksStrip(session.store, Date.now()).some((ask) => ask.askId === row.askId), "and in the master's strip")
 
     // Snoozed from here, as the swipe sends it: the copy shows it, and so does the ask on its own computer.
     const snoozed = await session.command('snooze_ask', { askId: row.askId, snooze: { kind: 'until', at: Date.now() + 3_600_000 } })
     assert.ok(snoozed.ok, snoozed.ok ? '' : JSON.stringify(snoozed.failure))
     await waitFor('snoozed here', () => asksRow()?.snoozed === true)
-    assert.equal(asksStrip(session.store, Date.now()).some((ask) => ask.askId === row.askId), false, "out of the master's strip while snoozed")
     await waitFor('snoozed on beta', () => [...betaPhone.session.store.asks.values()].some((ask) => ask.text === 'Ship it?' && ask.snooze !== null), 30_000)
     const reminded = await session.command('snooze_ask', { askId: row.askId, snooze: null })
     assert.ok(reminded.ok, reminded.ok ? '' : JSON.stringify(reminded.failure))

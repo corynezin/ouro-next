@@ -229,7 +229,7 @@ export const migrations: readonly string[] = [
     model TEXT NOT NULL
   ) STRICT;
   `,
-  // 6: a person's words carried by the master agent say so. Expand only.
+  // 6: a person's words carried for them by an agent say so. Expand only.
   `
   ALTER TABLE messages ADD COLUMN relayed_by TEXT;
   `,
@@ -502,7 +502,21 @@ export const migrations: readonly string[] = [
     message_id TEXT PRIMARY KEY REFERENCES messages(id)
   ) STRICT;
   `,
-  // 27: networks. The networks this server holds keys for (the keys themselves are in a file of their own), at most one
+  // 27: each person's pins: agents here, agents on their other computers, and group chats kept at the top of their lists,
+  // found by pinTargetKey.
+  // And an agent's standing instructions, added to its rules: JSON naming a protocol file. Expand only.
+  `
+  ALTER TABLE agents ADD COLUMN instructions TEXT;
+  CREATE TABLE pins (
+    id TEXT PRIMARY KEY,
+    person_id TEXT NOT NULL REFERENCES people(id),
+    target_key TEXT NOT NULL,
+    target_json TEXT NOT NULL,
+    pinned_at INTEGER NOT NULL,
+    UNIQUE (person_id, target_key)
+  ) STRICT;
+  `,
+  // 28: networks. The networks this server holds keys for (the keys themselves are in a file of their own), at most one
   // of them its home. Each peer gains the network it lives in
   // (null: none of this server's), whether it only visits this server's home network, whether it may still speak without
   // a network's signature (a full trust link from before networks, until it signs once), and its owner's name. A peer

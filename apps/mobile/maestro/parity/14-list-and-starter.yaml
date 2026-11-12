@@ -1,6 +1,6 @@
-# The Agents list header, search (iOS 26 shows its cancel as a button labelled "close"), ordering, states, and the master's card and chat. The runner makes alpha then
+# The Agents list header, search (iOS 26 shows its cancel as a button labelled "close"), ordering, states, and the pinned starter agent and its chat. The runner makes alpha then
 # zulu (both active in the last minute), a stopped "sleeper", "helper" with an open ask, a group "#team" where helper
-# posts, and has master reply naming five agents (zulu, alpha, mybot, asker, formatter) and ask a question of its own.
+# posts, and has concierge (the starter agent) reply naming five agents (zulu, alpha, mybot, asker, formatter) and ask a question of its own.
 # Rows: AG-04, AG-06, AG-07, AG-16, AG-20, AG-39, AG-43, CHAT-68, CHAT-69.
 appId: dev.claudeinbox.ouronext
 ---
@@ -12,8 +12,8 @@ appId: dev.claudeinbox.ouronext
     text: "zulu, stand-in, zulu, .*"
     below:
       text: "alpha, stand-in, alpha, .*"
-# The master's own ask stays out of the Asks section.
-- assertNotVisible: ".*Master question.*"
+# The starter agent's own ask is in Asks like anyone's.
+- assertVisible: ".*Starter question.*"
 - scrollUntilVisible:
     element: "sleeper, .*"
 - assertVisible: "sleeper, stand-in, sleeper, .*, stopped, .*"
@@ -38,9 +38,10 @@ appId: dev.claudeinbox.ouronext
     timeout: 5000
 - assertVisible: "Agents, tasks, messages"
 - takeScreenshot: parity-list-top
-- tapOn: "Master agent"
+- assertVisible: "PINNED"
+- tapOn: "concierge, .*"
 - extendedWaitUntil:
-    visible: "Message master"
+    visible: "Message concierge"
     timeout: 10000
 # Mention chips: the first four named agents, in order; "mybots" is not mybot, and formatter is the fifth.
 - assertVisible: "Open zulu"
@@ -54,10 +55,8 @@ appId: dev.claudeinbox.ouronext
     text: "Open asker"
     rightOf: "Open mybot"
 - assertNotVisible: "Open formatter"
-- assertVisible: "Master question\\?"
-# The strip of other agents' open asks.
-- assertVisible: "questionmark.circle, helper, Need a hand\\?"
-- takeScreenshot: parity-master-chat
+- assertVisible: "Starter question\\?"
+- takeScreenshot: parity-starter-chat
 - tapOn: "Open alpha"
 - extendedWaitUntil:
     visible: "Message alpha"
@@ -65,10 +64,6 @@ appId: dev.claudeinbox.ouronext
 - tapOn:
     point: "38,84"
 - extendedWaitUntil:
-    visible: "Message master"
-    timeout: 10000
-- tapOn: "questionmark.circle, helper, Need a hand\\?"
-- extendedWaitUntil:
-    visible: "Message helper"
+    visible: "Message concierge"
     timeout: 10000
 - runFlow: _to-list.yaml

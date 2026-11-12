@@ -6,6 +6,7 @@ import { createInterface } from 'node:readline'
 import type { ProviderFailure } from '../domain/agent.ts'
 import { PROMPT_CACHE_TTL_MS } from '../domain/compaction.ts'
 import type { ContextReading } from '../domain/compaction.ts'
+import { inputTokensOfUsage } from '../domain/context.ts'
 import { FIVE_HOUR_MINUTES, WEEKLY_MINUTES } from '../domain/usage.ts'
 import type { PlanLimitStatus, PlanWindowReading } from '../domain/usage.ts'
 import type { DeliveryForModel, ProviderEvent, ProviderSession, ProviderSessionParams } from './provider.ts'
@@ -60,7 +61,7 @@ export function planWindowsOfRateLimit(info: Record<string, unknown>): PlanWindo
  */
 export function contextOfUsage(usage: Record<string, unknown>, cacheTtlMs: number): ContextReading | null {
   const count = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
-  const tokens = count(usage.input_tokens) + count(usage.cache_read_input_tokens) + count(usage.cache_creation_input_tokens)
+  const tokens = inputTokensOfUsage(usage)
   if (tokens === 0) return null
   const written = isRecord(usage.cache_creation) ? usage.cache_creation : {}
   const writtenTtlMs = count(written.ephemeral_1h_input_tokens) > 0 ? PROMPT_CACHE_TTL_MS['1h'] : count(written.ephemeral_5m_input_tokens) > 0 ? PROMPT_CACHE_TTL_MS['5m'] : cacheTtlMs

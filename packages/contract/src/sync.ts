@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { Address } from './address.ts'
 import { AgentEntity } from './agent.ts'
 import {
-  AskEntity, ChatEntity, DeviceEntity, GoalEntity, PersonEntity, ReadStateEntity, ServerEntity, SummaryEntity, SummaryRecord,
+  AskEntity, ChatEntity, DeviceEntity, GoalEntity, PersonEntity, PinEntity, ReadStateEntity, ServerEntity, SummaryEntity, SummaryRecord,
 } from './entities.ts'
 import { MessageEntity } from './message.ts'
 import { ComputerEntity, RemoteAgentEntity, RemoteAskEntity } from './computers.ts'
@@ -31,6 +31,8 @@ export const Snapshot = z.object({
   agents: z.array(AgentEntity),
   chats: z.array(ChatEntity),
   readStates: z.array(ReadStateEntity),
+  /** The viewer's own pins. A server from before pins sends none. */
+  pins: z.array(PinEntity).default([]),
   asks: z.array(AskEntity),
   goals: z.array(GoalEntity),
   summaries: z.array(SummaryEntity),
@@ -54,6 +56,7 @@ export const EntityUpsert = z.discriminatedUnion('entity', [
   upsert('message', MessageEntity),
   upsert('chat', ChatEntity),
   upsert('read_state', ReadStateEntity),
+  upsert('pin', PinEntity),
   upsert('ask', AskEntity),
   upsert('goal', GoalEntity),
   upsert('summary', SummaryEntity),
@@ -69,7 +72,7 @@ export type EntityUpsert = z.infer<typeof EntityUpsert>
 
 export const EntityDeletion = z.object({
   cursor: z.number().int().positive(),
-  entity: z.enum(['server', 'agent', 'message', 'chat', 'read_state', 'ask', 'goal', 'summary', 'person', 'device', 'notification_settings', 'integration', 'computer', 'remote_agent', 'remote_ask']),
+  entity: z.enum(['server', 'agent', 'message', 'chat', 'read_state', 'pin', 'ask', 'goal', 'summary', 'person', 'device', 'notification_settings', 'integration', 'computer', 'remote_agent', 'remote_ask']),
   id: z.string(),
   op: z.literal('delete'),
 })
@@ -77,6 +80,12 @@ export type EntityDeletion = z.infer<typeof EntityDeletion>
 
 export const Change = z.union([EntityUpsert, EntityDeletion])
 export type Change = z.infer<typeof Change>
+
+/**
+ * Entity kinds a client is sent changes of only when it asks for them by name (`&entities=pin` on the changes stream):
+ * an app from before them would fail to read them. Its snapshot leaves them out by itself.
+ */
+export const OPT_IN_ENTITIES = ['pin'] as const
 
 /** The server writes an SSE comment at least this often, starting when the stream opens. Silence well past it means dead. */
 export const CHANGES_HEARTBEAT_MS = 15_000
@@ -125,6 +134,93 @@ export const LogPage = z.object({
   hasEarlier: z.boolean(),
 })
 export type LogPage = z.infer<typeof LogPage>
+
+/** Why an agent has no model requests to show: it isn't on Claude Code, it hasn't started a conversation, or the
+ * conversation's transcript isn't on this computer. The app words each. */
+export const ContextUnavailable = z.enum(['not_claude_code', 'no_conversation', 'transcript_missing'])
+export type ContextUnavailable = z.infer<typeof ContextUnavailable>
+
+/** How many requests a Context list page holds when the app doesn't say. */
+export const CONTEXT_PAGE_DEFAULT_LIMIT = 50
+
+/** `GET /v2/agents/<id>/context?before=<n>&limit=<k>`: one row per model request the agent made. Tokens are exact, from the API's own usage. */
+export const ContextRequestRow = z.object({
+  n: z.number().int().nonnegative(),
+  at: z.number().int(),
+  model: z.string(),
+  messageCount: z.number().int(),
+  /** Everything sent: uncached + cache read + cache written. Null when the request got no usage back. */
+  inputTokens: z.number().int().nullable(),
+  outputTokens: z.number().int().nullable(),
+})
+export type ContextRequestRow = z.infer<typeof ContextRequestRow>
+
+export const ContextList = z.object({
+  /** Newest first. */
+  requests: z.array(ContextRequestRow),
+  /** Pass the last request's `n` as `before` to continue. */
+  hasOlder: z.boolean(),
+  /** Why there is nothing to show, when there is nothing. */
+  unavailable: ContextUnavailable.nullable(),
+})
+export type ContextList = z.infer<typeof ContextList>
+
+/** What a request's input tokens went on. The app colours and words each. */
+export const ContextCategory = z.enum(['system', 'tools', 'system_reminders', 'user_text', 'attachments', 'assistant_text', 'tool_calls', 'tool_results', 'thinking'])
+export type ContextCategory = z.infer<typeof ContextCategory>
+
+/** A block's kind as the API names it; `other` for kinds this viewer doesn't know, named in the block's label. */
+export const ContextBlockKind = z.enum(['text', 'thinking', 'tool_use', 'tool_result', 'image', 'document', 'other'])
+export type ContextBlockKind = z.infer<typeof ContextBlockKind>
+
+export const ContextBlock = z.object({
+  type: ContextBlockKind,
+  /** A tool's name, or for `other` the API's own name for the block. */
+  label: z.string(),
+  text: z.string(),
+  /** Estimated; see ContextDetail.exact. */
+  tokens: z.number().int(),
+  truncated: z.boolean(),
+})
+export type ContextBlock = z.infer<typeof ContextBlock>
+
+/** `system`: what Claude Code adds mid-conversation (reminders, tools that became available), sent as messages of their own. */
+export const ContextRole = z.enum(['user', 'assistant', 'system'])
+export type ContextRole = z.infer<typeof ContextRole>
+
+/** One message sent with a request, or one the transcript doesn't hold. */
+export const ContextMessage = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('message'), role: ContextRole, blocks: z.array(ContextBlock) }),
+  z.object({ kind: z.literal('unresolved') }),
+])
+export type ContextMessage = z.infer<typeof ContextMessage>
+
+export const ContextBlockPart = z.enum(['system', 'message', 'response'])
+export type ContextBlockPart = z.infer<typeof ContextBlockPart>
+/** Where a block sits in a request: system block `item`; block `block` of message `item`; or block `block` of the reply. */
+export const ContextBlockPlace = z.object({ part: ContextBlockPart, item: z.number().int().nonnegative(), block: z.number().int().nonnegative() })
+export type ContextBlockPlace = z.infer<typeof ContextBlockPlace>
+
+/** `GET /v2/agents/<id>/context/<n>/text?part=system|message|response&i=<item>&k=<block>`: one block, uncut. */
+export const ContextBlockText = z.object({ text: z.string() })
+export type ContextBlockText = z.infer<typeof ContextBlockText>
+
+/** `GET /v2/agents/<id>/context/<n>`: everything sent with request n, and what came back. */
+export const ContextDetail = z.object({
+  n: z.number().int(),
+  at: z.number().int(),
+  model: z.string(),
+  usage: z.object({ uncached: z.number().int(), cacheRead: z.number().int(), cacheWrite: z.number().int(), output: z.number().int(), totalInput: z.number().int() }).nullable(),
+  /** True when the per-item counts were scaled to the API's reported input total; false when they are raw estimates. */
+  exact: z.boolean(),
+  totalInput: z.number().int(),
+  categories: z.array(z.object({ name: ContextCategory, tokens: z.number().int() })),
+  system: z.array(ContextBlock),
+  tools: z.array(z.object({ name: z.string(), description: z.string(), tokens: z.number().int() })),
+  messages: z.array(ContextMessage),
+  response: z.array(ContextBlock),
+})
+export type ContextDetail = z.infer<typeof ContextDetail>
 
 /** Unauthenticated, for pairing screens and for the guardian's probe of who is answering. */
 export const ServerIdentity = z.object({

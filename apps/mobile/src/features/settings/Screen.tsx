@@ -113,7 +113,7 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
     openrouter: session.store.integration('openrouter')?.state ?? null,
     github: session.store.integration('github')?.state ?? null,
   })
-  const base = server ? baseSection(server.release.base, isOwner) : null
+  const base = server ? baseSection(server.release, isOwner) : null
   const backup = server ? backupSection(server.sourceBackup, isOwner, now) : null
 
   return (

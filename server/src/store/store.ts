@@ -1,10 +1,10 @@
 // The only code that touches SQL. One connection, one writer: `ourod`. Every call is synchronous, so a transaction can't
 // interleave with anything else in the process.
 import { DatabaseSync } from 'node:sqlite'
-import { AgentPulled, AgentState, DEFAULT_NOTIFICATION_SETTINGS, DeliveryState, PeerHello, PromptCacheLifetime } from '@ouro/contract'
+import { AgentPulled, AgentState, DEFAULT_NOTIFICATION_SETTINGS, DeliveryState, PeerHello, PinTarget, pinTargetKey, PromptCacheLifetime, StandingInstructions } from '@ouro/contract'
 import type {
   AgentEntity, AskEntity, AttachmentRef, ChatEntity, DeliveryWake, DeviceEntity, EntityKind, IntegrationEntity, IntegrationProvider, MessageEntity, MessagePurpose,
-  AskLevel, AskSnooze, ComputerTrust, NetworkKind, NetworkRole, NotificationSettings, PeerGroupPost, PeerGroupUpdate, PeerMessage, PeerOwnerAsk, PeerOwnerMessage, PersonEntity, PlanWindow, RemoteAskEntity, RemoteDelivery, PushTokenRegistration, ReadStateEntity, SummaryEntity, SummaryRecord,
+  AskLevel, AskSnooze, ComputerTrust, NetworkKind, NetworkRole, NotificationSettings, PeerGroupPost, PeerGroupUpdate, PeerMessage, PeerOwnerAsk, PeerOwnerMessage, PersonEntity, PinEntity, PlanWindow, RemoteAskEntity, RemoteDelivery, PushTokenRegistration, ReadStateEntity, SummaryEntity, SummaryRecord,
 } from '@ouro/contract'
 import type { AgentLifecycle } from '../domain/agent.ts'
 import { cacheStateOf } from '../domain/compaction.ts'
@@ -49,6 +49,8 @@ export interface AgentRow {
   /** Its own worktree, while it has one; null when it works in its folder directly. */
   worktree: AgentWorktree | null
   promptCacheLifetime: PromptCacheLifetime
+  /** Standing instructions added to the agent's rules, such as the starter agent's; null for none. */
+  instructions: StandingInstructions | null
   /** A copy pulled from a shared network; null: not one. */
   pulled: AgentPulled | null
   /** Null until a turn reports its context, and for models without a timed prompt cache. */
@@ -78,6 +80,8 @@ export interface NewAgent {
   credentialHash: string
   worktree: AgentWorktree | null
   promptCacheLifetime: PromptCacheLifetime
+  /** Standing instructions added to its rules. Null or left out: none. */
+  instructions?: StandingInstructions | null
 }
 
 export interface DeliveryRow {
@@ -171,6 +175,21 @@ export class Store {
     }
   }
 
+  /** Inside a transaction: runs `body`, and if it throws, undoes only what `body` wrote and throws on. */
+  savepoint<T>(body: () => T): T {
+    if (this.transactionDepth === 0) throw new Error('a savepoint is taken inside a transaction')
+    this.db.exec('SAVEPOINT attempt')
+    try {
+      const result = body()
+      this.db.exec('RELEASE attempt')
+      return result
+    } catch (error) {
+      this.db.exec('ROLLBACK TO attempt')
+      this.db.exec('RELEASE attempt')
+      throw error
+    }
+  }
+
   /** How many rows it changed. */
   private run(sql: string, ...params: SqlValue[]): { changes: number } {
     return { changes: Number(this.db.prepare(sql).run(...params).changes) }
@@ -244,10 +263,12 @@ export class Store {
     return this.get<{ cursor: number | null }>('SELECT max(cursor) AS cursor FROM changes')?.cursor ?? 0
   }
 
-  changesAfter(cursor: number, personId: string, limit: number): ChangeRow[] {
+  /** `left out`: kinds this client isn't sent. */
+  changesAfter(cursor: number, personId: string, limit: number, leftOut: readonly EntityKind[] = []): ChangeRow[] {
+    const notIn = leftOut.length === 0 ? '' : ` AND entity NOT IN (${leftOut.map(() => '?').join(', ')})`
     const rows = this.all<{ cursor: number; entity: EntityKind; entity_id: string; deleted: number }>(
-      'SELECT cursor, entity, entity_id, deleted FROM changes WHERE cursor > ? AND (audience_person_id IS NULL OR audience_person_id = ?) ORDER BY cursor LIMIT ?',
-      cursor, personId, limit,
+      `SELECT cursor, entity, entity_id, deleted FROM changes WHERE cursor > ? AND (audience_person_id IS NULL OR audience_person_id = ?)${notIn} ORDER BY cursor LIMIT ?`,
+      cursor, personId, ...leftOut, limit,
     )
     return rows.map((row) => ({ cursor: row.cursor, entity: row.entity, entityId: row.entity_id, deleted: row.deleted === 1 }))
   }
@@ -357,11 +378,12 @@ export class Store {
 
   insertAgent(agent: NewAgent): void {
     this.run(
-      `INSERT INTO agents (id, name, task, folder, model, parent, created_by, created_at, state_name, state_json, instance_generation, consecutive_crashes, ownership_epoch, last_activity_at, credential_hash, worktree_json, prompt_cache_lifetime)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO agents (id, name, task, folder, model, parent, created_by, created_at, state_name, state_json, instance_generation, consecutive_crashes, ownership_epoch, last_activity_at, credential_hash, worktree_json, prompt_cache_lifetime, instructions)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       agent.id, agent.name, agent.task, agent.folder, agent.model, agent.parent, agent.createdBy, agent.createdAt,
       agent.lifecycle.state.state, JSON.stringify(agent.lifecycle.state), agent.lifecycle.instanceGeneration, agent.lifecycle.consecutiveCrashes,
       agent.lifecycle.ownershipEpoch, agent.createdAt, agent.credentialHash, agent.worktree === null ? null : JSON.stringify(agent.worktree), agent.promptCacheLifetime,
+      agent.instructions ? JSON.stringify(agent.instructions) : null,
     )
     this.markChanged('agent', agent.id)
   }
@@ -398,6 +420,7 @@ export class Store {
       repliesSettledThroughSeq: row.replies_settled_through_seq as number,
       worktree: row.worktree_json === null ? null : JSON.parse(row.worktree_json as string) as AgentWorktree,
       promptCacheLifetime: PromptCacheLifetime.parse(row.prompt_cache_lifetime),
+      instructions: row.instructions === null ? null : StandingInstructions.parse(JSON.parse(row.instructions as string)),
       pulled: row.pulled_json === null || row.pulled_json === undefined ? null : AgentPulled.parse(JSON.parse(row.pulled_json as string)),
       promptCache: row.prompt_cache_json === null ? null : JSON.parse(row.prompt_cache_json as string) as PromptCacheRecord,
     }
@@ -493,6 +516,12 @@ export class Store {
     this.run(`UPDATE agents SET ${assignments} WHERE id = ?`, ...entries.map(([, value]) => value as SqlValue), id)
     // Bookkeeping no client sees changes nothing to sync.
     if (entries.some(([field]) => field !== 'journalCursor' && field !== 'repliesSettledThroughSeq')) this.markChanged('agent', id)
+  }
+
+  /** A new task and standing instructions: the old master agent, becoming the starter agent. */
+  setAgentRole(id: string, task: string, instructions: StandingInstructions | null): void {
+    this.run('UPDATE agents SET task = ?, instructions = ? WHERE id = ?', task, instructions === null ? null : JSON.stringify(instructions), id)
+    this.markChanged('agent', id)
   }
 
   savePromptCache(id: string, cache: PromptCacheRecord | null): void {
@@ -801,6 +830,54 @@ export class Store {
 
   countUnread(chatId: string, afterSeq: number, viewerAddress: string): number {
     return this.get<{ count: number }>('SELECT count(*) AS count FROM messages WHERE chat_id = ? AND seq > ? AND from_address <> ?', chatId, afterSeq, viewerAddress)!.count
+  }
+
+  // Pins
+
+  /** In the order they were pinned. */
+  listPins(personId: string): PinEntity[] {
+    return this.all<Record<string, SqlValue>>('SELECT * FROM pins WHERE person_id = ? ORDER BY pinned_at, id', personId).map((row) => pinEntityOf(row))
+  }
+
+  pinById(id: string): { personId: string; pin: PinEntity } | null {
+    const row = this.get<Record<string, SqlValue>>('SELECT * FROM pins WHERE id = ?', id)
+    return row ? { personId: row.person_id as string, pin: pinEntityOf(row) } : null
+  }
+
+  pinOf(personId: string, target: PinTarget): PinEntity | null {
+    const row = this.get<Record<string, SqlValue>>('SELECT * FROM pins WHERE person_id = ? AND target_key = ?', personId, pinTargetKey(target))
+    return row ? pinEntityOf(row) : null
+  }
+
+  /** Everyone's pins of one thing. */
+  pinsOf(target: PinTarget): { personId: string; pin: PinEntity }[] {
+    return this.all<Record<string, SqlValue>>('SELECT * FROM pins WHERE target_key = ?', pinTargetKey(target))
+      .map((row) => ({ personId: row.person_id as string, pin: pinEntityOf(row) }))
+  }
+
+  /** Everyone's pins of agents on one other computer. */
+  pinsOfAgentsOn(machineName: string): { personId: string; pin: PinEntity }[] {
+    // Pins are few: filtering them here is simpler than matching addresses in SQL.
+    return this.all<Record<string, SqlValue>>('SELECT * FROM pins')
+      .map((row) => ({ personId: row.person_id as string, pin: pinEntityOf(row) }))
+      .filter(({ pin }) => pin.target.kind === 'remote_agent' && pin.target.address.endsWith(`@${machineName}`))
+  }
+
+  insertPin(personId: string, pin: PinEntity): void {
+    this.run('INSERT INTO pins (id, person_id, target_key, target_json, pinned_at) VALUES (?, ?, ?, ?, ?)',
+      pin.id, personId, pinTargetKey(pin.target), JSON.stringify(pin.target), pin.pinnedAt)
+    this.markChanged('pin', pin.id, personId)
+  }
+
+  /** The same pin, of what its target became (an agent that moved between computers), keeping its place. */
+  retargetPin(personId: string, id: string, target: PinTarget): void {
+    this.run('UPDATE pins SET target_key = ?, target_json = ? WHERE id = ? AND person_id = ?', pinTargetKey(target), JSON.stringify(target), id, personId)
+    this.markChanged('pin', id, personId)
+  }
+
+  deletePin(personId: string, id: string): void {
+    this.run('DELETE FROM pins WHERE id = ? AND person_id = ?', id, personId)
+    this.markDeleted('pin', id, personId)
   }
 
   // Attachments
@@ -1204,7 +1281,7 @@ export class Store {
     this.markChanged('server', 'server')
   }
 
-  /** A computer the person removed from a network stays out of it here: see schema 27. */
+  /** A computer the person removed from a network stays out of it here: see schema 28. */
   noteRemovedFromNetwork(networkId: string, machineId: string, at: number): void {
     this.run('INSERT INTO network_removed_peers (network_id, machine_id, removed_at) VALUES (?, ?, ?) ON CONFLICT (network_id, machine_id) DO NOTHING', networkId, machineId, at)
   }
@@ -1435,6 +1512,10 @@ export class Store {
     const agentIds = this.all<{ agent_id: string }>('SELECT agent_id FROM summaries UNION SELECT agent_id FROM summary_progress UNION SELECT agent_id FROM live_lines').map((row) => row.agent_id)
     return agentIds.map((agentId) => this.summaryEntity(agentId)).filter((entity) => entity !== null)
   }
+}
+
+function pinEntityOf(row: Record<string, SqlValue>): PinEntity {
+  return { id: row.id as string, target: PinTarget.parse(JSON.parse(row.target_json as string)), pinnedAt: row.pinned_at as number }
 }
 
 export const readStateId = (personId: string, chatId: string): string => `${personId}:${chatId}`

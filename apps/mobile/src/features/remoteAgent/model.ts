@@ -1,5 +1,4 @@
 // An agent on another of the person's computers, as the list and its chat show it. Pure: screens only draw this.
-import { MASTER_AGENT_NAME } from '@ouro/contract'
 import type { ComputerEntity, NetworkEntity, RemoteAgentEntity, RemoteAskEntity } from '@ouro/contract'
 import type { IdleFold } from '../../core/accounts/preferences.ts'
 import type { NewSend } from '../../core/session/outbox.ts'
@@ -71,8 +70,7 @@ export function remoteListEntries(store: StoreView & RemoteView, fold: IdleFold,
   const minutes = foldMinutes(store, fold)
   return [...store.remoteAgents.values()].flatMap((remote): RemoteListEntry[] => {
     const computer = store.computers.get(remote.computerId)
-    // Each computer's master is reached on its own computer; here it would be a second "master" row (AG-17).
-    if (!computer || remote.name === MASTER_AGENT_NAME) return []
+    if (!computer) return []
     const at = remoteActivityTime(remote, now)
     const unread = remoteUnreadOf(store, remote)
     const latest = directChatWith(store, remote.address)?.latestMessage
@@ -123,6 +121,8 @@ export interface RemoteChatModel {
   title: string
   subtitle: string
   statusText: string
+  /** The status without its timer: what the chat holds steady by, so the timer stays live while a blip waits. */
+  statusLabel: string
   busy: boolean
   /** Its latest one-line summary, as its computer last told this one. */
   summaryLine: string | null
@@ -140,6 +140,7 @@ export function remoteChatModel(remote: RemoteAgentEntity, computer: ComputerEnt
     title: remote.name,
     subtitle: `@${computer.name}`,
     statusText: activity ? `${statusLabel}  ${timerText(now - activity.since)}` : statusLabel,
+    statusLabel,
     busy: activity !== null,
     summaryLine: remote.details?.summaryLine ?? null,
     canReadLog: remote.details !== null,

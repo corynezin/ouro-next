@@ -5,7 +5,7 @@ import { Address, AGENT_NAME_PATTERN } from './address.ts'
 import { AgentEntity, AskLevel, AskSnooze, BranchMerge, ModelId, PromptCacheLifetime } from './agent.ts'
 import { BaseOffer } from './bases.ts'
 import { ComputerEntity, ComputerInvite, ComputerTrust, NETWORK_NAME_PATTERN, NetworkEntity, NetworkInvite, NetworkKind, NetworkRole, RemoteAgentAction, RemoteAgentEntity, RemoteAskEntity } from './computers.ts'
-import { AskEntity, ChatEntity, ChatTitle, DeviceEntity, ServerEntity, GoalEntity, GoalKind, ReadStateEntity } from './entities.ts'
+import { AskEntity, ChatEntity, ChatTitle, DeviceEntity, ServerEntity, GoalEntity, GoalKind, PinEntity, PinTarget, ReadStateEntity } from './entities.ts'
 import { DeliveryWake, MessageEntity } from './message.ts'
 import { NotificationSettings, NotificationSettingsEntity, PushTokenRegistration } from './notifications.ts'
 
@@ -35,6 +35,8 @@ export const commands = {
     folder: z.string().nullable(),
     /** For models with a timed prompt cache. A 1 hour cache costs more to write and keeps an idle agent warm. */
     promptCacheLifetime: PromptCacheLifetime.default('5m'),
+    /** Uploaded files that come with the task, in its first message. */
+    attachmentIds: z.array(z.string()).default([]),
   }), z.object({ agent: AgentEntity })),
 
   send_message: defineCommand(['person', 'agent'], z.object({
@@ -90,7 +92,7 @@ export const commands = {
   /** Brings the calling agent's project memory and the person's shared notes together; Claude Code's hooks call it. */
   sync_memory: defineCommand(['agent'], Empty, Empty),
 
-  /** The master agent passes the person's own words to an agent, as theirs: their answer to a question, say. */
+  /** An agent a person started passes their own words to an agent here, as theirs: their answer to a question, say. */
   relay_message: defineCommand(['agent'], z.object({
     to: Address,
     text: z.string().min(1),
@@ -143,6 +145,13 @@ export const commands = {
    * within WATCH_LEASE_MS to keep it; there is nothing to send when the screen closes.
    */
   watch_agent: defineCommand(['person'], AgentTarget, Empty),
+  /**
+   * Keeps an agent or group at the top of the person's lists, after their other pins. An agent calls it for its creator.
+   * Pinning what is already pinned returns the pin as it is.
+   */
+  pin: defineCommand(['person', 'agent'], z.object({ target: PinTarget }), z.object({ pin: PinEntity })),
+  /** Unpinning what isn't pinned does nothing. */
+  unpin: defineCommand(['person', 'agent'], z.object({ target: PinTarget }), Empty),
   mark_chat_read: defineCommand(['person'], z.object({ chatId: z.string(), readThroughSeq: z.number().int().nonnegative() }), z.object({ readState: ReadStateEntity })),
 
   /** A one-time code for a new device of the owner, or for a named new person. */
@@ -208,7 +217,7 @@ export const commands = {
   take_base_update: defineCommand(['person', 'agent'], z.object({ n: z.number().int().positive() }), z.object({ server: ServerEntity })),
   /** Carries on with a base update once its conflicts are resolved and the merge is committed beside the live source. */
   continue_base_update: defineCommand(['agent'], Empty, z.object({ server: ServerEntity })),
-  /** After a conflict: has the master agent resolve it beside the live source. The owner's, or an agent's for them. */
+  /** After a conflict: starts an agent, base-<n>, to resolve it beside the live source. The owner's, or an agent's for them. */
   resolve_base_update: defineCommand(['person', 'agent'], Empty, z.object({ server: ServerEntity })),
   /** After a conflict: throws the merge away, and tells an agent resolving it to stop. The base stays offered, to take later. */
   drop_base_update: defineCommand(['person', 'agent'], Empty, z.object({ server: ServerEntity })),

@@ -25,5 +25,5 @@ export function parseAddress(address: Address): ParsedAddress {
 export const personAddress = (person: string): Address => `${OWNER_ADDRESS}@${person}`
 
 export const AGENT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
-export const RESERVED_AGENT_NAMES: readonly string[] = [OWNER_ADDRESS, 'system', 'all', 'everyone']
-export const MASTER_AGENT_NAME = 'master'
+/** `master`: the old front door's name; a machine that has one adopts it as its starter agent by that name alone. */
+export const RESERVED_AGENT_NAMES: readonly string[] = [OWNER_ADDRESS, 'system', 'all', 'everyone', 'master']

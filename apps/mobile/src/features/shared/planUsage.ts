@@ -26,20 +26,20 @@ export const NO_READING_YET = 'No reading yet'
 /** Signed in to a Claude subscription, so there are plan limits to read (an API key has none). */
 export const isClaudeOnPlan = (claude: ClaudeIntegrationState | null) => claude?.status === 'signed_in' && claude.account.method === 'plan'
 
+/** The window that runs longest: the one a plan's use is quoted by. Null when there are none. */
+const longestWindow = (windows: readonly PlanWindow[]): PlanWindow | null =>
+  windows.reduce<PlanWindow | null>((found, window) => (found && found.windowMinutes >= window.windowMinutes ? found : window), null)
+
 function windowName(windowMinutes: number) {
   if (windowMinutes === FIVE_HOURS) return '5-hour'
   if (windowMinutes === WEEK) return 'Weekly'
   return windowLabel(windowMinutes)
 }
 
-/** "~3% of 5h · ~1% of 7d" from its share of the Claude plan; dollars for an agent not on it or before the plan is read. */
+/** "41%": its share of the Claude plan's longest window; dollars for an agent not on it or before the plan is read. */
 export function agentUsageText(agent: Pick<AgentEntity, 'planShare' | 'costUsd'>): string | null {
-  if (agent.planShare?.length) {
-    return [...agent.planShare]
-      .sort((a, b) => a.windowMinutes - b.windowMinutes)
-      .map((window) => `~${capPct(window.usedFraction)} of ${windowLabel(window.windowMinutes)}`)
-      .join(' · ')
-  }
+  const longest = agent.planShare ? longestWindow(agent.planShare) : null
+  if (longest) return capPct(longest.usedFraction)
   return agent.costUsd > 0 ? money(agent.costUsd) : null
 }
 
@@ -62,6 +62,6 @@ export function openRouterSpentUsd(state: OpenrouterIntegrationState | null, age
 }
 
 function part(name: string, usage: PlanUsage | null, now: number): string | null {
-  const longest = usage?.windows.reduce<PlanWindow | null>((found, window) => (found && found.windowMinutes >= window.windowMinutes ? found : window), null)
+  const longest = usage ? longestWindow(usage.windows) : null
   return longest ? `${name}: ${capPct(usedNow(longest, now))}` : null
 }
