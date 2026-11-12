@@ -1,7 +1,6 @@
-// Settings against the real server: choices the owner saves come back through sync.
+// Server settings against the real server: choices the owner saves (with `ouro`, say) come back through sync.
 import assert from 'node:assert/strict'
 import { after, test } from 'node:test'
-import { autoArchiveKey, autoArchiveOptions } from '../src/features/settings/model.ts'
 import { JourneyRun, waitFor } from '../../../journeys/harness.ts'
 import { cleanUp, pairedPhone, runs } from './support.ts'
 
@@ -13,15 +12,14 @@ test('Settings: the owner turns auto-archive on and off, and the choice comes ba
   await run.startServer()
   const { phone, session } = await pairedPhone(run)
   try {
-    const shown = () => autoArchiveKey(session.store.server?.limits.autoArchiveAfterHours ?? null)
-    await waitFor('auto-archive off by default', () => shown() === 'off')
-    const day = autoArchiveOptions(null).find((option) => option.label === 'After 1 day')!
-    const saved = await session.command('set_auto_archive', { afterHours: day.afterHours })
+    const shown = () => session.store.server?.limits.autoArchiveAfterHours
+    await waitFor('auto-archive off by default', () => shown() === null)
+    const saved = await session.command('set_auto_archive', { afterHours: 24 })
     assert.ok(saved.ok, saved.ok ? '' : JSON.stringify(saved.failure))
-    await waitFor('after 1 day, through sync', () => shown() === day.key)
+    await waitFor('after 1 day, through sync', () => shown() === 24)
     const off = await session.command('set_auto_archive', { afterHours: null })
     assert.ok(off.ok, off.ok ? '' : JSON.stringify(off.failure))
-    await waitFor('off again, through sync', () => shown() === 'off')
+    await waitFor('off again, through sync', () => shown() === null)
   } finally {
     phone.activeSession?.dispose()
   }

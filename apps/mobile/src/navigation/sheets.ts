@@ -4,7 +4,7 @@ import type { NavigationState } from '@react-navigation/native'
 import type { Routes } from './routes.ts'
 
 /** The routes in AppRoot's `presentation: 'modal'` group. */
-export const SHEET_ROUTES: ReadonlySet<string> = new Set<keyof Routes>(['New', 'NewGroup', 'AddToChat', 'SelectText', 'Settings', 'Servers', 'Computers', 'Claude', 'ChatGPT', 'OpenRouter', 'GitHub', 'Pair'])
+export const SHEET_ROUTES: ReadonlySet<string> = new Set<keyof Routes>(['New', 'NewGroup', 'AddToChat', 'SelectText', 'Settings', 'Invite', 'Servers', 'Computers', 'Claude', 'ChatGPT', 'OpenRouter', 'GitHub', 'AWS', 'Pair'])
 
 /** The stack below its first sheet, or null when no sheet is open. */
 export function withoutSheets(state: NavigationState): NavigationState | null {

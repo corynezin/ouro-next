@@ -3,7 +3,7 @@
 // socket already runs as the owner's user.
 import { createReadStream, statSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { CHANGES_HEARTBEAT_MS, ClaudeLoginFinishBody, CONTEXT_PAGE_DEFAULT_LIMIT, ContextBlockPlace, GithubTokenBody, IdempotencyKey, MAX_ATTACHMENT_BYTES, PairRequest, SEARCH_DEFAULT_LIMIT, SecretKeyBody, UPDATE_ASSETS_PATH, UPDATE_MANIFEST_PATH, UPDATE_PROTOCOL_VERSION } from '@ouro/contract'
+import { AwsCredentialsBody, CHANGES_HEARTBEAT_MS, ClaudeLoginFinishBody, CONTEXT_PAGE_DEFAULT_LIMIT, ContextBlockPlace, GithubTokenBody, IdempotencyKey, MAX_ATTACHMENT_BYTES, PairRequest, SEARCH_DEFAULT_LIMIT, SecretKeyBody, UPDATE_ASSETS_PATH, UPDATE_MANIFEST_PATH, UPDATE_PROTOCOL_VERSION } from '@ouro/contract'
 import { UPDATE_PLATFORM } from '../app/app-updates.ts'
 import { fileTypeOf } from '../domain/file-type.ts'
 import type { SyncFrame, Viewer } from '@ouro/contract'
@@ -142,7 +142,7 @@ export function createApiHandler(core: OuroCore, trust: ListenerTrust, logging: 
 
     if (path.startsWith('/v2/integrations/')) {
       if (caller.kind !== 'person') throw new CommandRefused('forbidden', 'accounts are set up from the app')
-      return replyJson(response, 200, await integrationAction(core.integrations, method, path.slice('/v2/integrations/'.length), request))
+      return replyJson(response, 200, await integrationAction(core.integrations, method, path.slice('/v2/integrations/'.length), request, caller.person.isOwner))
     }
 
     if (path === '/v2/tailscale') {
@@ -318,7 +318,7 @@ function streamChanges(core: OuroCore, viewer: Viewer, caller: Caller, url: URL,
 }
 
 /** The accounts' routes. Codes, keys and tokens pass straight to the provider's tool: never stored here or logged. */
-async function integrationAction(integrations: Integrations, method: string, action: string, request: IncomingMessage): Promise<unknown> {
+async function integrationAction(integrations: Integrations, method: string, action: string, request: IncomingMessage, byOwner: boolean): Promise<unknown> {
   const body = <S extends z.ZodType>(schema: S) => async (): Promise<z.infer<S>> => {
     const parsed = schema.safeParse(await readJson(request))
     if (!parsed.success) throw new CommandRefused('invalid_request', 'that request is missing what this action needs')
@@ -335,6 +335,9 @@ async function integrationAction(integrations: Integrations, method: string, act
     case 'DELETE openrouter/key': return await integrations.openrouterClearKey()
     case 'POST github/token': return await integrations.githubSetToken((await body(GithubTokenBody)()).token)
     case 'POST github/disconnect': return await integrations.githubDisconnect()
+    case 'GET aws': return await integrations.awsStatus()
+    case 'POST aws/credentials': return await integrations.awsSetCredentials(await body(AwsCredentialsBody)())
+    case 'POST aws/disconnect': return await integrations.awsDisconnect(byOwner)
     default: throw new CommandRefused('not_found', `no such account action: ${method} ${action}`)
   }
 }

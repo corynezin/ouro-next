@@ -1,5 +1,5 @@
 // Keeps each account's entity in step with its provider's own tool, and runs sign-ins, keys and tokens through them.
-import type { ChatgptLoginStart, ClaudeLoginStart, IntegrationActionResult, IntegrationEntity, IntegrationProvider } from '@ouro/contract'
+import type { AwsActionResult, AwsCredentialsBody, AwsIntegrationState, ChatgptLoginStart, ClaudeLoginStart, IntegrationActionResult, IntegrationEntity, IntegrationProvider } from '@ouro/contract'
 import { ProviderUnreachable } from '../adapters/integrations.ts'
 import type { ActionOutcome, IntegrationTools } from '../adapters/integrations.ts'
 import { CommandRefused } from './failure.ts'
@@ -171,5 +171,28 @@ export class Integrations {
   async githubDisconnect(): Promise<IntegrationActionResult> {
     await reaching(() => this.config.tools.githubDisconnect())
     return this.settle('github', { accepted: true })
+  }
+
+  /** AWS is asked each time the app looks: it isn't a synced entity (see the contract). */
+  awsStatus(): Promise<AwsIntegrationState> {
+    return reaching(() => this.config.tools.awsStatus())
+  }
+
+  async awsSetCredentials(body: AwsCredentialsBody): Promise<AwsActionResult> {
+    const outcome = await reaching(() => this.config.tools.awsSetCredentials({
+      accessKeyId: body.accessKeyId.trim(), secretAccessKey: body.secretAccessKey.trim(), region: body.region.trim().toLowerCase(),
+    }))
+    if (!outcome.accepted) return outcome
+    return { accepted: true, state: await this.awsStatus() }
+  }
+
+  /**
+   * Removes the default profile's key, which may be one the owner put on the machine by hand, so only the owner may: an
+   * invited person can still connect or replace a key, which AWS checks first.
+   */
+  async awsDisconnect(byOwner: boolean): Promise<AwsActionResult> {
+    if (!byOwner) throw new CommandRefused('forbidden', "only the owner disconnects this server's AWS key")
+    await reaching(() => this.config.tools.awsDisconnect())
+    return { accepted: true, state: await this.awsStatus() }
   }
 }

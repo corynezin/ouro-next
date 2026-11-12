@@ -340,6 +340,8 @@ export class OuroCore {
       offerChanged: () => this.store.markChanged('server', 'server'),
       publishApp: config.personSource === null ? null : () => this.publishApp(config.personSource!.appDir),
       handOff: (work) => this.handOffBaseWork(work),
+      tellAgent: (name, text) => this.alert(name, text),
+      tellOwner: (text) => this.alert(OWNER_ADDRESS, text),
       log: config.log,
     })
     this.tailscale = new TailscaleConnection({ setup: config.tailscale, hostname: tailscaleHostnameOf(config.machineName), now: () => config.clock.now(), log: config.log })
@@ -927,6 +929,18 @@ export class OuroCore {
 
   private commandContinueBaseUpdate(): CommandOutput<'continue_base_update'> {
     this.baseUpdates.carryOn()
+    return { server: this.serverEntity() }
+  }
+
+  private commandResolveBaseUpdate(caller: Caller): CommandOutput<'resolve_base_update'> {
+    if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner takes base updates')
+    this.baseUpdates.resolve()
+    return { server: this.serverEntity() }
+  }
+
+  private commandDropBaseUpdate(caller: Caller): CommandOutput<'drop_base_update'> {
+    if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner takes base updates')
+    this.baseUpdates.drop()
     return { server: this.serverEntity() }
   }
 
@@ -1928,6 +1942,8 @@ export class OuroCore {
       case 'refresh_plan_usage': return this.commandRefreshPlanUsage(prepared)
       case 'take_base_update': return this.commandTakeBaseUpdate(caller, input as never)
       case 'continue_base_update': return this.commandContinueBaseUpdate()
+      case 'resolve_base_update': return this.commandResolveBaseUpdate(caller)
+      case 'drop_base_update': return this.commandDropBaseUpdate(caller)
       case 'create_source_backup':
       case 'push_source_backup': return { server: this.serverEntity() }
       case 'ask': return this.commandAsk(caller, input as never, idempotencyKey)

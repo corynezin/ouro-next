@@ -21,6 +21,8 @@ const preferenceSchemas = {
   claudeAskedServerIds: z.array(z.string()),
   /** The one server updates come from, chosen apart from the active one. Null: the built-in version only. */
   updateHomeServerId: z.string().nullable(),
+  /** What notifications were set to before Settings turned them off, so turning them on brings it back. */
+  notificationsOnMode: z.enum(['needs_me', 'every_message']),
 }
 
 export type Preferences = { [K in keyof typeof preferenceSchemas]: z.infer<(typeof preferenceSchemas)[K]> }
@@ -30,6 +32,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   idleFold: { kind: 'server_default' },
   claudeAskedServerIds: [],
   updateHomeServerId: null,
+  // The server's own default, for a phone that never turned notifications off here.
+  notificationsOnMode: 'every_message',
 }
 
 export class PreferencesStore {

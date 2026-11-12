@@ -43,8 +43,10 @@ import { PairScreen } from '../features/pair/Screen.tsx'
 import { PersonScreen } from '../features/person/Screen.tsx'
 import { ServersScreen } from '../features/servers/Screen.tsx'
 import { SettingsScreen } from '../features/settings/Screen.tsx'
+import { InviteScreen } from '../features/settings/InviteScreen.tsx'
 import { ChatGptScreen } from '../features/integrations/ChatGptScreen.tsx'
 import { ClaudeScreen } from '../features/integrations/ClaudeScreen.tsx'
+import { AwsScreen } from '../features/integrations/AwsScreen.tsx'
 import { GitHubScreen } from '../features/integrations/GitHubScreen.tsx'
 import { OpenRouterScreen } from '../features/integrations/OpenRouterScreen.tsx'
 import { ComputersScreen } from '../features/computers/Screen.tsx'
@@ -205,12 +207,14 @@ export function AppRoot({ core, hostedServers, updates, lock, push, otherServers
                       <Stack.Screen name="AddToChat" component={AddToChatScreen} />
                       <Stack.Screen name="SelectText" component={SelectTextScreen} options={{ title: 'Select text' }} />
                       <Stack.Screen name="Settings" component={SettingsScreen} />
+                      <Stack.Screen name="Invite" component={InviteScreen} />
                       <Stack.Screen name="Computers" component={ComputersScreen} />
                       <Stack.Screen name="Servers" component={ServersScreen} options={{ title: 'Servers' }} />
                       <Stack.Screen name="Claude" component={ClaudeScreen} options={{ title: 'Claude Code' }} />
                       <Stack.Screen name="ChatGPT" component={ChatGptScreen} options={{ title: 'ChatGPT' }} />
                       <Stack.Screen name="OpenRouter" component={OpenRouterScreen} options={{ title: 'OpenRouter' }} />
                       <Stack.Screen name="GitHub" component={GitHubScreen} options={{ title: 'GitHub' }} />
+                      <Stack.Screen name="AWS" component={AwsScreen} options={{ title: 'AWS' }} />
                       <Stack.Screen name="Pair" options={{ title: 'Add a server' }}>{(props) => <PairScreen onBack={() => props.navigation.goBack()} />}</Stack.Screen>
                     </Stack.Group>
                   </Stack.Navigator>

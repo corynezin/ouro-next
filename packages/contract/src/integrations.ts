@@ -75,3 +75,36 @@ export type ChatgptLoginStart = z.infer<typeof ChatgptLoginStart>
 export const ClaudeLoginFinishBody = z.object({ code: z.string().min(1).max(2000) })
 export const SecretKeyBody = z.object({ key: z.string().min(1).max(500) })
 export const GithubTokenBody = z.object({ token: z.string().min(1).max(500) })
+
+// ---- AWS ----
+// AWS is not an `integration` entity: an app from before it would refuse a whole snapshot holding a provider it doesn't
+// know. The app asks for it on its own route instead, `GET /v2/integrations/aws`, and sets or clears it with
+// `POST aws/credentials` and `POST aws/disconnect`. The keys go to the AWS CLI's own files, as its default profile, so
+// agents' `aws` commands and AWS SDKs use them.
+
+export const AwsIntegrationState = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('not_connected') }),
+  /**
+   * `accessKeyId`: the key's id, shortened to show (`AKIA…WXYZ`). `accountId` and `arn`: who AWS says the key is, null
+   * when AWS couldn't be asked; `problem`: AWS refused the key, or couldn't be reached, fit to show.
+   */
+  z.object({
+    status: z.literal('connected'), accessKeyId: z.string(), region: z.string().nullable(),
+    accountId: z.string().nullable(), arn: z.string().nullable(), problem: z.string().nullable(),
+  }),
+])
+export type AwsIntegrationState = z.infer<typeof AwsIntegrationState>
+
+export const AwsActionResult = z.discriminatedUnion('accepted', [
+  z.object({ accepted: z.literal(true), state: AwsIntegrationState }),
+  z.object({ accepted: z.literal(false), why: z.string() }),
+])
+export type AwsActionResult = z.infer<typeof AwsActionResult>
+
+/** An IAM user's long-lived access key (`AKIA…`), and the region agents work in by default. */
+export const AwsCredentialsBody = z.object({
+  accessKeyId: z.string().min(1).max(200),
+  secretAccessKey: z.string().min(1).max(200),
+  region: z.string().min(1).max(50),
+})
+export type AwsCredentialsBody = z.infer<typeof AwsCredentialsBody>

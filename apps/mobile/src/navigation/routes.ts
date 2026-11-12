@@ -30,11 +30,14 @@ export type Routes = {
   Servers: undefined
   Computers: undefined
   Settings: undefined
+  /** Settings → Invite someone: a one-time code for a new person on this server. */
+  Invite: undefined
   Claude: undefined
   ChatGPT: undefined
   OpenRouter: undefined
   /** `thenMakePrivateCopy`: the person came to connect GitHub to back up, so the private copy is made once it connects. */
   GitHub: { thenMakePrivateCopy?: boolean } | undefined
+  AWS: undefined
   Pair: undefined
   SelectText: { text: string }
   /** A file sent in a chat, fetched with the session's authorisation. */

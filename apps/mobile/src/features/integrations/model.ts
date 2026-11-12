@@ -1,7 +1,7 @@
 // The accounts this server's agents use, as the screens show them. Each reads its provider's `integration` entity, which
 // is absent until the server has first asked that provider's tool. Pure.
 import type {
-  ChatgptIntegrationState, ClaudeIntegrationState, GithubIntegrationState, IntegrationActionResult, IntegrationEntity,
+  AwsActionResult, AwsIntegrationState, ChatgptIntegrationState, ClaudeIntegrationState, GithubIntegrationState, IntegrationActionResult, IntegrationEntity,
   OpenrouterIntegrationState, PlanUsage, PlanWindow,
 } from '@ouro/contract'
 import type { ApiResult } from '../../core/session/serverApi.ts'
@@ -91,15 +91,6 @@ export function openRouterSpentText(openrouter: OpenrouterIntegrationState) {
   return `${money(openrouter.spentUsd)}${openrouter.availableUsd !== null ? `, ${money(openrouter.availableUsd)} left` : ''}`
 }
 
-/** Settings' "OpenRouter credits": what the key spent, of what it may spend in all. Null until OpenRouter has said (SET-15). */
-export function openRouterCreditsText(openrouter: OpenrouterIntegrationState | null): string | null {
-  if (openrouter?.status !== 'configured' || openrouter.spentUsd === null) return null
-  const total = openrouter.availableUsd === null ? null : openrouter.spentUsd + openrouter.availableUsd
-  return `${money(openrouter.spentUsd)}${total === null ? '' : ` of ${money(total)}`}`
-}
-
-export const OPENROUTER_CREDITS_FOOTER = 'What this OpenRouter key has spent, and what is left of its limit (the model provider for agents using the deepseek, haiku, qwen-coder, and gemini-flash aliases).'
-
 /** Removing the key: refused in the server's words, as the reference (INT-18). */
 export function keyRemovalOutcome(result: ApiResult<IntegrationActionResult>): ActionOutcome {
   if (result.ok && !result.value.accepted) return { kind: 'failed', text: result.value.why.trim() || KEY_REMOVAL_FAILED }
@@ -123,3 +114,31 @@ export function gitHubMissingScopesNote(github: GithubIntegrationState) {
 export const gitHubName = (github: GithubIntegrationState) => (github.status === 'connected' && github.user ? github.user : 'GitHub')
 export const gitHubConnectedToast = (github: GithubIntegrationState) =>
   github.status === 'connected' && github.user ? `Connected as ${github.user}` : 'Connected to GitHub'
+
+// ---- AWS ----
+
+/** Where an IAM user and its access key are made. */
+export const AWS_IAM_USERS_PAGE = 'https://console.aws.amazon.com/iam/home#/users'
+export const AWS_DEFAULT_REGION = 'us-east-1'
+
+export type AwsOutcome = { kind: 'accepted'; state: AwsIntegrationState } | { kind: 'failed'; text: string }
+
+/** AWS refusing the key is said in the server's words: they say which part was wrong. */
+export function awsOutcome(result: ApiResult<AwsActionResult>, refusedText: string): AwsOutcome {
+  if (!result.ok) return { kind: 'failed', text: failureText(result.failure) }
+  if (!result.value.accepted) return { kind: 'failed', text: result.value.why.trim() || refusedText }
+  return { kind: 'accepted', state: result.value.state }
+}
+
+/** The account's number, or the key's when AWS couldn't say. */
+export const awsName = (aws: AwsIntegrationState) =>
+  aws.status !== 'connected' ? 'AWS' : aws.accountId !== null ? `AWS account ${aws.accountId}` : `AWS key ${aws.accessKeyId}`
+
+/** The IAM identity's own name, the last part of its ARN (`user/agents` → `agents`). */
+export const awsIdentityText = (arn: string | null) => (arn === null ? null : arn.split(':').pop()!.split('/').pop() ?? arn)
+
+/** What the screen needs to send: all three, trimmed, or null while one is missing. */
+export function awsCredentialsOf(accessKeyId: string, secretAccessKey: string, region: string) {
+  const values = { accessKeyId: accessKeyId.trim(), secretAccessKey: secretAccessKey.trim(), region: region.trim().toLowerCase() }
+  return values.accessKeyId && values.secretAccessKey && values.region ? values : null
+}

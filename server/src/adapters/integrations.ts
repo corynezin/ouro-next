@@ -4,20 +4,20 @@ import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type {
-  ChatgptIntegrationState, ChatgptLoginStart, ClaudeIntegrationState, ClaudeLoginStart, GithubIntegrationState, OpenrouterIntegrationState,
+  AwsIntegrationState, ChatgptIntegrationState, ChatgptLoginStart, ClaudeIntegrationState, ClaudeLoginStart, GithubIntegrationState, OpenrouterIntegrationState,
 } from '@ouro/contract'
 import type { PlanWindowReading } from '../domain/usage.ts'
+import type { AwsTools } from './aws.ts'
+import { awsCredentialsProblem, shortKeyId } from './aws.ts'
+import type { ActionOutcome } from './provider-outcome.ts'
 
-/** A provider's answer to a code, key or token. `why`: its refusal, fit to show the person. */
-export type ActionOutcome = { accepted: true } | { accepted: false; why: string }
-
-/** The provider or its tool couldn't be reached: nothing changed, and trying again may work. */
-export class ProviderUnreachable extends Error {}
+export { ProviderUnreachable } from './provider-outcome.ts'
+export type { ActionOutcome } from './provider-outcome.ts'
 
 /** What the stand-in's ChatGPT plan may run. */
 export const STAND_IN_CHATGPT_MODELS = ['gpt-6-luna', 'gpt-6.1-sol'] as const
 
-export interface IntegrationTools {
+export interface IntegrationTools extends AwsTools {
   claudeStatus(): Promise<ClaudeIntegrationState>
   claudeLoginStart(): Promise<ClaudeLoginStart>
   claudeLoginFinish(code: string): Promise<ActionOutcome>
@@ -45,13 +45,16 @@ interface StandInState {
   chatgptPendingCode: string | null
   openrouter: OpenrouterIntegrationState
   github: GithubIntegrationState
+  /** Absent in a state file from before AWS. */
+  aws?: AwsIntegrationState
 }
 
 /**
  * For journeys: accounts as files in `dir`. A code, key or token is accepted when it is a line of `dir/accepted`. A
  * ChatGPT sign-in completes once `dir/chatgpt-entered` holds its code, as if the person had entered it at OpenAI. The
  * ChatGPT plan's windows are what `dir/chatgpt-usage.json` holds, if anything; a configured OpenRouter key's spend and
- * credits, what `dir/openrouter-credits.json` holds, once it does.
+ * credits, what `dir/openrouter-credits.json` holds, once it does. AWS keys are accepted when the secret is a line of
+ * `dir/accepted`, and then belong to account 123456789012.
  */
 export function standInIntegrationTools(dir: string, keyFiles: { openrouter: string }): IntegrationTools {
   mkdirSync(dir, { recursive: true })
@@ -143,5 +146,19 @@ export function standInIntegrationTools(dir: string, keyFiles: { openrouter: str
       rmSync(join(dir, 'github-token'), { force: true })
       update((state) => { state.github = { status: 'not_connected' } })
     },
+    awsStatus: async () => read().aws ?? { status: 'not_connected' },
+    awsSetCredentials: async (credentials) => {
+      const problem = awsCredentialsProblem(credentials)
+      if (problem) return { accepted: false, why: problem }
+      if (!accepts(credentials.secretAccessKey)) return refused
+      update((state) => {
+        state.aws = {
+          status: 'connected', accessKeyId: shortKeyId(credentials.accessKeyId), region: credentials.region,
+          accountId: '123456789012', arn: 'arn:aws:iam::123456789012:user/ouro-agents', problem: null,
+        }
+      })
+      return accepted
+    },
+    awsDisconnect: async () => update((state) => { state.aws = { status: 'not_connected' } }),
   }
 }

@@ -119,5 +119,4 @@ export const COMPUTERS_COPY = {
   offlineNote: 'An offline computer comes back by itself when it wakes.',
   inviteFailed: 'Could not make an invite.',
   removeFailed: 'Could not remove it.',
-  settingsFooter: 'Run agents on your own Mac or Linux machine too.',
 } as const

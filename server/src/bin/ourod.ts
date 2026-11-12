@@ -13,6 +13,7 @@ import { createApiHandler, openChangeStreams } from '../interfaces/http.ts'
 import { fileClock, systemClock } from '../adapters/clock.ts'
 import { apnsSender } from '../adapters/apns.ts'
 import { realIntegrationTools } from '../adapters/integration-tools.ts'
+import { awsFilesOf } from '../adapters/aws.ts'
 import { standInIntegrationTools } from '../adapters/integrations.ts'
 import { spriteTailscale, systemdTailscale, standInTailscale } from '../adapters/tailscale.ts'
 import type { TailscaleSetup } from '../adapters/tailscale.ts'
@@ -157,7 +158,7 @@ const core = new OuroCore({
   // Journeys use the stand-in; a real machine asks the accounts' own tools.
   integrationTools: environment.OURO_INTEGRATIONS_STAND_IN_DIR
     ? standInIntegrationTools(environment.OURO_INTEGRATIONS_STAND_IN_DIR, { openrouter: paths.openrouterApiKey })
-    : realIntegrationTools({ dataDir: paths.dataDir, anthropicKeyFile: paths.anthropicApiKey, openrouterKeyFile: paths.openrouterApiKey, claudeConfigDir: environment.CLAUDE_CONFIG_DIR ?? null }),
+    : realIntegrationTools({ dataDir: paths.dataDir, anthropicKeyFile: paths.anthropicApiKey, openrouterKeyFile: paths.openrouterApiKey, claudeConfigDir: environment.CLAUDE_CONFIG_DIR ?? null, awsFiles: awsFilesOf(environment) }),
   // An older guardian's acceptance check runs stand-in agents with real accounts and an empty home.
   accountsAreStandIns: environment.OURO_INTEGRATIONS_STAND_IN_DIR !== undefined,
   hostHold: hostHoldFromEnvironment(),

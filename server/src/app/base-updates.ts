@@ -1,5 +1,6 @@
-// Taking bases: which one is offered, and taking it. The base is merged beside the live source; a conflict goes to an
-// agent started for it, and nothing live changes. The merge goes live through the guardian, which builds, checks and switches to
+// Taking bases: which one is offered, and taking it. The base is merged beside the live source; on a conflict nothing live
+// changes, and the person chooses to have an agent, started for them, resolve it, or to drop it. The merge goes live
+// through the guardian, which builds, checks and switches to
 // it, rolling back if it turns out unhealthy; only then does the person's branch move to it. The ourod that starts a deploy
 // is replaced by it, so the update's state is stored and the next ourod follows the deployment to its end.
 import type { BaseStatus } from '@ouro/contract'
@@ -10,7 +11,7 @@ import {
 import type { BaseRelease, BaseSource } from '../adapters/base-source.ts'
 import { deploymentOutcome } from '../adapters/guardian-client.ts'
 import type { GuardianClient } from '../adapters/guardian-client.ts'
-import { baseUpdateOf, conflictBrief, continueDecision, takeRefusal } from '../domain/base-update.ts'
+import { baseUpdateOf, conflictBrief, conflictWaitingNotice, continueDecision, droppedBrief, dropDecision, resolveDecision, takeRefusal } from '../domain/base-update.ts'
 import type { BaseUpdateRecord } from '../domain/base-update.ts'
 import { NotPublished } from './app-publishing.ts'
 import type { PublishedApp } from './app-publishing.ts'
@@ -43,6 +44,10 @@ export interface BaseUpdatesConfig {
    * owner was told instead. Called inside a transaction.
    */
   handOff: (work: { name: string; task: string }) => string | null
+  /** Tells the agent of that name, if it is on this machine; called inside a transaction. */
+  tellAgent: (name: string, text: string) => void
+  /** Tells the owner with a notice in their chat; called inside a transaction. */
+  tellOwner: (text: string) => void
   log: (event: string, fields: Record<string, unknown>) => void
 }
 
@@ -122,6 +127,36 @@ export class BaseUpdates {
     setImmediate(() => void this.failingOnError(n, () => this.deploy(n)))
   }
 
+  /**
+   * After a conflict, the person's choice: an agent, `base-<n>`, is started for them to resolve it beside the live source,
+   * and the record names it. Called inside a transaction, so the record and the hand-off go in together or not at all. If
+   * no agent could start, the owner was told and the conflict keeps waiting for their choice.
+   */
+  resolve(): void {
+    const decision = resolveDecision(this.config.readRecord())
+    if (decision.kind === 'refused') throw new CommandRefused(decision.refusal.code, decision.refusal.message)
+    const { n, files, notes } = decision
+    const resolver = this.config.handOff({ name: `base-${n}`, task: conflictBrief(n, notes, files, besideDirOf(this.config.sourceRoot!, n)) })
+    this.config.saveRecord({ state: 'conflict', n, files, notes, resolver })
+  }
+
+  /**
+   * After a conflict, the person's other choice: the base stays offered and the merge beside is thrown away. Allowed while
+   * an agent is resolving it, and that agent is told to stop. Called inside a transaction: only the record is saved here;
+   * the merge is removed once the command commits, so a rollback can't leave a conflict without its merge. A quick re-take
+   * is safe, as `merge` removes any merge beside before it merges again.
+   */
+  drop(): void {
+    const decision = dropDecision(this.config.readRecord())
+    if (decision.kind === 'refused') throw new CommandRefused(decision.refusal.code, decision.refusal.message)
+    const { n, stopping } = decision
+    this.config.saveRecord({ state: 'idle' })
+    if (stopping !== null) this.config.tellAgent(stopping, droppedBrief(n))
+    this.config.log('base_update_dropped', { n, stopped: stopping })
+    const root = this.config.sourceRoot!
+    setImmediate(() => removeBeside(root, n))
+  }
+
   private async failingOnError(n: number, step: () => Promise<void>): Promise<void> {
     try {
       await step()
@@ -141,10 +176,11 @@ export class BaseUpdates {
       removeBeside(root, n)
       const merged = mergeBeside(root, n)
       if (merged.kind === 'conflicted') {
-        // One transaction: a conflict recorded with nobody told would wait for ever, refusing every retake.
+        // The person chooses whether an agent resolves it. The owner is told too, since an app from before this choice
+        // shows no buttons for it.
         this.config.commit(() => {
-          const resolver = this.config.handOff({ name: `base-${n}`, task: conflictBrief(n, notes, merged.files, besideDirOf(root, n)) })
-          this.config.saveRecord({ state: 'conflict', n, files: merged.files, resolver })
+          this.config.saveRecord({ state: 'conflict', n, files: merged.files, notes, resolver: null })
+          this.config.tellOwner(conflictWaitingNotice(n, merged.files))
         })
         return
       }

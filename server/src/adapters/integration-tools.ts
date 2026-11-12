@@ -1,4 +1,4 @@
-// The real accounts: Claude Code (`claude auth`), Codex (`codex app-server`), OpenRouter's API and GitHub's `gh`. Each
+// The real accounts: Claude Code (`claude auth`), Codex (`codex app-server`), OpenRouter's API, GitHub's `gh` and AWS. Each
 // keeps its own login in its own files; the server keeps only the keys it was given, in `secretsDir` (mode 600), and
 // never logs a code, key or token.
 import { execFile, execFileSync } from 'node:child_process'
@@ -10,6 +10,8 @@ import type { ChatgptIntegrationState, ClaudeIntegrationState, GithubIntegration
 import type { PlanWindowReading } from '../domain/usage.ts'
 import { CodexAppServer } from './codex-app-server.ts'
 import { ProviderUnreachable } from './integrations.ts'
+import { realAwsTools } from './aws.ts'
+import type { AwsFiles } from './aws.ts'
 import type { ActionOutcome, IntegrationTools } from './integrations.ts'
 
 const TOOL_TIMEOUT_MS = 20_000
@@ -64,7 +66,7 @@ function runTool(command: string, args: string[], stdin?: string): Promise<{ ok:
   })
 }
 
-export function realIntegrationTools(options: { dataDir: string; anthropicKeyFile: string; openrouterKeyFile: string; claudeConfigDir: string | null }): IntegrationTools {
+export function realIntegrationTools(options: { dataDir: string; anthropicKeyFile: string; openrouterKeyFile: string; claudeConfigDir: string | null; awsFiles: AwsFiles }): IntegrationTools {
   const claudeKeyFile = options.anthropicKeyFile
   const openrouterKeyFile = options.openrouterKeyFile
   const claudeSettingsFile = join(options.claudeConfigDir ?? join(homedir(), '.claude'), 'settings.json')
@@ -132,6 +134,7 @@ export function realIntegrationTools(options: { dataDir: string; anthropicKeyFil
   }
 
   return {
+    ...realAwsTools(options.awsFiles),
     claudeStatus,
     async claudeLoginStart() {
       endLogin()
