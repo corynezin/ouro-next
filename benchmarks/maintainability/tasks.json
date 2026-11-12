@@ -1,0 +1,402 @@
+[
+  {
+    "id": "T001",
+    "prompt": "Add a search box to the Archived screen so I can find an old agent by its name or task."
+  },
+  {
+    "id": "T002",
+    "prompt": "Let me hide tool results in the agent log when I only want to read the conversation."
+  },
+  {
+    "id": "T003",
+    "prompt": "Show a character count on the Select text screen."
+  },
+  {
+    "id": "T004",
+    "prompt": "Add a way to copy the filename from the file viewer."
+  },
+  {
+    "id": "T005",
+    "prompt": "Add a quick way to show only messages from one agent in the feed."
+  },
+  {
+    "id": "T006",
+    "prompt": "Let me snooze an ask for a week by typing 1w, or two weeks with 2w."
+  },
+  {
+    "id": "T007",
+    "prompt": "Recognize SVG and WebM attachments instead of treating them as generic binary files."
+  },
+  {
+    "id": "T008",
+    "prompt": "Show how many attachments I have selected in the composer."
+  },
+  {
+    "id": "T009",
+    "prompt": "Add a Copy goal action on the goal screen."
+  },
+  {
+    "id": "T010",
+    "prompt": "Add a workspace description field that I can set and see from the CLI."
+  },
+  {
+    "id": "T011",
+    "prompt": "Let me select several archived agents and unarchive them together."
+  },
+  {
+    "id": "T012",
+    "prompt": "Add search within the agent log, with next and previous match buttons."
+  },
+  {
+    "id": "T013",
+    "prompt": "Add a compact mode for agent rows so more agents fit on my phone."
+  },
+  {
+    "id": "T014",
+    "prompt": "Let me bookmark messages in an agent conversation and jump back to them later."
+  },
+  {
+    "id": "T015",
+    "prompt": "Give the feed a pause button so I can read it without new messages moving everything around."
+  },
+  {
+    "id": "T016",
+    "prompt": "Add JSON output to the workspaces command for scripts."
+  },
+  {
+    "id": "T017",
+    "prompt": "Add a command to export one agent conversation as a plain text file."
+  },
+  {
+    "id": "T018",
+    "prompt": "Let me mute notifications from an entire workspace."
+  },
+  {
+    "id": "T019",
+    "prompt": "Let me reorder attachments before sending a message."
+  },
+  {
+    "id": "T020",
+    "prompt": "Let me reorder my saved servers and remember that order."
+  },
+  {
+    "id": "T021",
+    "prompt": "Let me enter a custom snooze duration for an ask in the app."
+  },
+  {
+    "id": "T022",
+    "prompt": "Add a CLI option to show only the last few lines of the goal notes for an agent."
+  },
+  {
+    "id": "T023",
+    "prompt": "Add an app setting to make code blocks use a larger font."
+  },
+  {
+    "id": "T024",
+    "prompt": "Add a few saved task templates to the New agent screen, with a way to save my own."
+  },
+  {
+    "id": "T025",
+    "prompt": "Add JSON output for open asks so I can feed them into another tool."
+  },
+  {
+    "id": "T026",
+    "prompt": "Let me copy a group chat roster as plain text."
+  },
+  {
+    "id": "T027",
+    "prompt": "Add a personal note on each agent that I can edit in the app and read from the CLI."
+  },
+  {
+    "id": "T028",
+    "prompt": "Let me schedule a message to a local agent for later and cancel it before it goes out."
+  },
+  {
+    "id": "T029",
+    "prompt": "Add tags to agents, with a tag filter in the app and a CLI command to manage them."
+  },
+  {
+    "id": "T030",
+    "prompt": "Let me search the conversations already loaded on my phone when the server is offline."
+  },
+  {
+    "id": "T031",
+    "prompt": "Keep a history of goal status changes and show it on the goal screen."
+  },
+  {
+    "id": "T032",
+    "prompt": "Add a dry-run bulk archive command for all stopped agents in a workspace."
+  },
+  {
+    "id": "T033",
+    "prompt": "Add a Drafts screen where I can find and reopen my unsent messages across servers."
+  },
+  {
+    "id": "T034",
+    "prompt": "Add a CLI view of queued remote messages with an option to cancel one that has not been delivered."
+  },
+  {
+    "id": "T035",
+    "prompt": "Let me share an agent conversation as a text file from the app, including older messages."
+  },
+  {
+    "id": "T036",
+    "prompt": "Make the empty Archived screen explain how agents end up there."
+  },
+  {
+    "id": "T037",
+    "prompt": "Use a more readable font size in the log: 14 points with a 20-point line height."
+  },
+  {
+    "id": "T038",
+    "prompt": "Keep the Select text screen open after Copy all so I can keep selecting text."
+  },
+  {
+    "id": "T039",
+    "prompt": "Show up to five lines of each ask in the agents list instead of three."
+  },
+  {
+    "id": "T040",
+    "prompt": "Show attachment sizes below 1 MB with one decimal place in KB."
+  },
+  {
+    "id": "T041",
+    "prompt": "Show a zero-second goal interval as 0 seconds instead of 0s in human-readable duration output."
+  },
+  {
+    "id": "T042",
+    "prompt": "Make new devices group notification bursts for 30 seconds by default rather than a minute."
+  },
+  {
+    "id": "T043",
+    "prompt": "Sort archived agents alphabetically instead of by archive date."
+  },
+  {
+    "id": "T044",
+    "prompt": "When an agent is stopped, call it Not running in the app rather than stopped."
+  },
+  {
+    "id": "T045",
+    "prompt": "Keep sanitized attachment filenames up to 120 characters rather than 100, still preserving the extension."
+  },
+  {
+    "id": "T046",
+    "prompt": "Keep agents in the recently active bucket for five minutes instead of one."
+  },
+  {
+    "id": "T047",
+    "prompt": "Make multiword agent searches match words separately, even if they appear in different parts of the task or name."
+  },
+  {
+    "id": "T048",
+    "prompt": "An agent with an open unsnoozed ask should never get folded into Idle."
+  },
+  {
+    "id": "T049",
+    "prompt": "Group the feed by day and show a date heading above each group."
+  },
+  {
+    "id": "T050",
+    "prompt": "Ask me for confirmation before unarchiving an agent."
+  },
+  {
+    "id": "T051",
+    "prompt": "When loading older log entries fails, put Retry beside the Earlier control instead of a persistent error at the bottom."
+  },
+  {
+    "id": "T052",
+    "prompt": "Require explicit units in goal intervals, so 90s works but a bare 90 asks me to specify a unit."
+  },
+  {
+    "id": "T053",
+    "prompt": "Accept decimal hours when snoozing, like 1.5h."
+  },
+  {
+    "id": "T054",
+    "prompt": "When Allow urgent is on, let urgent asks from muted agents come through too. Normal messages should stay muted."
+  },
+  {
+    "id": "T055",
+    "prompt": "Include each workspace working directory in the error when an agent name is ambiguous across workspaces."
+  },
+  {
+    "id": "T056",
+    "prompt": "When I enter localhost without a scheme while pairing, use HTTP instead of HTTPS."
+  },
+  {
+    "id": "T057",
+    "prompt": "Use a filename extension as the fallback when an upload says its media type is unknown/unknown."
+  },
+  {
+    "id": "T058",
+    "prompt": "Show line numbers in code blocks, but leave them out when I copy the code."
+  },
+  {
+    "id": "T059",
+    "prompt": "Give failed file previews a visible Retry button."
+  },
+  {
+    "id": "T060",
+    "prompt": "Show snoozed asks in their own collapsed section below active asks."
+  },
+  {
+    "id": "T061",
+    "prompt": "Show stopped and running agent counts separately in the workspace list."
+  },
+  {
+    "id": "T062",
+    "prompt": "Add status:running and status:done filters to agent search, and let me combine them with ordinary words."
+  },
+  {
+    "id": "T063",
+    "prompt": "Let notification quiet hours use different schedules on weekdays and weekends."
+  },
+  {
+    "id": "T064",
+    "prompt": "Make the idle-fold preference specific to each server instead of sharing it across all servers."
+  },
+  {
+    "id": "T065",
+    "prompt": "Make failed goal cycles stop retrying automatically after five consecutive failures and explain why."
+  },
+  {
+    "id": "T066",
+    "prompt": "Let send all exclude selected agents with repeatable --except options."
+  },
+  {
+    "id": "T067",
+    "prompt": "Add a Retry all failed messages action for the conversation I am looking at."
+  },
+  {
+    "id": "T068",
+    "prompt": "After a remote message has been waiting a day, stop retrying and tell its sender it expired."
+  },
+  {
+    "id": "T069",
+    "prompt": "When the active server is unavailable, offer to switch to another saved server that is reachable."
+  },
+  {
+    "id": "T070",
+    "prompt": "Warn me if a goal changed on the server while I was editing it, instead of silently overwriting the newer text."
+  },
+  {
+    "id": "T071",
+    "prompt": "A message I have already read still counts as unread when its timestamp exactly matches the read marker. Please fix that."
+  },
+  {
+    "id": "T072",
+    "prompt": "Quiet hours from 10pm to 7am seem to do nothing overnight. Please fix them."
+  },
+  {
+    "id": "T073",
+    "prompt": "Typing 90 to snooze an ask makes it reappear almost immediately rather than after an hour and a half."
+  },
+  {
+    "id": "T074",
+    "prompt": "A photo attached as PICTURE.PNG is showing up as a generic file. Lowercase names seem fine."
+  },
+  {
+    "id": "T075",
+    "prompt": "Agent search used to find names without me worrying about capital letters. Now searching ALICE does not find alice."
+  },
+  {
+    "id": "T076",
+    "prompt": "The workspace chooser sometimes lists the same workspace several times. Can you fix that?"
+  },
+  {
+    "id": "T077",
+    "prompt": "A draft to master on one server shows up when I open master on another server. Please keep them separate."
+  },
+  {
+    "id": "T078",
+    "prompt": "An agent that has finished is labeled stopped in the app. Please show that it is done."
+  },
+  {
+    "id": "T079",
+    "prompt": "Long attachment filenames are losing their extension when they are uploaded. Please preserve it."
+  },
+  {
+    "id": "T080",
+    "prompt": "Reading a conversation on another computer sometimes does not clear its unread badge here, even after the read state syncs."
+  },
+  {
+    "id": "T081",
+    "prompt": "Running the CLI inside a nested workspace picks the outer workspace instead. Please fix workspace selection."
+  },
+  {
+    "id": "T082",
+    "prompt": "I have /work/project configured as a workspace, but commands from /work/project-old are being routed into it too."
+  },
+  {
+    "id": "T083",
+    "prompt": "After re-pairing a server using a URL with a trailing slash, I end up with two saved entries for it."
+  },
+  {
+    "id": "T084",
+    "prompt": "After installing an update, drafts from a much older session sometimes come back. Please stop restoring stale state."
+  },
+  {
+    "id": "T085",
+    "prompt": "I turned notifications off, but urgent asks are still pushing through. Please respect the off setting."
+  },
+  {
+    "id": "T086",
+    "prompt": "An old snooze from my other computer replaces a more recent Remind me now action. Please fix the sync behavior."
+  },
+  {
+    "id": "T087",
+    "prompt": "My quiet hours happen at the wrong time when my phone is west of UTC. Please make them follow the phone time."
+  },
+  {
+    "id": "T088",
+    "prompt": "Unarchiving an agent whose name includes a workspace fails from the app, while simple names work."
+  },
+  {
+    "id": "T089",
+    "prompt": "Sometimes a message at the end of a live log is missing or garbled while it is still being written. Please fix live log reading."
+  },
+  {
+    "id": "T090",
+    "prompt": "After a remote computer reconnects, queued messages arrive in reverse order. Please keep the original send order."
+  },
+  {
+    "id": "T091",
+    "prompt": "When sending a message fails, it disappears completely instead of staying available to retry. Please keep failed messages."
+  },
+  {
+    "id": "T092",
+    "prompt": "Two computers both have an agent called worker, and reading one clears the other conversation too."
+  },
+  {
+    "id": "T093",
+    "prompt": "Removing one attachment sometimes removes another copy of the same filename too. Please remove only the one I tapped."
+  },
+  {
+    "id": "T094",
+    "prompt": "When an agent restarts during a turn, older messages sometimes get handled after newer ones. Please preserve delivery order."
+  },
+  {
+    "id": "T095",
+    "prompt": "Some messages stay waiting forever after the agent has answered them, especially around a restart. Please fix completion tracking."
+  },
+  {
+    "id": "T096",
+    "prompt": "After reconnecting, an agent occasionally seems to forget a message it had already accepted. Please investigate duplicate acceptance events."
+  },
+  {
+    "id": "T097",
+    "prompt": "Restarting the gateway makes the phone reload its whole conversation history even when nothing changed."
+  },
+  {
+    "id": "T098",
+    "prompt": "Two identical messages sent at the same time collapse into one on the phone after reconnecting. Please preserve both."
+  },
+  {
+    "id": "T099",
+    "prompt": "If I switch servers while a request is in flight, the previous server sometimes overwrites what I see on the new one."
+  },
+  {
+    "id": "T100",
+    "prompt": "Cancelling an upload leaves partial files behind on disk. Please clean up failed uploads properly."
+  }
+]
