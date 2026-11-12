@@ -1553,7 +1553,8 @@ export class OuroCore {
     const runtime = runtimeOf(launchModelFor(row.model, { openrouter: this.openrouterConfigured() }).model.provider)
     if (runtime !== 'claude_code') return { kind: 'unavailable', reason: 'not_claude_code' }
     if (row.providerSessionId === null) return { kind: 'unavailable', reason: 'no_conversation' }
-    const state = await transcriptAt(claudeTranscriptPathOf(this.claudeConfigDir, row.providerSessionId, row.folder))
+    const path = claudeTranscriptPathOf(this.claudeConfigDir, row.providerSessionId, row.folder)
+    const state = path === null ? null : await transcriptAt(path)
     return state === null ? { kind: 'unavailable', reason: 'transcript_missing' } : { kind: 'transcript', state }
   }
 
