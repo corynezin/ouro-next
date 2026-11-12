@@ -6,7 +6,7 @@ import type {
   AgentEntity, AskEntity, AttachmentRef, ChatEntity, DeliveryWake, DeviceEntity, EntityKind, IntegrationEntity, IntegrationProvider, MessageEntity, MessagePurpose,
   AskLevel, AskSnooze, ComputerTrust, NetworkKind, NetworkRole, NotificationSettings, PeerGroupPost, PeerGroupUpdate, PeerMessage, PeerOwnerAsk, PeerOwnerMessage, PersonEntity, PinEntity, PlanWindow, RemoteAskEntity, RemoteDelivery, PushTokenRegistration, ReadStateEntity, SummaryEntity, SummaryRecord,
 } from '@ouro/contract'
-import type { AgentLifecycle } from '../domain/agent.ts'
+import type { AgentLifecycle, BackgroundTasks } from '../domain/agent.ts'
 import { cacheStateOf } from '../domain/compaction.ts'
 import type { PromptCacheRecord } from '../domain/compaction.ts'
 import type { GoalRecord } from '../domain/goal.ts'
@@ -55,6 +55,8 @@ export interface AgentRow {
   pulled: AgentPulled | null
   /** Null until a turn reports its context, and for models without a timed prompt cache. */
   promptCache: PromptCacheRecord | null
+  /** Null until its runner reports background tasks. */
+  backgroundTasks: BackgroundTasks | null
 }
 
 export interface TakenMessageRow {
@@ -423,6 +425,7 @@ export class Store {
       instructions: row.instructions === null ? null : StandingInstructions.parse(JSON.parse(row.instructions as string)),
       pulled: row.pulled_json === null || row.pulled_json === undefined ? null : AgentPulled.parse(JSON.parse(row.pulled_json as string)),
       promptCache: row.prompt_cache_json === null ? null : JSON.parse(row.prompt_cache_json as string) as PromptCacheRecord,
+      backgroundTasks: row.background_tasks_json === null || row.background_tasks_json === undefined ? null : JSON.parse(row.background_tasks_json as string) as BackgroundTasks,
     }
   }
 
@@ -527,6 +530,11 @@ export class Store {
   savePromptCache(id: string, cache: PromptCacheRecord | null): void {
     this.run('UPDATE agents SET prompt_cache_json = ? WHERE id = ?', cache === null ? null : JSON.stringify(cache), id)
     this.markChanged('agent', id)
+  }
+
+  /** Bookkeeping no client sees: it only decides when an idle agent may exit. */
+  saveBackgroundTasks(id: string, tasks: BackgroundTasks): void {
+    this.run('UPDATE agents SET background_tasks_json = ? WHERE id = ?', JSON.stringify(tasks), id)
   }
 
   /** Where an agent works from now on: back in the main checkout once its own worktree is removed. */

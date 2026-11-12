@@ -21,6 +21,7 @@ export type JournalBody =
   | { kind: 'compaction_finished'; contextTokens: number | null }
   | { kind: 'plan_usage_observed'; windows: PlanWindowReading[] }
   | { kind: 'notice'; text: string }
+  | { kind: 'background_tasks'; running: number }
   | { kind: 'runner_exiting'; reason: string }
 
 export type JournalRecord = JournalBody & { at: number; generation: number }

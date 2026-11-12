@@ -31,6 +31,8 @@ export type ProviderEvent =
   /** The subscription's usage windows, as the provider reported them; only those it reported. */
   | { type: 'plan_usage_observed'; windows: PlanWindowReading[] }
   | { type: 'notice'; text: string }
+  /** How many background tasks (shell commands, subagents) the model has running, each time that set changes. */
+  | { type: 'background_tasks'; running: number }
   | { type: 'exited'; reason: string }
 
 export interface ProviderSessionParams {

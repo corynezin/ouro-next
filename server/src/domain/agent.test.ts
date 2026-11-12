@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { decideAgent, defaultAgentPolicy, dueEvent, liveGeneration, longTurnToReport, wakeReasonForQueuedWork } from './agent.ts'
+import { BACKGROUND_TASKS_CAP_MS, decideAgent, defaultAgentPolicy, dueEvent, idleExitAt, liveGeneration, longTurnToReport, wakeReasonForQueuedWork } from './agent.ts'
 import type { AgentDecision, AgentEvent, AgentLifecycle, ExternalEffect } from './agent.ts'
 
 const policy = defaultAgentPolicy
@@ -223,6 +223,37 @@ test('finishing inside a turn waits for the turn, then stops and reopens on a me
   assert.deepEqual(reopened.externalEffects, [{ effect: 'launch_runner', generation: 2, resumeConversation: true }])
 })
 
+test('a turn the model begins on its own, idle, is a turn: a finish inside it waits for its end', () => {
+  const began = apply(run(toIdle()), { type: 'unprompted_turn_began', generation: 1, turnId: 'u1' }, 5000)
+  assert.deepEqual(began.next.state, { state: 'in_turn', since: 5000, generation: 1, turnId: 'u1', activity: { kind: 'waiting' }, lastOutputAt: 5000, afterTurn: null })
+  assert.deepEqual(began.externalEffects, [])
+  const finishing = apply(began.next, { type: 'finish_requested', summary: 'reported' })
+  assert.deepEqual(finishing.externalEffects, [])
+  const stopping = apply(finishing.next, { type: 'turn_finished', generation: 1, turnId: 'u1', continuation: { kind: 'no_unacknowledged_deliveries' } })
+  assert.deepEqual(stopping.externalEffects, [{ effect: 'signal_runner_stop', generation: 1 }])
+  // Already in a turn, or not up, it changes nothing.
+  assert.deepEqual(decideAgent(run(toInTurn()), { type: 'unprompted_turn_began', generation: 1, turnId: 'u2' }, 1000, policy), { outcome: 'refused', why: 'not_applicable_in_state' })
+  assert.deepEqual(decideAgent(run(toIdle()), { type: 'unprompted_turn_began', generation: 0, turnId: 'u2' }, 1000, policy), { outcome: 'refused', why: 'stale_generation' })
+})
+
+test('the idle exit waits for background tasks, up to a cap, and counts the idle period from their last change', () => {
+  const idleMs = 30 * 60_000
+  assert.equal(idleExitAt(1000, 1, idleMs, null), 1000 + idleMs)
+  // Running: held off until the cap after the tasks last changed, never sooner than the plain idle exit.
+  assert.equal(idleExitAt(1000, 1, idleMs, { generation: 1, running: 1, changedAt: 2000 }), 2000 + BACKGROUND_TASKS_CAP_MS)
+  // All finished: the idle period starts again from when they did.
+  assert.equal(idleExitAt(1000, 1, idleMs, { generation: 1, running: 0, changedAt: 9000 }), 9000 + idleMs)
+  assert.equal(idleExitAt(9000, 1, idleMs, { generation: 1, running: 0, changedAt: 1000 }), 9000 + idleMs)
+  // Reported by an earlier runner: those tasks died with it.
+  assert.equal(idleExitAt(1000, 2, idleMs, { generation: 1, running: 1, changedAt: 2000 }), 1000 + idleMs)
+
+  const idle = run(toIdle())
+  const facts = { hasQueuedWork: false, activeGoal: false, nextGoalCycleAt: null, promptCache: null }
+  const running = { ...facts, backgroundTasks: { generation: 1, running: 1, changedAt: 1000 } }
+  assert.equal(dueEvent(idle, 1000 + idleMs, policy, running), null)
+  assert.deepEqual(dueEvent(idle, 1000 + BACKGROUND_TASKS_CAP_MS, policy, running), { type: 'idle_timeout_reached' })
+})
+
 test('a provider hold keeps the work and resumes on the same conversation', () => {
   const failed = apply(run(toInTurn()), { type: 'turn_failed', generation: 1, turnId: 't1', failure: 'usage_limit', detail: 'limit', retryAt: 300_000 })
   assert.deepEqual(failed.transactionEffects, [{ effect: 'requeue_in_turn_deliveries' }])
@@ -292,7 +323,7 @@ test('a hold that began during a turn stops the agent between turns, and only th
 
 test('deadlines become events', () => {
   const inTurn = run(toInTurn())
-  const noFacts = { hasQueuedWork: false, activeGoal: false, nextGoalCycleAt: null, promptCache: null }
+  const noFacts = { hasQueuedWork: false, activeGoal: false, nextGoalCycleAt: null, promptCache: null, backgroundTasks: null }
   assert.equal(dueEvent(inTurn, 1000 + policy.stallMs - 1, policy, noFacts), null)
   assert.deepEqual(dueEvent(inTurn, 1000 + policy.stallMs, policy, noFacts), { type: 'stall_detected' })
   const onTool = apply(inTurn, { type: 'turn_activity', generation: 1, turnId: 't1', activity: { kind: 'tool', toolName: 'Bash' } }, 1000).next
@@ -362,6 +393,7 @@ test('generated event sequences never produce a second live instance', () => {
         { type: 'runner_ready', generation },
         { type: 'launch_deadline_passed' },
         { type: 'deliveries_dispatched', generation, turnId },
+        { type: 'unprompted_turn_began', generation, turnId },
         { type: 'turn_activity', generation, turnId, activity: { kind: 'thinking' } },
         { type: 'turn_finished', generation, turnId, continuation: pick(4) === 0 ? { kind: 'unacknowledged_deliveries_remain', nextTurnId: `next-${step}` } : { kind: 'no_unacknowledged_deliveries' } },
         { type: 'turn_failed', generation, turnId, failure: (['logged_out', 'credits', 'usage_limit', 'transient', 'fatal', 'model_refused'] as const)[pick(6)]!, detail: 'x', retryAt: null },
