@@ -22,6 +22,24 @@ Only one journey process runs at a time on a machine, across every checkout: the
 (`$TMPDIR/ouro-rebirth-journey.lock`) when a journey file loads it, and others print who holds it and wait. A lock left
 by a process that is gone is taken over.
 
+## Installing on Ubuntu (an EC2 instance)
+
+`scripts/install-run-ubuntu.sh <commit>` installs the server on a plain Ubuntu machine as two systemd services, with
+Caddy in front for HTTPS. Run it as the user Ouro runs as (on EC2, `ubuntu`), who needs sudo without a password; ports 80
+and 443 must be open to the internet. Phones and other computers reach it at `OURO_NEXT_PUBLIC_URL`, `https://<a name
+pointing at it>`; by default `https://<its public IP, dashed>.sslip.io`. That default follows the IP, so on EC2 give the
+instance an Elastic IP or set a name you own: a re-run that would change the URL stops and says so.
+
+```sh
+git clone <your copy> ~/ouro/source
+~/ouro/source/scripts/install-run-ubuntu.sh "$(git -C ~/ouro/source rev-parse HEAD)"
+```
+
+The guardian listens only on 127.0.0.1 there; `journalctl -u ouro-guardian` and `-u ouro-host` show the logs.
+
+The three installers share `scripts/install-run.sh`, which installs the server under any of the three service managers,
+and `scripts/lib/install-common.sh`; `scripts/install-run-sprite.sh` sets up a run Sprite.
+
 ## Installing on a Mac
 
 `scripts/install-run-mac.sh` installs the server on a Mac as the person's launch agents: it runs while they're logged in
