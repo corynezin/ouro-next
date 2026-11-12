@@ -62,6 +62,7 @@ const WORKING_ROUTES: Record<string, { action: PeerAction; handle: PeerRoute }> 
   '/group-posts': { action: 'group', handle: (peers, peer, body) => peers.receiveGroupPost(peer, body()) },
   '/pull': { action: 'pull', handle: (peers, peer, body) => peers.receivePull(peer, body()) },
   '/memory-push': { action: 'push_memory', handle: (peers, peer, body) => peers.receiveMemoryPush(peer, body()) },
+  '/claude-token': { action: 'sign_in', handle: (peers, peer, body) => peers.receiveClaudeToken(peer, body()) },
   '/messages': { action: 'message', handle: (peers, peer, body) => peers.receiveMessage(peer, body()) },
 }
 

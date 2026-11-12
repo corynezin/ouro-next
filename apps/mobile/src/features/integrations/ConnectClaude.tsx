@@ -1,4 +1,5 @@
 // Sign in to Claude Code on the server: Anthropic's own login with a code, an Anthropic API key, or OpenRouter instead.
+// Or share: one approval makes a year-long plan token that signs this server and the person's other computers in.
 // Shown from Settings → Claude Code, in its sheet.
 import { useState } from 'react'
 import type { ReactNode } from 'react'
@@ -9,8 +10,8 @@ import { accent } from '../../design/theme.ts'
 import type { ApiResult } from '../../core/session/serverApi.ts'
 import { failureText } from '../../core/session/serverApi.ts'
 import { useSession } from '../../navigation/coreContext.tsx'
-import type { IntegrationActionResult } from '@ouro/contract'
-import { actionOutcome, CONNECT_COPY, pasted } from './model.ts'
+import type { ClaudeShareComputer, IntegrationActionResult } from '@ouro/contract'
+import { actionOutcome, CONNECT_COPY, pasted, SHARE_COPY, shareOutcome } from './model.ts'
 import type { ConnectMode } from './model.ts'
 
 type Busy = 'none' | 'open' | 'code' | 'key' | 'openrouter'
@@ -104,6 +105,58 @@ export function ConnectClaude({ onDone }: { onDone: () => void }) {
           <Secondary title="Sign in with your Claude plan instead" onPress={() => switchTo('login')} />
         </>
       )}
+      {!!error && <Text style={s.error}>{error}</Text>}
+    </Page>
+  )
+}
+
+export function ShareClaude({ onShared }: { onShared: (computers: ClaudeShareComputer[]) => void }) {
+  const { api } = useSession()
+  const [opened, setOpened] = useState(false)
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState<'none' | 'open' | 'code'>('none')
+  const [error, setError] = useState('')
+
+  const openApproval = async () => {
+    setBusy('open'); setError('')
+    const started = await api.claudeShareStart()
+    setBusy('none')
+    if (!started.ok) return setError(failureText(started.failure))
+    setOpened(true)
+    await Linking.openURL(started.value.url)
+  }
+  const sendCode = async (text = code) => {
+    const value = pasted(text)
+    if (value === null) return
+    setBusy('code'); setError('')
+    const outcome = shareOutcome(await api.claudeShareFinish(value), SHARE_COPY.codeRefused)
+    setBusy('none')
+    if (outcome.kind === 'failed') return setError(outcome.text)
+    setCode('')
+    onShared(outcome.computers)
+  }
+  const paste = async () => {
+    const text = (await Clipboard.getStringAsync()).trim()
+    setCode(text)
+    void sendCode(text)
+  }
+
+  return (
+    <Page>
+      <Text style={s.title}>{SHARE_COPY.title}</Text>
+      <Text style={s.body}>{SHARE_COPY.body}</Text>
+      <Text style={s.small}>After you approve, Anthropic shows a code: copy it and paste it here.</Text>
+      <Primary title={opened ? 'Open the approval page again' : 'Open Anthropic approval'} onPress={() => { void openApproval() }} busy={busy === 'open'} />
+      {opened && (
+        <>
+          <Text style={s.label}>Code from Anthropic</Text>
+          <TextInput style={[s.input, { fontFamily: 'Menlo' }]} placeholder="paste the code" value={code} onChangeText={setCode}
+            autoCapitalize="none" autoCorrect={false} returnKeyType="done" onSubmitEditing={() => { void sendCode() }} placeholderTextColor={C.tertiary} />
+          <Secondary title="Paste from clipboard" onPress={() => { void paste() }} />
+          <Primary title="Sign in all my computers" onPress={() => { void sendCode() }} busy={busy === 'code'} disabled={!code.trim()} />
+        </>
+      )}
+      <Text style={s.small}>The token is kept only by Claude Code on your computers; Ouro's servers elsewhere never see it.</Text>
       {!!error && <Text style={s.error}>{error}</Text>}
     </Page>
   )

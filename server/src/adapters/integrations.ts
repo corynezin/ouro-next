@@ -1,6 +1,6 @@
 // The accounts port: each provider's own tool asked what is true, and told to sign in or out. The server stores only what
 // it last saw; the truth stays in the tools' own files (~/.claude, ~/.codex, gh's config) and the keys the server keeps.
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type {
@@ -9,12 +9,12 @@ import type {
 import type { PlanWindowReading } from '../domain/usage.ts'
 import type { AwsTools } from './aws.ts'
 import { awsCredentialsProblem, shortKeyId } from './aws.ts'
-import type { ActionOutcome } from './provider-outcome.ts'
+import type { ActionOutcome, TokenOutcome } from './provider-outcome.ts'
 import { fileSpritesTools } from './sprites-account.ts'
 import type { SpritesTools } from './sprites-account.ts'
 
 export { ProviderUnreachable } from './provider-outcome.ts'
-export type { ActionOutcome } from './provider-outcome.ts'
+export type { ActionOutcome, TokenOutcome } from './provider-outcome.ts'
 
 /** What the stand-in's ChatGPT plan may run. */
 export const STAND_IN_CHATGPT_MODELS = ['gpt-6-luna', 'gpt-6.1-sol'] as const
@@ -25,6 +25,14 @@ export interface IntegrationTools extends AwsTools, SpritesTools {
   claudeLoginFinish(code: string): Promise<ActionOutcome>
   claudeSetApiKey(key: string): Promise<ActionOutcome>
   claudeClearApiKey(): Promise<void>
+  /** Starts `claude setup-token`: the address where the person approves a year-long token for their Claude plan. */
+  claudeTokenStart(): Promise<ClaudeLoginStart>
+  /** Finishes it with the code the approval shows: the token, which Claude Code here is then signed in with. */
+  claudeTokenFinish(code: string): Promise<TokenOutcome>
+  /** Signs Claude Code in with a plan token, made here or shared from another of the person's computers. */
+  claudeUseToken(token: string): Promise<ActionOutcome>
+  /** The plan token Claude Code here is signed in with; null when none. Never logged. */
+  claudeToken(): Promise<string | null>
   chatgptStatus(): Promise<ChatgptIntegrationState>
   chatgptLoginStart(): Promise<ChatgptLoginStart>
   chatgptSignOut(): Promise<void>
@@ -43,6 +51,8 @@ export interface IntegrationTools extends AwsTools, SpritesTools {
 interface StandInState {
   claude: ClaudeIntegrationState
   claudeLoginStarted: boolean
+  /** The plan token Claude is signed in with, if it is; absent in a state file from before tokens. */
+  claudeToken?: string | null
   chatgpt: ChatgptIntegrationState
   chatgptPendingCode: string | null
   openrouter: OpenrouterIntegrationState
@@ -87,14 +97,41 @@ export function standInIntegrationTools(dir: string, keyFiles: { openrouter: str
       update((state) => {
         state.claude = { status: 'signed_in', account: { method: 'plan', email: 'person@stand-in.invalid' } }
         state.claudeLoginStarted = false
+        state.claudeToken = null
       })
       return accepted
     },
     claudeSetApiKey: async (key) => {
       if (!accepts(key)) return refused
-      update((state) => { state.claude = { status: 'signed_in', account: { method: 'api_key' } } })
+      update((state) => {
+        state.claude = { status: 'signed_in', account: { method: 'api_key' } }
+        state.claudeToken = null
+      })
       return accepted
     },
+    claudeTokenStart: async () => {
+      update((state) => { state.claudeLoginStarted = true })
+      return { url: 'https://stand-in.invalid/claude/authorize?long-lived' }
+    },
+    claudeTokenFinish: async (code) => {
+      if (!read().claudeLoginStarted) return { accepted: false, why: 'no sign-in in progress: start it first' }
+      if (!accepts(code)) return refused
+      const token = `sk-ant-oat01-stand-in-${createHash('sha256').update(code).digest('hex').slice(0, 24)}`
+      update((state) => {
+        state.claude = { status: 'signed_in', account: { method: 'plan', email: null, longLived: true } }
+        state.claudeLoginStarted = false
+        state.claudeToken = token
+      })
+      return { accepted: true, token }
+    },
+    claudeUseToken: async (token) => {
+      update((state) => {
+        state.claude = { status: 'signed_in', account: { method: 'plan', email: null, longLived: true } }
+        state.claudeToken = token
+      })
+      return accepted
+    },
+    claudeToken: async () => read().claudeToken ?? null,
     claudeClearApiKey: async () => update((state) => { state.claude = { status: 'signed_out' } }),
     chatgptStatus: async () => {
       const state = read()

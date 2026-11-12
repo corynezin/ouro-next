@@ -84,7 +84,7 @@ export const PEER_API_PREFIX = '/peer/v1'
 /** The wire protocol this release speaks, and the oldest it still speaks. Two machines work together when each one's
  * protocol is within the other's range. `hello` and `forget` keep their shapes forever, so any two versions can see each
  * other and part; every other request passes only between machines that work together. */
-export const PEER_PROTOCOL = 7
+export const PEER_PROTOCOL = 8
 export const PEER_MIN_PROTOCOL = 1
 /** The first protocol with POST /owner-messages: a machine sends it only to peers that speak it. */
 export const PEER_OWNER_MESSAGES_PROTOCOL = 2
@@ -100,6 +100,8 @@ export const PEER_LOG_PROTOCOL = 6
 /** The first protocol with networks: the network signature headers, a hello's `identity`, `visiting` and `ownerName`,
  * POST /network-join, POST /pull and POST /memory-push. */
 export const PEER_NETWORKS_PROTOCOL = 7
+/** The first protocol with POST /claude-token: a machine sends it only to peers that speak it. */
+export const PEER_CLAUDE_TOKEN_PROTOCOL = 8
 
 /** A machine as it introduces itself. `address`: where its peer API is reached. */
 export const PeerIdentity = z.object({
@@ -446,6 +448,11 @@ export type PeerPullRequest = z.infer<typeof PeerPullRequest>
  * added where the receiver lacks them. Never notes about the person. */
 export const PeerMemoryPush = z.object({ projectKey: z.string(), notes: z.array(PeerNote).max(1000) })
 export type PeerMemoryPush = z.infer<typeof PeerMemoryPush>
+
+/** POST /claude-token, signed, between the person's own computers in a private network: a year-long Claude plan token
+ * (`claude setup-token`) for the receiver to sign Claude Code in with. Never logged. */
+export const PeerClaudeToken = z.object({ token: z.string().regex(/^sk-ant-oat01-[A-Za-z0-9_-]{20,500}$/) })
+export type PeerClaudeToken = z.infer<typeof PeerClaudeToken>
 
 /** The signature headers on every peer request but /join. */
 export const PEER_SIGNATURE_HEADERS = {

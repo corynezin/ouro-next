@@ -1,6 +1,6 @@
 // One server's HTTP API, typed from `contract`. Never throws: every outcome is a value, and every answer is validated.
 import {
-  AttachmentRef, AwsActionResult, AwsIntegrationState, ChatgptLoginStart, ClaudeLoginStart, CommandRequest, commands, ContextBlockText, ContextDetail, ContextList, ErrorResponse, HistoryPage,
+  AttachmentRef, AwsActionResult, AwsIntegrationState, ChatgptLoginStart, ClaudeLoginStart, ClaudeShareResult, CommandRequest, commands, ContextBlockText, ContextDetail, ContextList, ErrorResponse, HistoryPage,
   IntegrationActionResult, LogPage, MachineList, NewMachine, SearchPage, Snapshot, SpritesActionResult, SpritesIntegrationState, SummaryPage, SyncFrame,
 } from '@ouro/contract'
 import type { ApiError, AwsCredentialsBody, CreateMachineBody, CommandInput, CommandName, CommandOutput, ContextBlockPlace } from '@ouro/contract'
@@ -160,6 +160,9 @@ export class ServerApi {
 
   claudeLoginStart() { return this.integrationRoute('POST', 'claude/login/start', null, ClaudeLoginStart) }
   claudeLoginFinish(code: string) { return this.integrationRoute('POST', 'claude/login/finish', { code }, IntegrationActionResult) }
+  claudeShareStart() { return this.integrationRoute('POST', 'claude/share/start', null, ClaudeLoginStart) }
+  claudeShareFinish(code: string) { return this.integrationRoute('POST', 'claude/share/finish', { code }, ClaudeShareResult) }
+  claudeShareAgain() { return this.integrationRoute('POST', 'claude/share/again', null, ClaudeShareResult) }
   claudeSetApiKey(key: string) { return this.integrationRoute('POST', 'claude/api_key', { key }, IntegrationActionResult) }
   chatgptLoginStart() { return this.integrationRoute('POST', 'chatgpt/login/start', null, ChatgptLoginStart) }
   chatgptSignOut() { return this.integrationRoute('POST', 'chatgpt/sign_out', null, IntegrationActionResult) }

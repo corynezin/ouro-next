@@ -328,6 +328,7 @@ export class OuroCore {
       integrationStored: (provider) => { if (provider === 'github') this.sourceBackup.refresh() },
       accountSignedIn: (account) => this.commit(() => this.releaseHolds('logged_out', (agent) => this.accountOf(agent) === account)),
       planUsageRead: (account, windows) => this.observePlanUsage(account, windows, config.clock.now()),
+      shareClaudeToken: (token) => this.peers.shareClaudeToken(token),
       log: config.log,
     })
     this.sourceBackup = new SourceBackupKeeper({
@@ -410,6 +411,16 @@ export class OuroCore {
       moveCheckFromPeer: (peer, check) => this.moveCheckFromPeer(peer, check),
       moveFromPeer: (peer, move) => this.commit(() => this.moveFromPeer(peer, move)),
       pullForPeer: (agentName) => this.pullForPeer(agentName),
+      claudeTokenFromPeer: async (peer, token) => {
+        try {
+          const outcome = await this.integrations.claudeUseSharedToken(token)
+          config.log('claude_token_from_peer', { machineId: peer.machineId, accepted: outcome.accepted })
+          return outcome
+        } catch (error) {
+          if (error instanceof CommandRefused) return { accepted: false, why: error.message }
+          throw error
+        }
+      },
       memoryPushFromPeer: (_peer, push) => this.commit(() => this.memory.takeSharedNotes(push.projectKey, push.notes)),
       agentCards: (trust) => this.store.listUnarchivedAgents().map((agent) => this.agentCard(agent, trust)),
       claudePlan: () => claudePlanForPeers(this.planReadingKnown('claude'), (since) => this.planCostSince('claude', since), config.clock.now()),
