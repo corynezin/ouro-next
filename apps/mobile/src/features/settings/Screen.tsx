@@ -222,9 +222,6 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
         </Section>
         {viewer?.isOwner ? <AutoArchiveSection /> : null}
         {viewer?.isOwner ? <ReplyRemindersSection /> : null}
-        <Section title="Avatars" footer={<Text>{SETTINGS_COPY.avatarsFooter}</Text>}>
-          <Toggle label="Model avatars" isOn={preferences.modelAvatars} onIsOnChange={(on) => core.preferences.set('modelAvatars', on)} />
-        </Section>
         <Section title="App" footer={<Text>{`${SETTINGS_COPY.appFooter} ${SETTINGS_COPY.updatesFromFooter}`}</Text>}>
           <KV k="Running" v={runningCodeText(runningCode())} />
           <KV k="Version" v={binaryVersionText(Application.nativeApplicationVersion, Application.nativeBuildVersion)} />
