@@ -271,8 +271,29 @@ test("a Sprite's steps write the installer's settings and run it, and its server
 /** The settings an installer reads: the `OURO_NEXT_…` names in its header comment. */
 const headerSettings = (script: string) => new Set(readFileSync(join(repoRoot, script), 'utf8').split('\nset -euo pipefail')[0]!.match(/OURO_NEXT_[A-Z_]+/g) ?? [])
 
-test('every installer a provisioner runs is in the repository', () => {
-  for (const script of Object.values(INSTALLERS)) assert.ok(existsSync(join(repoRoot, script)), `${script} is missing`)
+/**
+ * An installer and every file it runs or sources, followed from `"$here/…"` and `"$script_dir/…"` (both the scripts
+ * folder): install-run.sh, lib/install-common.sh, lib/guardian-config.mjs and so on.
+ */
+function installerFiles(script: string, seen = new Set<string>()): Set<string> {
+  if (seen.has(script)) return seen
+  seen.add(script)
+  if (!existsSync(join(repoRoot, script))) return seen
+  for (const match of readFileSync(join(repoRoot, script), 'utf8').matchAll(/"\$(?:here|script_dir)\/([^"$]+)"/g)) installerFiles(`scripts/${match[1]!}`, seen)
+  return seen
+}
+
+test('every installer a provisioner runs, and every file it runs in turn, is in the repository and travels in the bundle', () => {
+  // The new machine gets the commit as a git bundle: only tracked files reach it.
+  const tracked = new Set(execFileSync('git', ['ls-files', 'scripts'], { cwd: repoRoot, encoding: 'utf8' }).split('\n'))
+  for (const installer of Object.values(INSTALLERS)) {
+    const files = installerFiles(installer)
+    for (const file of ['scripts/install-run.sh', 'scripts/lib/install-common.sh', 'scripts/lib/guardian-config.mjs']) assert.ok(files.has(file), `${installer} doesn't reach ${file}`)
+    for (const file of files) {
+      assert.ok(existsSync(join(repoRoot, file)), `${file}, run by ${installer}, is missing`)
+      assert.ok(tracked.has(file), `${file}, run by ${installer}, isn't tracked, so no bundle carries it`)
+    }
+  }
 })
 
 test('every setting a provisioner gives an installer is one that installer, or install-run.sh under it, reads', () => {
