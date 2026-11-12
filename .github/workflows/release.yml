@@ -49,8 +49,8 @@ jobs:
           git config user.name "Ouro Next"
           git config user.email "bases@ouro-next.invalid"
           git commit -am "Ouro $version"
-          git push origin HEAD:main
           git tag -a "base-$n" -m "$NOTES"
           git tag -a "v$version" -m "Ouro $version (base $n)"
-          git push origin "base-$n" "v$version"
+          # One push, all or nothing: main never carries a version that has no base.
+          git push --atomic origin HEAD:main "base-$n" "v$version"
           gh release create "v$version" --title "Ouro $version" --notes "$NOTES" --verify-tag
