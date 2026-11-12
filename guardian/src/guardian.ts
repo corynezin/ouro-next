@@ -94,9 +94,10 @@ export class Guardian {
   async start(): Promise<void> {
     this.startControlSocket()
     this.proxy = startProxy({
+      host: this.config.listenHost,
       port: this.config.listenPort,
       upstreamSocket: this.paths.appSocket,
-      onListening: () => this.logEvent('listening', { port: this.config.listenPort }),
+      onListening: () => this.logEvent('listening', { host: this.config.listenHost, port: this.config.listenPort }),
     })
     this.supervisor.whenExitsUnexpectedly((code) => this.handleOurodExit(code))
 

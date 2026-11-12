@@ -1,6 +1,6 @@
 // Servers → Link a computer with a command: for a computer this phone won't pair with, such as the person's own Mac, a
-// one-time `ouro computers join` command to run on it. A server that reaches computers over Tailscale needs it connected
-// first, under Settings → Integrations → Tailscale. The linked computers themselves are listed in Servers.
+// one-time `ouro computers join` command to run on it. A server that reaches computers only over Tailscale (a Sprite) needs
+// it connected first, under Settings → Integrations → Tailscale; one with its own public address (an EC2 instance) doesn't. The linked computers themselves are listed in Servers.
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { Share } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
@@ -12,7 +12,7 @@ import { HeaderButton, Note } from '../../design/form.tsx'
 import { toast } from '../../design/Toast.tsx'
 import { useSession } from '../../navigation/coreContext.tsx'
 import type { ScreenProps } from '../../navigation/routes.ts'
-import { COMPUTERS_COPY, inviteFooter, tailscaleGateOf, TAILSCALE_COPY } from './model.ts'
+import { COMPUTERS_COPY, inviteFooter, tailscaleBlocksComputers, TAILSCALE_COPY } from './model.ts'
 
 export function ComputersScreen({ navigation }: ScreenProps<'Computers'>) {
   const session = useSession()
@@ -28,7 +28,7 @@ export function ComputersScreen({ navigation }: ScreenProps<'Computers'>) {
     })
   }, [session])
   // Unknown until the first answer: no invite shows yet.
-  const needsTailscale = tailscale !== null && tailscaleGateOf(tailscale.tailscale) !== null
+  const needsTailscale = tailscale !== null && tailscaleBlocksComputers(tailscale)
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: COMPUTERS_COPY.addTitle, headerRight: () => <HeaderButton title="Done" bold onPress={() => navigation.goBack()} /> })

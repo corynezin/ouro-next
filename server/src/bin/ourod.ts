@@ -15,7 +15,7 @@ import { apnsSender } from '../adapters/apns.ts'
 import { realIntegrationTools } from '../adapters/integration-tools.ts'
 import { awsFilesOf } from '../adapters/aws.ts'
 import { standInIntegrationTools } from '../adapters/integrations.ts'
-import { spriteTailscale, standInTailscale } from '../adapters/tailscale.ts'
+import { spriteTailscale, systemdTailscale, standInTailscale } from '../adapters/tailscale.ts'
 import type { TailscaleSetup } from '../adapters/tailscale.ts'
 import type { SendPush } from '../adapters/apns.ts'
 import { claudeSummarize } from '../adapters/summarizer.ts'
@@ -32,6 +32,7 @@ import { fileSpritesAccount } from '../adapters/sprites-account.ts'
 import { SpritesHttpApi } from '../adapters/sprites-api.ts'
 import { Machines } from '../app/machines.ts'
 import { MachinesFile } from '../store/machines-file.ts'
+import { ownPeerAddress } from '../domain/peers.ts'
 
 const startedAt = performance.now()
 const DEFAULT_SLOW_REQUEST_MS = 2_000
@@ -121,10 +122,16 @@ function hostHoldFromEnvironment(): HostHold {
   return spriteTasksHold(socketPath, `ouro-${createHash('sha256').update(paths.dataDir).digest('hex').slice(0, 12)}`)
 }
 
-/** Journeys use the stand-in; a run Sprite sets Tailscale up itself; anywhere else the machine has its own network. */
+/**
+ * Journeys use the stand-in; a run Sprite sets Tailscale up itself, and reaches computers only through it. A run server
+ * under systemd (an EC2 instance, `OURO_TAILSCALE=systemd`) can join the person's Tailscale network too, though it
+ * reaches computers without it. Anywhere else the machine has its own network.
+ */
 function tailscaleSetupFromEnvironment(): TailscaleSetup {
-  if (environment.OURO_TAILSCALE_STAND_IN_DIR) return { kind: 'set_up_here', host: standInTailscale(environment.OURO_TAILSCALE_STAND_IN_DIR) }
-  if (environment.OURO_TAILSCALE === 'sprite') return { kind: 'set_up_here', host: spriteTailscale() }
+  if (environment.OURO_TAILSCALE_STAND_IN_DIR) return { kind: 'set_up_here', host: standInTailscale(environment.OURO_TAILSCALE_STAND_IN_DIR), neededForComputers: true }
+  const kind = environment.OURO_TAILSCALE
+  if (kind === 'sprite') return { kind: 'set_up_here', host: spriteTailscale(), neededForComputers: true }
+  if (kind === 'systemd') return { kind: 'set_up_here', host: systemdTailscale(), neededForComputers: false }
   return { kind: 'not_needed' }
 }
 
@@ -189,7 +196,7 @@ const core = new OuroCore({
   policy,
   releaseId,
   machineName: environment.OURO_MACHINE_NAME ?? 'this-machine',
-  peerAddress: environment.OURO_PEER_ADDRESS ?? null,
+  peerAddress: ownPeerAddress({ peerAddress: environment.OURO_PEER_ADDRESS, publicUrl: environment.OURO_PUBLIC_URL }),
   defaultModel: environment.OURO_DEFAULT_MODEL ?? 'opus',
   defaultFolder: environment.OURO_DEFAULT_FOLDER ?? join(paths.dataDir, 'work'),
   agentLimit: Number(environment.OURO_AGENT_LIMIT ?? 8),
