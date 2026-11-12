@@ -171,9 +171,10 @@ function parseArguments(args: string[], valueFlags: readonly string[], switchFla
   return parsed
 }
 
-/** `--cache 5m|1h`: how long a new agent's prompt cache lives, for models with a timed one. Absent means 5 minutes. */
-export function promptCacheLifetimeFlag(value: string | undefined): PromptCacheLifetime {
-  if (value === undefined) return '5m'
+/** `--cache 5m|1h`: how long a new agent's prompt cache lives, for models with a timed one. Absent: nothing is sent, and
+ * the server's default applies. */
+export function promptCacheLifetimeFlag(value: string | undefined): PromptCacheLifetime | undefined {
+  if (value === undefined) return undefined
   const parsed = PromptCacheLifetime.safeParse(value)
   if (!parsed.success) throw new CliFailure(`--cache is 5m or 1h, not ${value}`)
   return parsed.data

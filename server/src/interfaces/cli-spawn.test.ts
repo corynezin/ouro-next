@@ -33,8 +33,8 @@ after(async () => {
 const environment = { OURO_SOCKET: socketPath, OURO_AGENT_CREDENTIAL: 'credential' }
 const run = (args: string[]) => runCli(args, environment, () => '', () => {})
 
-test('--cache is 5m by default and takes 5m or 1h', () => {
-  assert.equal(promptCacheLifetimeFlag(undefined), '5m')
+test("--cache takes 5m or 1h, and absent leaves the choice to the server's default", () => {
+  assert.equal(promptCacheLifetimeFlag(undefined), undefined)
   assert.equal(promptCacheLifetimeFlag('5m'), '5m')
   assert.equal(promptCacheLifetimeFlag('1h'), '1h')
   assert.throws(() => promptCacheLifetimeFlag('2h'), CliFailure)
@@ -48,7 +48,7 @@ test('ouro spawn and ouro new pass the prompt cache lifetime on', async () => {
   assert.deepEqual(received.map(({ path, input }) => [path, input.promptCacheLifetime, input.task]), [
     ['/v2/commands/create_agent', '1h', 'the task'],
     ['/v2/commands/create_agent', '1h', 'another task'],
-    ['/v2/commands/create_agent', '5m', 'a plain task'],
+    ['/v2/commands/create_agent', undefined, 'a plain task'],
   ])
   await assert.rejects(run(['spawn', 'bad', '--cache', 'forever', 'x']), CliFailure)
   assert.equal(received.length, 3)
