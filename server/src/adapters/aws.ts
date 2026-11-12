@@ -6,15 +6,25 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { AwsIntegrationState } from '@ouro/contract'
-import { ProviderUnreachable } from './integrations.ts'
-import type { ActionOutcome } from './integrations.ts'
+import { ProviderUnreachable } from './provider-outcome.ts'
+import type { ActionOutcome } from './provider-outcome.ts'
 
 export interface AwsCredentials { accessKeyId: string; secretAccessKey: string; region: string }
 
+/** A key as it is signed with: `sessionToken` only for temporary credentials, which someone set outside Ouro. */
+export interface SigningCredentials { accessKeyId: string; secretAccessKey: string; sessionToken?: string }
+
+// The checks only keep out what can't be a key, so nothing odd (a newline, a bracket) reaches the INI files. Their bounds
+// are IAM's own: a key id is 16 to 128 characters, AKIA (an IAM user's) or ASIA (temporary) and then capitals and digits;
+// a secret is 40 base64 characters today, allowed 30 to 128 in case that changes; a region is like us-east-1 or
+// ap-southeast-2, or us-gov-west-1.
 const ACCESS_KEY_ID = /^AKIA[A-Z0-9]{12,124}$/
 const TEMPORARY_KEY_ID = /^ASIA[A-Z0-9]{12,124}$/
 const SECRET_ACCESS_KEY = /^[A-Za-z0-9/+=]{30,128}$/
 const REGION = /^[a-z]{2}(-[a-z]+)+-\d{1,2}$/
+
+/** How long STS has to answer a check before it counts as unreachable. */
+const STS_TIMEOUT_MS = 15_000
 
 /** Why these can't be an access key, or null when they look like one. */
 export function awsCredentialsProblem(credentials: AwsCredentials): string | null {
@@ -115,18 +125,25 @@ export function sigV4Authorization(request: SigningRequest, credentials: { acces
 
 const amzDateOf = (now: Date) => now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
 
+/** The headers a check sends besides `host` and `x-amz-date`: temporary credentials carry their token, signed with the rest. */
+export function stsHeaders(credentials: SigningCredentials): Record<string, string> {
+  const headers: Record<string, string> = { 'content-type': 'application/x-www-form-urlencoded; charset=utf-8' }
+  if (credentials.sessionToken) headers['x-amz-security-token'] = credentials.sessionToken
+  return headers
+}
+
 export type CallerIdentity = { kind: 'known'; accountId: string; arn: string } | { kind: 'refused'; why: string }
 
 /** Who AWS says the key is, through STS's GetCallerIdentity, which any key may ask. Throws ProviderUnreachable. */
-export async function getCallerIdentity(credentials: { accessKeyId: string; secretAccessKey: string }, now = new Date()): Promise<CallerIdentity> {
+export async function getCallerIdentity(credentials: SigningCredentials, now = new Date()): Promise<CallerIdentity> {
   const host = 'sts.amazonaws.com'
   const body = 'Action=GetCallerIdentity&Version=2011-06-15'
-  const headers = { 'content-type': 'application/x-www-form-urlencoded; charset=utf-8' }
+  const headers = stsHeaders(credentials)
   const amzDate = amzDateOf(now)
   const authorization = sigV4Authorization({ method: 'POST', host, path: '/', query: '', headers, body, region: 'us-east-1', service: 'sts', amzDate }, credentials)
   let response: Response
   try {
-    response = await fetch(`https://${host}/`, { method: 'POST', headers: { ...headers, 'x-amz-date': amzDate, authorization }, body, signal: AbortSignal.timeout(15_000) })
+    response = await fetch(`https://${host}/`, { method: 'POST', headers: { ...headers, 'x-amz-date': amzDate, authorization }, body, signal: AbortSignal.timeout(STS_TIMEOUT_MS) })
   } catch {
     throw new ProviderUnreachable("couldn't reach AWS to check the key; try again")
   }
@@ -161,7 +178,8 @@ export function awsFilesOf(environment: Record<string, string | undefined>): Aws
   }
 }
 
-const readText = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8') : '')
+/** A file's text, or nothing when it isn't there. */
+export const readText = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8') : '')
 
 function writeText(path: string, text: string, mode: number): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
@@ -176,11 +194,14 @@ export function realAwsTools(files: AwsFiles, identify: typeof getCallerIdentity
       const keys = iniSection(readText(files.credentials), 'default')
       const accessKeyId = keys.aws_access_key_id
       const secretAccessKey = keys.aws_secret_access_key
+      // Set by hand or by another tool, the default profile may hold temporary credentials: they work for agents, so
+      // they are checked as they are, token and all.
+      const sessionToken = keys.aws_session_token || undefined
       if (!accessKeyId || !secretAccessKey) return { status: 'not_connected' }
       const region = iniSection(readText(files.config), 'default').region ?? null
       const shown = { status: 'connected' as const, accessKeyId: shortKeyId(accessKeyId), region }
       try {
-        const identity = await identify({ accessKeyId, secretAccessKey })
+        const identity = await identify({ accessKeyId, secretAccessKey, sessionToken })
         if (identity.kind === 'refused') return { ...shown, accountId: null, arn: null, problem: identity.why }
         return { ...shown, accountId: identity.accountId, arn: identity.arn, problem: null }
       } catch (error) {

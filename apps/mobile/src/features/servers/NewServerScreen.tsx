@@ -16,7 +16,7 @@ import type { ScreenProps } from '../../navigation/routes.ts'
 import { HostedServerSetupView, MachineSetupView } from '../onboarding/SetupScreen.tsx'
 import { NOTHING_USABLE_TO_PAIR_WITH, PairingGate, pairingTarget } from '../pair/model.ts'
 import {
-  createFailureText, EXISTING_SERVER, machineAsHosted, NETWORKS_COPY, NEW_SERVER_COPY, networkNameOf, networkStartOf,
+  createFailureText, detailsHintOf, EXISTING_SERVER, machineAsHosted, NETWORKS_COPY, NEW_SERVER_COPY, networkNameOf, networkStartOf,
   newServerLabelOf, newServerNetworkChoices, whereChoices,
 } from './model.ts'
 import type { NewServerNetworkChoice } from './model.ts'
@@ -48,7 +48,7 @@ export function NewServerScreen({ navigation }: ScreenProps<'NewServer'>) {
       <Rows>
         {choices.map((choice) => (
           <Row key={choice.key} title={choice.title} detail={choice.detail} chevron={choice.kind !== 'set_up'} disabled={choice.kind === 'set_up'}
-            onPress={() => navigation.navigate('NewServerDetails', { where: choice.key })} />
+            onPress={() => navigation.navigate('NewServerDetails', { where: choice.key, detail: choice.detail })} />
         ))}
       </Rows>
     </Step>
@@ -58,7 +58,7 @@ export function NewServerScreen({ navigation }: ScreenProps<'NewServer'>) {
 // ---- Step 2: its name, or its pairing link ----
 
 export function NewServerDetailsScreen({ navigation, route }: ScreenProps<'NewServerDetails'>) {
-  const { where } = route.params
+  const { where, detail } = route.params
   const existing = where === EXISTING_SERVER
   const [typed, setTyped] = useState('')
   const named = existing ? null : newServerLabelOf(typed)
@@ -76,7 +76,7 @@ export function NewServerDetailsScreen({ navigation, route }: ScreenProps<'NewSe
   })
 
   return (
-    <Step title={existing ? NEW_SERVER_COPY.linkTitle : NEW_SERVER_COPY.nameTitle} hint={existing ? NEW_SERVER_COPY.linkHint : NEW_SERVER_COPY.hintFor(where)}>
+    <Step title={existing ? NEW_SERVER_COPY.linkTitle : NEW_SERVER_COPY.nameTitle} hint={detailsHintOf(where, detail)}>
       <TextInput style={s.input} value={typed} onChangeText={setTyped} autoFocus autoCapitalize="none" autoCorrect={false}
         placeholder={existing ? 'ouronext://pair?url=…&code=…' : NEW_SERVER_COPY.placeholder} returnKeyType="next" onSubmitEditing={next} />
       {existing && (

@@ -7,8 +7,8 @@ export type BaseOffer = z.infer<typeof BaseOffer>
 
 /**
  * Taking a base. `conflict`: the base and the person's changes touch the same files, and nothing live has changed. The merge
- * waits beside the live source until the owner starts an agent to resolve it, named `resolver` (null until then; absent
- * from an older server, which starts one at once), or drops it. `failed`: the base didn't go in; `why` says what, if anything,
+ * waits beside the live source until the owner has the master agent resolve it, named `resolver` (null until then; absent
+ * from an older server, which told it at once), or drops it. `failed`: the base didn't go in; `why` says what, if anything,
  * changed.
  */
 export const BaseUpdate = z.discriminatedUnion('state', [

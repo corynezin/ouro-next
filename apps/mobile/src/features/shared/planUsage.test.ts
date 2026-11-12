@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { PlanUsage } from '@ouro/contract'
-import { agentUsageText, claudePlanRows, isClaudeOnPlan, openRouterSpentUsd, planUsageLine, planWindowRows } from './planUsage.ts'
+import { agentUsageText, isClaudeOnPlan, openRouterSpentUsd, planUsageLine, planWindowRows } from './planUsage.ts'
 
 const NOW = Date.UTC(2026, 10, 10, 12)
 const HOUR = 3_600_000
@@ -52,9 +52,6 @@ test("before Claude's first turn on a plan, Settings and the list's line say the
   assert.equal(isClaudeOnPlan({ status: 'signed_in', account: { method: 'api_key' } }), false)
   assert.equal(isClaudeOnPlan({ status: 'signed_out' }), false)
   assert.equal(isClaudeOnPlan(null), false)
-  assert.deepEqual(claudePlanRows(null, true, NOW), [{ key: 0, label: 'Usage', valueText: 'No reading yet' }])
-  assert.equal(claudePlanRows(null, false, NOW), null, 'no section without a plan')
-  assert.deepEqual(claudePlanRows(claude, false, NOW), planWindowRows(claude, NOW), 'a reading shows, whatever the sign-in says now')
   assert.equal(planUsageLine({ claude: null, chatgpt: null }, true, null, NOW), 'Claude: no reading yet')
   assert.equal(planUsageLine({ claude: null, chatgpt: null }, true, 1.2, NOW), 'Claude: no reading yet · OpenRouter: $1.20')
   assert.equal(planUsageLine({ claude, chatgpt: null }, true, null, NOW), 'Claude: 63%')

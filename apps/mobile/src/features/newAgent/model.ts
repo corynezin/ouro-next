@@ -1,5 +1,6 @@
 // The New agent sheet as data. The server says which models exist; this groups them as the pickers show them.
 import type { CommandInput, ComputerEntity, ModelOption, PromptCacheLifetime } from '@ouro/contract'
+import { sameServerUrl } from '../../core/accounts/savedServers.ts'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
 
 export interface ModelGroup { title: string; models: { id: string; label: string }[] }
@@ -49,11 +50,9 @@ export const typedAgentName = (typed: string) => typed.replace(/\s/g, '')
 /** Where a new agent runs: here, or on one of the person's other computers. */
 export interface MachineOption { key: string; computerId: string | null; label: string }
 
-const sameUrl = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '')
-
 /** A computer as the phone names its server in Settings → Servers, when the phone is paired with it too; else its own name. */
 export const computerLabel = (computer: ComputerEntity, saved: readonly SavedServer[]) =>
-  (computer.address ? saved.find((server) => sameUrl(server.url, computer.address!))?.label : undefined) ?? computer.name
+  (computer.address ? saved.find((server) => sameServerUrl(server.url, computer.address!))?.label : undefined) ?? computer.name
 
 /** Here first, named `hereLabel` (this server's name in Settings), then the other computers by their names, those with no
  * agents yet too. Only a computer that trusts this one fully takes an agent from it; with none, there is nothing to pick

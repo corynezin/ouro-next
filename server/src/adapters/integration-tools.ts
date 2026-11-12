@@ -12,6 +12,7 @@ import { CodexAppServer } from './codex-app-server.ts'
 import { ProviderUnreachable } from './integrations.ts'
 import { realAwsTools } from './aws.ts'
 import type { AwsFiles } from './aws.ts'
+import { fileSpritesTools } from './sprites-account.ts'
 import type { ActionOutcome, IntegrationTools } from './integrations.ts'
 
 const TOOL_TIMEOUT_MS = 20_000
@@ -66,7 +67,7 @@ function runTool(command: string, args: string[], stdin?: string): Promise<{ ok:
   })
 }
 
-export function realIntegrationTools(options: { dataDir: string; anthropicKeyFile: string; openrouterKeyFile: string; claudeConfigDir: string | null; awsFiles: AwsFiles }): IntegrationTools {
+export function realIntegrationTools(options: { dataDir: string; anthropicKeyFile: string; openrouterKeyFile: string; claudeConfigDir: string | null; awsFiles: AwsFiles; spritesTokenFile: string }): IntegrationTools {
   const claudeKeyFile = options.anthropicKeyFile
   const openrouterKeyFile = options.openrouterKeyFile
   const claudeSettingsFile = join(options.claudeConfigDir ?? join(homedir(), '.claude'), 'settings.json')
@@ -135,6 +136,7 @@ export function realIntegrationTools(options: { dataDir: string; anthropicKeyFil
 
   return {
     ...realAwsTools(options.awsFiles),
+    ...fileSpritesTools(options.spritesTokenFile),
     claudeStatus,
     async claudeLoginStart() {
       endLogin()

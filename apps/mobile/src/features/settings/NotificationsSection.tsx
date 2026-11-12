@@ -6,14 +6,15 @@ import { Section, Toggle } from '@expo/ui/swift-ui'
 import type { NotificationSettings } from '@ouro/contract'
 import { allowOutcomeText } from '../../core/push/pushCenter.ts'
 import { Note } from '../../design/form.tsx'
-import { usePush, useSession } from '../../navigation/coreContext.tsx'
-import { changedNotificationSettings, NOTIFICATIONS_COPY, notificationSettingsOf } from './model.ts'
+import { useCore, usePush, useSession } from '../../navigation/coreContext.tsx'
+import { changedNotificationSettings, NOTIFICATIONS_COPY, notificationSettingsOf, notifyingModeOf } from './model.ts'
 import type { NotificationChange } from './model.ts'
 
 const phoneTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone
 
 export function NotificationsSection() {
   const push = usePush()
+  const core = useCore()
   const session = useSession()
   const stored = session.store.notificationSettings
   // Shown from the tap until the server's answer, so quick changes build on each other instead of on the stored ones.
@@ -30,11 +31,16 @@ export function NotificationsSection() {
     if (!result.ok) setNote({ text: NOTIFICATIONS_COPY.savingFailed, failed: true })
   }
 
-  // On asks this phone for permission too, so one switch is all it takes; off keeps the phone's registration.
+  // On asks this phone for permission too, so one switch is all it takes; off keeps the phone's registration. The mode
+  // in use is remembered as it turns off, so on brings it back.
   const turn = async (on: boolean) => {
     setNote(null)
-    if (!on) return save({ kind: 'mode', mode: 'nothing' })
-    void save({ kind: 'mode', mode: settings?.mode === 'nothing' || !settings ? 'needs_me' : settings.mode })
+    const remembered = core.preferences.current.notificationsOnMode
+    if (!on) {
+      if (settings) core.preferences.set('notificationsOnMode', notifyingModeOf(settings, remembered))
+      return save({ kind: 'on', on: false, lastOnMode: remembered })
+    }
+    void save({ kind: 'on', on: true, lastOnMode: remembered })
     const outcome = await push.allowOnThisPhone()
     if (outcome.kind !== 'on') setNote({ text: allowOutcomeText(outcome), failed: outcome.kind === 'failed' })
   }

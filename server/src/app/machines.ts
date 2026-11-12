@@ -1,12 +1,11 @@
 // New servers this one makes on the cloud accounts it is connected to (see packages/contract/src/machines.ts). Each is
 // made one step at a time, as the hub makes hosted ones: the step is recorded before it runs and every step can run
 // again, so after a restart each carries on where it was. Once a phone has paired with one it is an ordinary server,
-// linked by the phone with the others; it stays here until its machine is destroyed.
+// which the phone that asked for it links with the others; it stays here until its machine is destroyed.
 import { randomBytes } from 'node:crypto'
 import { ProvisioningStep } from '@ouro/contract'
-import type { MachineList, MachineProvider, NewMachine, SpritesActionResult, SpritesIntegrationState } from '@ouro/contract'
+import type { MachineList, MachineProvider, NewMachine } from '@ouro/contract'
 import type { MachineOrder, MachineProvisioner } from '../adapters/machine-provisioners.ts'
-import type { SpritesAccount } from '../adapters/sprites-account.ts'
 import type { MachineRecord, MachinesFile } from '../store/machines-file.ts'
 import { CommandRefused } from './failure.ts'
 
@@ -24,8 +23,6 @@ export interface MachineProviderSetup {
 export interface MachinesConfig {
   file: MachinesFile
   providers: readonly MachineProviderSetup[]
-  /** The Sprites account Sprite servers are made on, set up in Integrations. */
-  sprites: SpritesAccount
   /** The commit new servers are made from, or null when this server has no copy of its source to make one from. */
   currentCommit: () => Promise<string | null>
   now: () => number
@@ -34,6 +31,11 @@ export interface MachinesConfig {
 
 /** A code is replaced this long before it expires, so the one handed out has time to be used. */
 const PAIRING_RENEW_BEFORE_MS = 2 * 60_000
+/**
+ * Listing asks a ready server that no phone has paired with yet whether one has, at most this often each: the app stops
+ * asking about one once it pairs, and a list that never learned it would offer that server to pair again.
+ */
+const LIST_PAIRING_CHECK_INTERVAL_MS = 30_000
 const STEPS = ProvisioningStep.options
 
 export const failureWhy = (step: ProvisioningStep, error: Error): string => {
@@ -45,6 +47,7 @@ export class Machines {
   private readonly config: MachinesConfig
   private readonly running = new Map<string, Promise<void>>()
   private readonly pairingChecks = new Map<string, Promise<void>>()
+  private readonly lastListPairingCheck = new Map<string, number>()
 
   constructor(config: MachinesConfig) {
     this.config = config
@@ -55,7 +58,15 @@ export class Machines {
     for (const record of this.config.file.list()) if (record.progress.state === 'provisioning') void this.start(record.id)
   }
 
+  /** As each stands. A ready one not yet paired is asked again in the background, so the next list knows. */
   async list(): Promise<MachineList> {
+    const now = this.config.now()
+    for (const record of this.config.file.list()) {
+      if (record.progress.state !== 'ready' || record.progress.phonePaired) continue
+      if (now - (this.lastListPairingCheck.get(record.id) ?? -Infinity) < LIST_PAIRING_CHECK_INTERVAL_MS) continue
+      this.lastListPairingCheck.set(record.id, now)
+      void this.checkPairing(record.id)
+    }
     const providers: MachineProvider[] = this.config.providers.map((provider) => {
       const available = provider.provisioner() !== null
       return { id: provider.id, name: provider.name, available, detail: provider.detail(), setup: available ? null : provider.setup }
@@ -96,21 +107,8 @@ export class Machines {
     if (provisioner === null) throw new CommandRefused('invalid_request', `${this.providerOf(record)?.name ?? record.provider} isn't connected any more, so its machine can't be removed from here`)
     await provisioner.destroy(orderOf(record))
     this.config.file.delete(id)
+    this.lastListPairingCheck.delete(id)
     this.config.log('machine_removed', { machineId: id })
-  }
-
-  spritesStatus(): Promise<SpritesIntegrationState> {
-    return this.config.sprites.status()
-  }
-
-  async spritesSetToken(token: string): Promise<SpritesActionResult> {
-    const outcome = await this.config.sprites.setToken(token)
-    return outcome.accepted ? { accepted: true, state: await this.spritesStatus() } : outcome
-  }
-
-  async spritesDisconnect(): Promise<SpritesActionResult> {
-    this.config.sprites.disconnect()
-    return { accepted: true, state: await this.spritesStatus() }
   }
 
   /** Settles when it is ready or has failed. */
@@ -140,8 +138,10 @@ export class Machines {
           return
         }
         if (step === 'create') {
-          const data = await provisioner.create(order)
-          this.update(id, (current) => ({ ...current, data: { ...current.data, ...data } }))
+          // Kept the moment the machine exists, so a create that fails or is cut short after that still leaves its
+          // machine known, and Remove destroys it.
+          const keep = (data: Record<string, string>) => this.update(id, (current) => ({ ...current, data: { ...current.data, ...data } }))
+          keep(await provisioner.create(order, keep))
         } else {
           await provisioner[step](order)
         }
@@ -196,7 +196,7 @@ export class Machines {
 
   private recordOf(id: string): MachineRecord {
     const record = this.config.file.get(id)
-    if (!record) throw new CommandRefused('not_found', 'no such server being made')
+    if (!record) throw new CommandRefused('not_found', 'no such server made here')
     return record
   }
 

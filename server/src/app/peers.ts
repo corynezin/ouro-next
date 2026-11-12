@@ -340,7 +340,7 @@ export class Peers {
     const expiresAt = this.config.now() + COMPUTER_INVITE_LIFETIME_MS
     this.config.store.setMeta(INVITE_HASH_KEY, hashCode(code).toString('hex'))
     this.config.store.setMeta(INVITE_EXPIRES_KEY, String(expiresAt))
-    return { code, expiresAt, command: `ouro computers join ${address} ${code}` }
+    return { code, expiresAt, command: `ouro computers join ${address} ${code}`, address }
   }
 
   /** The open invite is this code, and still open; using it closes it. */

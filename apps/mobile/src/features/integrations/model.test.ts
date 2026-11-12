@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   actionOutcome, awsCredentialsOf, awsIdentityText, awsName, awsOutcome, chatgptAccountText, chatgptSection, claudeButtonLabel, claudeStatusText, GITHUB_TOKEN_PAGE, gitHubConnectedToast, gitHubMissingScopesNote,
-  gitHubName, KEY_REMOVAL_FAILED, keyRemovalOutcome, OPENROUTER_CREDITS_FOOTER, openRouterCreditsText, openRouterSpentText, pasted, usageFooter, usageRows, usageWindowLabel, usageWindowValue,
+  gitHubName, KEY_REMOVAL_FAILED, keyRemovalOutcome, openRouterSpentText, pasted, usageFooter, usageRows, usageWindowLabel, usageWindowValue,
 } from './model.ts'
 
 test('Claude Code status in words, checking until the server has asked', () => {
@@ -59,14 +59,6 @@ test('GitHub names the missing scopes agents need', () => {
   assert.equal(GITHUB_TOKEN_PAGE, 'https://github.com/settings/tokens/new?description=Ouro%20agents&scopes=repo,gist,read:org,workflow')
   assert.equal(pasted('  '), null)
   assert.equal(pasted(' ghp_x '), 'ghp_x')
-})
-
-test('Settings shows OpenRouter credits as spent of all it may spend, once OpenRouter has said (SET-15)', () => {
-  assert.equal(openRouterCreditsText({ status: 'configured', spentUsd: 1.5, availableUsd: 8.5 }), '$1.50 of $10.00')
-  assert.equal(openRouterCreditsText({ status: 'configured', spentUsd: 1.5, availableUsd: null }), '$1.50')
-  assert.equal(openRouterCreditsText({ status: 'configured', spentUsd: null, availableUsd: null }), null)
-  assert.equal(openRouterCreditsText({ status: 'not_configured' }), null)
-  assert.match(OPENROUTER_CREDITS_FOOTER, /^What this OpenRouter key has spent, and what is left of its limit/)
 })
 
 test("removing the OpenRouter key, refused, says the server's reason, else the reference's words (INT-18)", () => {

@@ -29,7 +29,8 @@ export type Routes = {
   /** Servers → New server, a step at a time: where it runs, then its name or pairing link, then its network. */
   NewServer: undefined
   /** `where`: a provider id, 'hosted', or 'existing' for a server the person already runs. */
-  NewServerDetails: { where: string }
+  /** `detail`: what the open server says about where it runs, how long it takes (its provider's own words). */
+  NewServerDetails: { where: string; detail: string }
   /** `label` for a server to make; `link`, the pairing link, for one already run. */
   NewServerNetwork: { where: string; label: string | null; link: string | null }
   /** Servers → Network… → Start a network: its name, private or shared. */

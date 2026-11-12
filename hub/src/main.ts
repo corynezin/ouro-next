@@ -27,7 +27,7 @@ import type { LocalProvisionerConfig } from './local-provisioner.ts'
 import { Provisioning } from './provisioning.ts'
 import type { Provisioner } from './provisioning.ts'
 import { SpriteProvisioner } from './sprite-provisioner.ts'
-import { namePrefixProblem, SPRITES_API_BASE, SpritesHttpApi } from './sprites-api.ts'
+import { namePrefixProblem, SPRITES_API_BASE, SpritesHttpApi } from '@ouro/contract/sprites'
 import { HubStore } from './store.ts'
 
 interface HubConfig {

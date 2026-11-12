@@ -12,12 +12,15 @@ import { toast } from '../../design/Toast.tsx'
 import { useSession } from '../../navigation/coreContext.tsx'
 import type { ScreenProps } from '../../navigation/routes.ts'
 import { AWS_DEFAULT_REGION, AWS_IAM_USERS_PAGE, awsCredentialsOf, awsIdentityText, awsName, awsOutcome, CHECKING_TEXT } from './model.ts'
-import { SecretField } from './parts.tsx'
+import { PlainKeyField, SecretField } from './parts.tsx'
 
 const Label = ({ text }: { text: string }) => <Text modifiers={[font({ textStyle: 'footnote' }), foregroundStyle('secondary')]}>{text}</Text>
 
 export function AwsScreen({ navigation }: ScreenProps<'AWS'>) {
-  const { api } = useSession()
+  const session = useSession()
+  const { api } = session
+  // Disconnecting removes the machine's default AWS key, which the owner may have put there by hand: it is theirs alone.
+  const isOwner = session.store.viewer?.isOwner ?? false
   const [aws, setAws] = useState<AwsIntegrationState | null>(null)
   const [accessKeyId, setAccessKeyId] = useState('')
   const [secretAccessKey, setSecretAccessKey] = useState('')
@@ -94,15 +97,15 @@ export function AwsScreen({ navigation }: ScreenProps<'AWS'>) {
           <Section title="Connect AWS" footer={<Text>In the AWS console, open IAM, make a user for Ouro (for example with AmazonEC2FullAccess), then under Security credentials create an access key for "Command Line Interface". Paste its ID and secret here. AWS checks the key before Ouro saves it.</Text>}>
             <Button label="Open IAM in the AWS console" onPress={() => { void Linking.openURL(AWS_IAM_USERS_PAGE) }} />
             <Label text="Access key ID" />
-            <SecretField shown placeholder="AKIA…" value={accessKeyId} onChange={setAccessKeyId} onSubmit={() => { void send() }} />
+            <PlainKeyField placeholder="AKIA…" value={accessKeyId} onChange={setAccessKeyId} onSubmit={() => { void send() }} />
             <Label text="Secret access key" />
             <SecretField placeholder="Secret access key" value={secretAccessKey} onChange={setSecretAccessKey} onSubmit={() => { void send() }} />
             <Label text="Default region" />
-            <SecretField shown placeholder={AWS_DEFAULT_REGION} value={region} onChange={setRegion} onSubmit={() => { void send() }} />
+            <PlainKeyField placeholder={AWS_DEFAULT_REGION} value={region} onChange={setRegion} onSubmit={() => { void send() }} />
             <Button label={busy ? 'Connecting…' : 'Connect'} onPress={() => { void send() }} />
           </Section>
         ) : null}
-        {connected ? <Section><Button label={`Disconnect ${awsName(connected)}`} role="destructive" onPress={disconnect} /></Section> : null}
+        {connected && isOwner ? <Section><Button label={`Disconnect ${awsName(connected)}`} role="destructive" onPress={disconnect} /></Section> : null}
       </Form>
     </Host>
   )

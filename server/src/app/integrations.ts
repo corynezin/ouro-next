@@ -1,5 +1,5 @@
 // Keeps each account's entity in step with its provider's own tool, and runs sign-ins, keys and tokens through them.
-import type { AwsActionResult, AwsCredentialsBody, AwsIntegrationState, ChatgptLoginStart, ClaudeLoginStart, IntegrationActionResult, IntegrationEntity, IntegrationProvider } from '@ouro/contract'
+import type { AwsActionResult, AwsCredentialsBody, AwsIntegrationState, SpritesActionResult, SpritesIntegrationState, ChatgptLoginStart, ClaudeLoginStart, IntegrationActionResult, IntegrationEntity, IntegrationProvider } from '@ouro/contract'
 import { ProviderUnreachable } from '../adapters/integrations.ts'
 import type { ActionOutcome, IntegrationTools } from '../adapters/integrations.ts'
 import { CommandRefused } from './failure.ts'
@@ -186,8 +186,38 @@ export class Integrations {
     return { accepted: true, state: await this.awsStatus() }
   }
 
-  async awsDisconnect(): Promise<AwsActionResult> {
+  /**
+   * Removes the default profile's key, which may be one the owner put on the machine by hand, so only the owner may: an
+   * invited person can still connect or replace a key, which AWS checks first.
+   */
+  async awsDisconnect(byOwner: boolean): Promise<AwsActionResult> {
+    if (!byOwner) throw new CommandRefused('forbidden', "only the owner disconnects this server's AWS key")
     await reaching(() => this.config.tools.awsDisconnect())
     return { accepted: true, state: await this.awsStatus() }
   }
+
+  /**
+   * Sprites, like AWS, is asked each time the app looks. Only the owner may see or change it: its token makes servers,
+   * and reaches every Sprite on the account.
+   */
+  spritesStatus(byOwner: boolean): Promise<SpritesIntegrationState> {
+    requireOwner(byOwner)
+    return reaching(() => this.config.tools.spritesStatus())
+  }
+
+  async spritesSetToken(token: string, byOwner: boolean): Promise<SpritesActionResult> {
+    requireOwner(byOwner)
+    const outcome = await reaching(() => this.config.tools.spritesSetToken(token))
+    return outcome.accepted ? { accepted: true, state: await this.spritesStatus(byOwner) } : outcome
+  }
+
+  async spritesDisconnect(byOwner: boolean): Promise<SpritesActionResult> {
+    requireOwner(byOwner)
+    await reaching(() => this.config.tools.spritesDisconnect())
+    return { accepted: true, state: await this.spritesStatus(byOwner) }
+  }
+}
+
+function requireOwner(byOwner: boolean): void {
+  if (!byOwner) throw new CommandRefused('forbidden', 'only the owner makes servers, and so only the owner sets up Sprites')
 }

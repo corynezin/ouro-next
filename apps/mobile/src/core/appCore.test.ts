@@ -543,5 +543,26 @@ test('a private network started and waiting is done waiting once a server made w
   await ctx.core.networkPlans.set('m-5', { kind: 'new_private', name: 'work' })
   await ctx.core.pairAndActivate(B, 'code', { setupId: 'm-5' })
   assert.deepEqual(await ctx.core.pendingNetworks.list(), ['home'])
+    ctx.core.activeSession?.dispose()
+  })
+
+test('pairing a server leaves it unlinked; one the person just made here is linked with the other saved servers', async () => {
+  const ctx = setup()
+  await ctx.core.start()
+  for (const url of [A, B]) {
+    ctx.network.routeJson('POST', `${url}/v2/pair`, pairResponse)
+    ctx.network.routeJson('POST', `${url}/v2/commands/create_computer_invite`, { code: `code-${url}`, expiresAt: 1, command: 'words for people', address: url })
+    ctx.network.routeJson('POST', `${url}/v2/commands/join_computer`, {})
+  }
+  await ctx.core.pairAndActivate(A, 'code')
+  await ctx.core.pairAndActivate(B, 'code')
+  await settle()
+  assert.deepEqual(ctx.network.bodiesTo('/join_computer'), [], 'a plain pairing links nothing by itself')
+
+  await ctx.core.removeServer((await ctx.core.servers.list()).find((server) => server.url === B)!.id)
+  await ctx.core.pairAndActivate(B, 'code', { label: 'Made', afterPairing: 'link_with_other_servers' })
+  await settle()
+  const joins = ctx.network.requests.filter((request) => request.url.includes('/join_computer'))
+  assert.deepEqual(joins.map((request) => [request.url.split('/v2/')[0], (JSON.parse(request.body!) as { input: unknown }).input]), [[B, { address: A, code: `code-${A}` }]])
   ctx.core.activeSession?.dispose()
 })

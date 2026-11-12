@@ -7,7 +7,6 @@ import { COMPUTERS_COPY, TAILSCALE_COPY } from './computers/model.ts'
 import { CONNECT_COPY } from './integrations/model.ts'
 import { SETUP_SCREEN_COPY, WELCOME_COPY } from './onboarding/model.ts'
 import { leaveAction, SETTINGS_COPY } from './settings/model.ts'
-import { planUsageFooter } from './shared/planUsage.ts'
 
 test('Welcome and Setup say what the reference says (ONB-03, ONB-07, ONB-11, ONB-17)', () => {
   assert.equal(WELCOME_COPY.pitch, 'Your own team of Claude agents, on a computer of your own in the cloud. Chat with them from here.')
@@ -31,7 +30,6 @@ test('Connect Claude says what the reference says (ONB-20, ONB-26, ONB-28, ONB-3
 
 test('Settings footers and outcomes say what the reference says (SET-08, SET-13, SET-19, SET-22, SET-24)', () => {
   assert.equal(SETTINGS_COPY.inviteFooter, 'A one-time code they paste in the Ouro app (or a link they tap). The code lasts 10 minutes and gives them full access to this server.')
-  assert.equal(planUsageFooter('mac'), "The subscription's 5-hour and weekly limits as mac last saw them (it learns them from agents' turns).")
   assert.equal(checkOutcomeText('checking'), 'Checking…')
   assert.equal(checkOutcomeText({ kind: 'disabled' }), 'Updates are off in development builds.')
   assert.equal(checkOutcomeText({ kind: 'up_to_date' }), 'Up to date.')

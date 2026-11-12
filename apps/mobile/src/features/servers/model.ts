@@ -2,6 +2,7 @@
 // open one is linked to that this phone isn't paired with. Pure: Screen.tsx only draws this.
 import { NETWORK_NAME_PATTERN } from '@ouro/contract'
 import type { ComputerEntity, HostedServer, MachineProvider, NetworkEntity, NewMachine, ProvisioningStep } from '@ouro/contract'
+import { sameServerUrl } from '../../core/accounts/savedServers.ts'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
 import type { ServerPlace } from '../../core/servers/otherServersUnread.ts'
 import type { NetworkPlan } from '../../core/servers/networkPlans.ts'
@@ -28,11 +29,9 @@ export interface ServerRow {
   checking: boolean
 }
 
-const withoutTrailingSlashes = (url: string) => url.replace(/\/+$/, '')
-
 /** The open server's computer at a saved server's address: the same machine, linked. */
 export const computerAt = (url: string, computers: Iterable<ComputerEntity>): ComputerEntity | undefined =>
-  [...computers].find((computer) => computer.address && withoutTrailingSlashes(computer.address) === withoutTrailingSlashes(url))
+  [...computers].find((computer) => computer.address && sameServerUrl(computer.address, url))
 
 function linkOf(computer: ComputerEntity | undefined): ServerLink {
   if (!computer) return { kind: 'not_linked' }
@@ -63,9 +62,8 @@ export function serverRows(servers: readonly SavedServer[], activeId: string | n
 export interface UnpairedComputerRow { computerId: string; name: string; stateText: string; fullTrust: boolean; incompatibility: string | null }
 
 export function unpairedComputerRows(computers: Iterable<ComputerEntity>, servers: readonly SavedServer[]): UnpairedComputerRow[] {
-  const savedUrls = new Set(servers.map((server) => withoutTrailingSlashes(server.url)))
   return [...computers]
-    .filter((computer) => !computer.address || !savedUrls.has(withoutTrailingSlashes(computer.address)))
+    .filter((computer) => !computer.address || !isSaved(computer.address, servers))
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((computer) => ({ computerId: computer.id, name: computer.name, stateText: computerStateText(computer), fullTrust: computer.trust === 'full', incompatibility: computer.incompatibility }))
 }
@@ -203,6 +201,13 @@ export interface WhereChoice { key: string; title: string; detail: string; kind:
 
 export const EXISTING_SERVER = 'existing'
 
+/** The hint under step 2: how to get the pairing link for a server already run; for one made on a provider, that
+ * provider's own words on what it makes and how long it takes; for a hosted one, the plain wait. */
+export function detailsHintOf(where: string, detail: string): string {
+  if (where === EXISTING_SERVER) return NEW_SERVER_COPY.linkHint
+  return where === 'hosted' ? NEW_SERVER_COPY.hint : NEW_SERVER_COPY.hintFor(detail)
+}
+
 export function whereChoices(providers: readonly MachineProvider[], hostedAvailable: boolean): WhereChoice[] {
   return [
     ...newServerChoices(providers, hostedAvailable).map((choice): WhereChoice => {
@@ -312,6 +317,8 @@ export function renamedLabel(typed: string, current: string): string | null {
   return label && label !== current ? label : null
 }
 
+const isSaved = (url: string, saved: readonly SavedServer[]) => saved.some((server) => sameServerUrl(server.url, url))
+
 /** One of the account's servers that this phone isn't paired with: still being set up, failed, or ready to connect. */
 export interface HostedRow { id: string; label: string; detail: string }
 
@@ -323,10 +330,9 @@ const STEP_TEXT: Record<ProvisioningStep, string> = {
 export function hostedRows(hosted: readonly HostedServer[], saved: readonly SavedServer[]): HostedRow[] {
   const savedIds = new Set(saved.map((server) => server.hostedServerId))
   // Paired before the phone kept hosted ids: known by its address instead.
-  const savedUrls = new Set(saved.map((server) => withoutTrailingSlashes(server.url)))
   const unpaired = hosted.filter((server) => {
     if (savedIds.has(server.id)) return false
-    return !(server.status.state === 'ready' && savedUrls.has(withoutTrailingSlashes(server.status.address)))
+    return !(server.status.state === 'ready' && isSaved(server.status.address, saved))
   })
   return unpaired.map((server) => ({ id: server.id, label: server.label, detail: hostedDetail(server.status) }))
 }
@@ -355,10 +361,9 @@ export const createFailureText = (failure: HubFailure) => hubFailureText(failure
 export const NEW_SERVER_COPY = {
   button: 'New server',
   placeholder: 'e.g. Work',
-  /** EC2 installs everything from a bare Ubuntu machine. */
-  hintFor: (provider: string) => provider === 'aws'
-    ? 'An EC2 server takes about 10–15 minutes to set up. You can leave and come back.'
-    : 'A server takes several minutes to set up. You can leave and come back.',
+  hint: 'A server takes a few minutes to set up. You can leave and come back.',
+  /** The open server says what it makes and how long that takes (its provider's `detail`). */
+  hintFor: (detail: string) => `${detail} You can leave and come back.`,
   failed: 'Could not create the server.',
   existingChoice: 'A server I already run',
   existingDetail: 'Pair it with the link it prints for ouro pair.',
@@ -379,6 +384,8 @@ export const NEW_SERVER_COPY = {
   destroyMessage: 'Its machine is deleted, with its agents and everything on it, and the server leaves this phone. This can\'t be undone.',
   destroyConfirm: 'Destroy',
   destroyFailed: (why: string) => `Could not destroy it: ${why}`,
+  destroyElsewhereMessage: 'Its machine is deleted, with its agents and everything on it, for every phone paired with it. This can\'t be undone.',
+  pairedElsewhere: 'Paired with another phone',
 } as const
 
 // ---- Servers this server makes on a cloud account (contract machines.ts) ----
@@ -410,29 +417,35 @@ export function newServerChoices(providers: readonly MachineProvider[], hostedAv
   return choices
 }
 
-/** A machine this server is making, or made and no phone has paired with yet, or failed to make. */
-export interface MachineRow { id: string; label: string; detail: string; canRemove: boolean }
+/**
+ * A machine the open server made that isn't a server saved on this phone (one that is shows Destroy on its own row):
+ * - `setting_up`: being made, failed, or ready for a phone to pair; tapping it carries on setting it up. Removable once
+ *   settled, which destroys the machine.
+ * - `paired_elsewhere`: a phone has paired with it, not this one (or this one forgot it). It offers only Destroy, so a
+ *   machine no phone here can reach can still be stopped from billing.
+ */
+export type MachineRow =
+  | { kind: 'setting_up'; id: string; label: string; detail: string; canRemove: boolean }
+  | { kind: 'paired_elsewhere'; id: string; label: string; detail: string }
 
 const providerName = (provider: string, providers: readonly MachineProvider[]) =>
   providers.find((candidate) => candidate.id === provider)?.name ?? provider
 
 export function machineRows(machines: readonly NewMachine[], providers: readonly MachineProvider[], saved: readonly SavedServer[]): MachineRow[] {
-  const savedUrls = new Set(saved.map((server) => withoutTrailingSlashes(server.url)))
   return machines
-    .filter((machine) => !machine.paired && !(machine.status.state === 'ready' && savedUrls.has(withoutTrailingSlashes(machine.status.address))))
-    .map((machine) => ({
-      id: machine.id,
-      label: machine.label,
-      detail: `${providerName(machine.provider, providers)} · ${hostedDetail(machine.status)}`,
-      canRemove: machine.status.state !== 'provisioning',
-    }))
+    .filter((machine) => !(machine.status.state === 'ready' && isSaved(machine.status.address, saved)))
+    .map((machine): MachineRow => {
+      const where = providerName(machine.provider, providers)
+      return machine.paired
+        ? { kind: 'paired_elsewhere', id: machine.id, label: machine.label, detail: `${where} · ${NEW_SERVER_COPY.pairedElsewhere}` }
+        : { kind: 'setting_up', id: machine.id, label: machine.label, detail: `${where} · ${hostedDetail(machine.status)}`, canRemove: machine.status.state !== 'provisioning' }
+    })
 }
 
 /** The machine the open server made for this saved server, paired or not, when it made one and it's ready: the one Destroy
  * removes. */
 export function machineOfServer(url: string, machines: readonly NewMachine[]): NewMachine | null {
-  const address = withoutTrailingSlashes(url)
-  return machines.find((machine) => machine.status.state === 'ready' && withoutTrailingSlashes(machine.status.address) === address) ?? null
+  return machines.find((machine) => machine.status.state === 'ready' && sameServerUrl(machine.status.address, url)) ?? null
 }
 
 /** A machine's state as the setup flow reads a hosted server's: the same shape, and failures in the hub's terms. */

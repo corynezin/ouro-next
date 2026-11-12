@@ -86,7 +86,7 @@ test('New server offers the open server\'s providers, ready ones to make and the
   assert.equal(integrationRouteOf(null), null)
 })
 
-test('machines being made show their provider and step; paired ones are left out; only settled ones can be removed', async () => {
+test('machines being made show their provider and step; only settled ones can be removed; one paired elsewhere offers Destroy', async () => {
   const { machineRows } = await import('./model.ts')
   const providers = [{ id: 'aws', name: 'AWS', available: true, detail: '', setup: 'aws' }]
   const machine = (id: string, provider: string, status: HostedServer['status'], paired = false) => ({ id, label: `M${id}`, provider, createdAt: 1, status, paired })
@@ -96,12 +96,19 @@ test('machines being made show their provider and step; paired ones are left out
     machine('3', 'aws', { state: 'ready', address: 'https://c/', pairing: { code: 'x', expiresAt: 9 } }),
     machine('4', 'aws', { state: 'ready', address: 'https://d', pairing: null }),
     machine('5', 'aws', { state: 'ready', address: 'https://e', pairing: null }, true),
+    machine('6', 'aws', { state: 'ready', address: 'https://c', pairing: null }, true),
   ], providers, [server('c')])
   assert.deepEqual(rows, [
-    { id: '1', label: 'M1', detail: 'AWS · Installing tools…', canRemove: false },
-    { id: '2', label: 'M2', detail: 'sprite · Error: no room', canRemove: true },
-    { id: '4', label: 'M4', detail: 'AWS · Ready — tap to connect', canRemove: true },
-  ])
+    { kind: 'setting_up', id: '1', label: 'M1', detail: 'AWS · Installing tools…', canRemove: false },
+    { kind: 'setting_up', id: '2', label: 'M2', detail: 'sprite · Error: no room', canRemove: true },
+    { kind: 'setting_up', id: '4', label: 'M4', detail: 'AWS · Ready — tap to connect', canRemove: true },
+    { kind: 'paired_elsewhere', id: '5', label: 'M5', detail: 'AWS · Paired with another phone' },
+  ], 'a server saved here shows Destroy on its own row instead')
+})
+
+test("the New server hint is the open server's own word on how long it takes", async () => {
+  const { NEW_SERVER_COPY } = await import('./model.ts')
+  assert.equal(NEW_SERVER_COPY.hintFor('An EC2 t3.medium in us-east-1. Takes 10–15 minutes.'), 'An EC2 t3.medium in us-east-1. Takes 10–15 minutes. You can leave and come back.')
 })
 
 test('a saved server finds the ready machine made for it, by address, paired or not', async () => {
@@ -254,4 +261,11 @@ test('a place a server can run that is not connected yet is listed by its name, 
     ['Sprite', 'set_up', 'Connect Sprites in Integrations first.'],
     ['A server I already run', 'existing', 'Pair it with the link it prints for ouro pair.'],
   ])
+})
+
+test("step 2's hint: the pairing link for a server already run, the provider's own words for one made there", async () => {
+  const { detailsHintOf, EXISTING_SERVER, NEW_SERVER_COPY } = await import('./model.ts')
+  assert.equal(detailsHintOf(EXISTING_SERVER, 'ignored'), NEW_SERVER_COPY.linkHint)
+  assert.equal(detailsHintOf('hosted', 'Run by Ouro.'), NEW_SERVER_COPY.hint)
+  assert.equal(detailsHintOf('aws', 'An EC2 t3.medium. Takes 10–15 minutes.'), 'An EC2 t3.medium. Takes 10–15 minutes. You can leave and come back.')
 })

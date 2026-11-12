@@ -9,8 +9,8 @@ import { after, test } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
 import type { ComputerOrder } from './provisioning.ts'
 import { LAUNCHER, SpriteProvisioner, SpriteStepFailure } from './sprite-provisioner.ts'
-import { SpriteNameOutOfScope, SpritesApiError, SpritesHttpApi } from './sprites-api.ts'
-import type { SpriteInfo, SpritesApi } from './sprites-api.ts'
+import { SpriteNameOutOfScope, SpritesApiError, SpritesHttpApi } from '@ouro/contract/sprites'
+import type { SpriteInfo, SpritesApi } from '@ouro/contract/sprites'
 
 const dir = mkdtempSync(join(tmpdir(), 'hub-sprites-test-'))
 after(() => rmSync(dir, { recursive: true, force: true }))
@@ -306,7 +306,10 @@ test('the HTTP client speaks the documented API: bearer token, paths, bodies, an
   for (const prefix of ['', 'ouro', 'ouro-next-h', 'Ouro-h-', 'ouro--h-', 'ouro-h/-']) assert.throws(() => new SpritesHttpApi('token-1', prefix), outOfScope, prefix)
 })
 
-test('what ships in a base includes the installer the service step runs, so a computer made from a base can set up', () => {
+test('what ships in a base includes the installers and what they run and source, so a computer made from a base can set up', () => {
   const rule = JSON.parse(readFileSync(new URL('../../distribution.json', import.meta.url), 'utf8')) as { ships: string[] }
-  assert.ok(rule.ships.some((entry) => entry === 'scripts' || entry === 'scripts/install-run-sprite.sh'), JSON.stringify(rule.ships))
+  const installers = ['install-run.sh', 'install-run-sprite.sh', 'install-run-ubuntu.sh', 'install-run-mac.sh', 'lib/install-common.sh']
+  for (const file of installers) {
+    assert.ok(rule.ships.some((entry) => entry === 'scripts' || entry === `scripts/${file}`), `${file}: ${JSON.stringify(rule.ships)}`)
+  }
 })

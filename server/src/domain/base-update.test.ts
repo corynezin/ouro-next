@@ -29,15 +29,24 @@ test('merging and deploying both show as updating', () => {
   assert.deepEqual(baseUpdateOf({ state: 'conflict', n: 4, files: ['x'] }), { state: 'conflict', n: 4, files: ['x'], resolver: 'master' }, 'an older record went to the master agent at once')
 })
 
-test('a conflict waits for the person: an agent is started to merge it, or it is dropped, but not once an agent is on it', () => {
+test('a conflict waits for the person: the master agent is told to merge it, or it is dropped; it is merged only once', () => {
   const waiting: BaseUpdateRecord = { state: 'conflict', n: 3, files: ['a'], notes: 'faster', resolver: null }
   assert.deepEqual(resolveDecision(waiting), { kind: 'goes_ahead', n: 3, files: ['a'], notes: 'faster' })
-  assert.deepEqual(dropDecision(waiting), { kind: 'goes_ahead', n: 3, files: ['a'], notes: 'faster' })
+  assert.deepEqual(dropDecision(waiting), { kind: 'goes_ahead', n: 3, stopping: null })
   assert.match(takeRefusal(waiting, offer, 3)!.message, /ouro base resolve/)
   const resolving: BaseUpdateRecord = { ...waiting, resolver: 'master' }
   assert.equal(resolveDecision(resolving).kind, 'refused')
-  assert.equal(dropDecision(resolving).kind, 'refused')
   assert.equal(resolveDecision({ state: 'conflict', n: 3, files: ['a'] }).kind, 'refused', 'an older record has its agent')
   assert.equal(resolveDecision({ state: 'idle' }).kind, 'refused')
   assert.equal(dropDecision({ state: 'idle' }).kind, 'refused')
+})
+
+test('a conflict can be dropped while an agent is resolving it, and that agent is the one told to stop', () => {
+  const resolving: BaseUpdateRecord = { state: 'conflict', n: 3, files: ['a'], notes: 'faster', resolver: 'master' }
+  assert.deepEqual(dropDecision(resolving), { kind: 'goes_ahead', n: 3, stopping: 'master' })
+  assert.match(takeRefusal(resolving, offer, 3)!.message, /ouro base drop/, 'the refusal names the way out')
+})
+
+test('a conflict recorded before the choice existed can be dropped, and the master agent it went to is told to stop', () => {
+  assert.deepEqual(dropDecision({ state: 'conflict', n: 3, files: ['a'] }), { kind: 'goes_ahead', n: 3, stopping: 'master' })
 })

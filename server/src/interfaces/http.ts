@@ -141,7 +141,7 @@ export function createApiHandler(core: OuroCore, trust: ListenerTrust, logging: 
       return replyJson(response, 200, core.executeCommand(caller, command[1]!, key.data, body.input, prepared))
     }
 
-    if (path === '/v2/machines' || path.startsWith('/v2/machines/') || path.startsWith('/v2/integrations/sprites')) {
+    if (path === '/v2/machines' || path.startsWith('/v2/machines/')) {
       if (caller.kind !== 'person' || !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner makes servers')
       if (!core.machines) throw new CommandRefused('not_found', 'this server makes no servers')
       return replyJson(response, 200, await machineAction(core.machines, method, path, request))
@@ -149,7 +149,7 @@ export function createApiHandler(core: OuroCore, trust: ListenerTrust, logging: 
 
     if (path.startsWith('/v2/integrations/')) {
       if (caller.kind !== 'person') throw new CommandRefused('forbidden', 'accounts are set up from the app')
-      return replyJson(response, 200, await integrationAction(core.integrations, method, path.slice('/v2/integrations/'.length), request))
+      return replyJson(response, 200, await integrationAction(core.integrations, method, path.slice('/v2/integrations/'.length), request, caller.person.isOwner))
     }
 
     if (path === '/v2/tailscale') {
@@ -315,13 +315,18 @@ function streamChanges(core: OuroCore, viewer: Viewer, caller: Caller, url: URL,
   pump()
 }
 
-/** New servers, and the Sprites account they can be made on. The token passes straight through: never logged. */
-async function machineAction(machines: Machines, method: string, path: string, request: IncomingMessage): Promise<unknown> {
-  const body = <S extends z.ZodType>(schema: S) => async (): Promise<z.infer<S>> => {
+/** A route's JSON body, checked against its schema when the route reads it. */
+function bodyReader(request: IncomingMessage) {
+  return <S extends z.ZodType>(schema: S) => async (): Promise<z.infer<S>> => {
     const parsed = schema.safeParse(await readJson(request))
     if (!parsed.success) throw new CommandRefused('invalid_request', 'that request is missing what this action needs')
     return parsed.data
   }
+}
+
+/** New servers. The Sprites account they can be made on is in Integrations. */
+async function machineAction(machines: Machines, method: string, path: string, request: IncomingMessage): Promise<unknown> {
+  const body = bodyReader(request)
   const one = /^\/v2\/machines\/([^/]+)$/.exec(path)
   if (one && method === 'GET') return await machines.get(decodeURIComponent(one[1]!))
   if (one && method === 'DELETE') {
@@ -334,20 +339,13 @@ async function machineAction(machines: Machines, method: string, path: string, r
       const { provider, label } = await body(CreateMachineBody)()
       return await machines.create(provider, label)
     }
-    case 'GET /v2/integrations/sprites': return await machines.spritesStatus()
-    case 'POST /v2/integrations/sprites/token': return await machines.spritesSetToken((await body(SpritesTokenBody)()).token)
-    case 'POST /v2/integrations/sprites/disconnect': return await machines.spritesDisconnect()
     default: throw new CommandRefused('not_found', `no such route: ${method} ${path}`)
   }
 }
 
 /** The accounts' routes. Codes, keys and tokens pass straight to the provider's tool: never stored here or logged. */
-async function integrationAction(integrations: Integrations, method: string, action: string, request: IncomingMessage): Promise<unknown> {
-  const body = <S extends z.ZodType>(schema: S) => async (): Promise<z.infer<S>> => {
-    const parsed = schema.safeParse(await readJson(request))
-    if (!parsed.success) throw new CommandRefused('invalid_request', 'that request is missing what this action needs')
-    return parsed.data
-  }
+async function integrationAction(integrations: Integrations, method: string, action: string, request: IncomingMessage, byOwner: boolean): Promise<unknown> {
+  const body = bodyReader(request)
   switch (`${method} ${action}`) {
     case 'POST claude/login/start': return await integrations.claudeLoginStart()
     case 'POST claude/login/finish': return await integrations.claudeLoginFinish((await body(ClaudeLoginFinishBody)()).code)
@@ -361,7 +359,10 @@ async function integrationAction(integrations: Integrations, method: string, act
     case 'POST github/disconnect': return await integrations.githubDisconnect()
     case 'GET aws': return await integrations.awsStatus()
     case 'POST aws/credentials': return await integrations.awsSetCredentials(await body(AwsCredentialsBody)())
-    case 'POST aws/disconnect': return await integrations.awsDisconnect()
+    case 'POST aws/disconnect': return await integrations.awsDisconnect(byOwner)
+    case 'GET sprites': return await integrations.spritesStatus(byOwner)
+    case 'POST sprites/token': return await integrations.spritesSetToken((await body(SpritesTokenBody)()).token, byOwner)
+    case 'POST sprites/disconnect': return await integrations.spritesDisconnect(byOwner)
     default: throw new CommandRefused('not_found', `no such account action: ${method} ${action}`)
   }
 }

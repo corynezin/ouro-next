@@ -15,7 +15,7 @@ import { apnsSender } from '../adapters/apns.ts'
 import { realIntegrationTools } from '../adapters/integration-tools.ts'
 import { awsFilesOf } from '../adapters/aws.ts'
 import { standInIntegrationTools } from '../adapters/integrations.ts'
-import { spriteTailscale, standInTailscale } from '../adapters/tailscale.ts'
+import { spriteTailscale, systemdTailscale, standInTailscale } from '../adapters/tailscale.ts'
 import type { TailscaleSetup } from '../adapters/tailscale.ts'
 import type { SendPush } from '../adapters/apns.ts'
 import { claudeSummarize } from '../adapters/summarizer.ts'
@@ -27,11 +27,12 @@ import { httpGitHubApi } from '../adapters/github-api.ts'
 import { guardianClient } from '../adapters/guardian-client.ts'
 import { DEFAULT_LIVE_POLICY, DEFAULT_SUMMARY_POLICY } from '../domain/summary.ts'
 import { ec2CredentialsOf, HttpEc2Api } from '../adapters/ec2.ts'
-import { currentCommitOf, Ec2Provisioner, SpriteMachineProvisioner } from '../adapters/machine-provisioners.ts'
-import { fileSpritesAccount } from '../adapters/sprites-account.ts'
-import { SpritesHttpApi } from '../adapters/sprites-api.ts'
+import { currentCommitOf, Ec2Provisioner, publicAddressOfThisServer, runSsh, SpriteMachineProvisioner } from '../adapters/machine-provisioners.ts'
+import type { IntegrationTools } from '../adapters/integrations.ts'
+import { SpritesHttpApi } from '@ouro/contract/sprites'
 import { Machines } from '../app/machines.ts'
 import { MachinesFile } from '../store/machines-file.ts'
+import { ownPeerAddress } from '../domain/peers.ts'
 
 const startedAt = performance.now()
 const DEFAULT_SLOW_REQUEST_MS = 2_000
@@ -121,10 +122,16 @@ function hostHoldFromEnvironment(): HostHold {
   return spriteTasksHold(socketPath, `ouro-${createHash('sha256').update(paths.dataDir).digest('hex').slice(0, 12)}`)
 }
 
-/** Journeys use the stand-in; a run Sprite sets Tailscale up itself; anywhere else the machine has its own network. */
+/**
+ * Journeys use the stand-in; a run Sprite sets Tailscale up itself, and reaches computers only through it. A run server
+ * under systemd (an EC2 instance, `OURO_TAILSCALE=systemd`) can join the person's Tailscale network too, though it
+ * reaches computers without it. Anywhere else the machine has its own network.
+ */
 function tailscaleSetupFromEnvironment(): TailscaleSetup {
-  if (environment.OURO_TAILSCALE_STAND_IN_DIR) return { kind: 'set_up_here', host: standInTailscale(environment.OURO_TAILSCALE_STAND_IN_DIR) }
-  if (environment.OURO_TAILSCALE === 'sprite') return { kind: 'set_up_here', host: spriteTailscale() }
+  if (environment.OURO_TAILSCALE_STAND_IN_DIR) return { kind: 'set_up_here', host: standInTailscale(environment.OURO_TAILSCALE_STAND_IN_DIR), neededForComputers: true }
+  const kind = environment.OURO_TAILSCALE
+  if (kind === 'sprite') return { kind: 'set_up_here', host: spriteTailscale(), neededForComputers: true }
+  if (kind === 'systemd') return { kind: 'set_up_here', host: systemdTailscale(), neededForComputers: false }
   return { kind: 'not_needed' }
 }
 
@@ -132,7 +139,7 @@ function tailscaleSetupFromEnvironment(): TailscaleSetup {
  * New servers made from this one's own source, on the AWS account connected in Settings (an EC2 instance) or the Sprites
  * account (a Sprite). Each is offered only while its account is connected.
  */
-function machinesFromEnvironment(): Machines {
+function machinesFromEnvironment(spritesToken: () => string | null): Machines {
   const sourceRoot = personSourceOf(agentBaseEnv.OURO_APP_SOURCE)?.root ?? null
   const settings = { sourceRoot: sourceRoot ?? '', defaultModel: environment.OURO_DEFAULT_MODEL ?? null, baseRepo: environment.OURO_BASE_REPO ?? null }
   const awsFiles = awsFilesOf(environment)
@@ -144,10 +151,10 @@ function machinesFromEnvironment(): Machines {
       return credentials
     }),
     keysDir: join(paths.dataDir, 'machines', 'keys'),
+    ssh: runSsh, makerAddress: publicAddressOfThisServer,
     settings, instanceType, diskGb: 30, pollIntervalMs: 5_000,
     deadlines: { create: 5 * 60_000, ssh: 5 * 60_000, upload: 5 * 60_000, install: 40 * 60_000, service: 10 * 60_000 },
   })
-  const sprites = fileSpritesAccount(join(paths.dataDir, 'secrets', 'sprites-token'))
   const spriteProvisioner = (token: string) => new SpriteMachineProvisioner({
     api: new SpritesHttpApi(token, 'ouro-made-'), settings, pollIntervalMs: 3_000,
     deadlines: { upload: 5 * 60_000, install: 15 * 60_000, service: 20 * 60_000, query: 60_000 },
@@ -155,7 +162,6 @@ function machinesFromEnvironment(): Machines {
   const noSource = 'This server has no copy of its source to make another from.'
   return new Machines({
     file: new MachinesFile(join(paths.dataDir, 'machines', 'machines.json')),
-    sprites,
     providers: [
       {
         id: 'aws', name: 'AWS', setup: 'aws',
@@ -163,16 +169,16 @@ function machinesFromEnvironment(): Machines {
         detail: () => {
           if (sourceRoot === null) return noSource
           const credentials = ec2CredentialsOf(awsFiles)
-          return credentials ? `An EC2 ${instanceType} in ${credentials.region}. Takes about 15 minutes.` : 'Connect AWS in Integrations first.'
+          return credentials ? `An EC2 ${instanceType} in ${credentials.region}. Takes 10–15 minutes.` : 'Connect AWS in Integrations first.'
         },
       },
       {
         id: 'sprite', name: 'Sprite', setup: 'sprites',
         provisioner: () => {
-          const token = sprites.token()
+          const token = spritesToken()
           return sourceRoot !== null && token !== null ? spriteProvisioner(token) : null
         },
-        detail: () => sourceRoot === null ? noSource : sprites.token() !== null ? 'A Sprite on your Sprites account. Takes about 10 minutes.' : 'Connect Sprites in Integrations first.',
+        detail: () => sourceRoot === null ? noSource : spritesToken() !== null ? 'A Sprite on your Sprites account. Takes about 10 minutes.' : 'Connect Sprites in Integrations first.',
       },
     ],
     currentCommit: async () => (sourceRoot === null ? null : await currentCommitOf(sourceRoot)),
@@ -181,7 +187,13 @@ function machinesFromEnvironment(): Machines {
   })
 }
 
-const machines = environment.OURO_INTEGRATIONS_STAND_IN_DIR ? null : machinesFromEnvironment()
+const integrationTools: IntegrationTools = environment.OURO_INTEGRATIONS_STAND_IN_DIR
+  ? standInIntegrationTools(environment.OURO_INTEGRATIONS_STAND_IN_DIR, { openrouter: paths.openrouterApiKey })
+  : realIntegrationTools({
+    dataDir: paths.dataDir, anthropicKeyFile: paths.anthropicApiKey, openrouterKeyFile: paths.openrouterApiKey, claudeConfigDir: environment.CLAUDE_CONFIG_DIR ?? null,
+    awsFiles: awsFilesOf(environment), spritesTokenFile: join(paths.dataDir, 'secrets', 'sprites-token'),
+  })
+const machines = environment.OURO_INTEGRATIONS_STAND_IN_DIR ? null : machinesFromEnvironment(() => integrationTools.spritesToken())
 
 const core = new OuroCore({
   paths,
@@ -189,7 +201,7 @@ const core = new OuroCore({
   policy,
   releaseId,
   machineName: environment.OURO_MACHINE_NAME ?? 'this-machine',
-  peerAddress: environment.OURO_PEER_ADDRESS ?? null,
+  peerAddress: ownPeerAddress({ peerAddress: environment.OURO_PEER_ADDRESS, publicUrl: environment.OURO_PUBLIC_URL }),
   defaultModel: environment.OURO_DEFAULT_MODEL ?? 'opus',
   defaultFolder: environment.OURO_DEFAULT_FOLDER ?? join(paths.dataDir, 'work'),
   agentLimit: Number(environment.OURO_AGENT_LIMIT ?? 8),
@@ -208,9 +220,7 @@ const core = new OuroCore({
   summaryModel: environment.OURO_SUMMARY_MODEL ?? 'haiku',
   sendPush: pushSenderFromEnvironment(),
   // Journeys use the stand-in; a real machine asks the accounts' own tools.
-  integrationTools: environment.OURO_INTEGRATIONS_STAND_IN_DIR
-    ? standInIntegrationTools(environment.OURO_INTEGRATIONS_STAND_IN_DIR, { openrouter: paths.openrouterApiKey })
-    : realIntegrationTools({ dataDir: paths.dataDir, anthropicKeyFile: paths.anthropicApiKey, openrouterKeyFile: paths.openrouterApiKey, claudeConfigDir: environment.CLAUDE_CONFIG_DIR ?? null, awsFiles: awsFilesOf(environment) }),
+  integrationTools,
   // An older guardian's acceptance check runs stand-in agents with real accounts and an empty home.
   accountsAreStandIns: environment.OURO_INTEGRATIONS_STAND_IN_DIR !== undefined,
   hostHold: hostHoldFromEnvironment(),

@@ -330,6 +330,11 @@ export class OuroCore {
       offerChanged: () => this.store.markChanged('server', 'server'),
       publishApp: config.personSource === null ? null : () => this.publishApp(config.personSource!.appDir),
       tellMasterAgent: (text) => this.alert(MASTER_AGENT_NAME, text),
+      tellAgent: (name, text) => this.alert(name, text),
+      tellOwner: (text) => {
+        const owner = this.store.ownerPerson()
+        if (owner) this.alert(owner.address, text)
+      },
       log: config.log,
     })
     this.machines = config.machines ?? null
