@@ -1,4 +1,5 @@
 // The Tailscale port: install it on this host, start its login, read where it stands, and take it off again.
+// On a machine with systemd (an EC2 server) it comes from Tailscale's own package repository, its daemon a systemd service.
 // On a Sprite it runs as root through sudo, its daemon a Sprite service. Removing logs out with the daemon up, then lets the
 // service manager stop the daemon with SIGTERM, so it undoes its own network changes; never pkill or `tailscaled --cleanup`.
 import { execFile, spawn } from 'node:child_process'
@@ -17,16 +18,23 @@ export class TailscaleStepFailed extends Error {}
 
 export interface TailscaleHost {
   observe(): Promise<TailscaleObservation>
-  /** Saves a restore point, then installs the tools and starts the daemon as a service. */
+  /** Installs the tools and starts the daemon as a service (a Sprite saves a restore point first). */
   install(): Promise<void>
-  /** Starts `tailscale up` and leaves it running: it finishes the login once the person approves the link. */
+  /**
+   * Starts `tailscale up` and leaves it running: it finishes the login once the person approves the link. Connect calls
+   * this without install() when Tailscale is installed but `stopped`.
+   */
   startLogin(hostname: string): Promise<void>
   /** Logs out, stops the daemon and removes everything installed. */
   remove(): Promise<void>
 }
 
-/** Whether this server is one Ouro sets Tailscale up on. A person's own computer joins their network by itself. */
-export type TailscaleSetup = { kind: 'set_up_here'; host: TailscaleHost } | { kind: 'not_needed' }
+/**
+ * Whether this server is one Ouro sets Tailscale up on. A person's own computer joins their network by itself.
+ * `neededForComputers`: whether it reaches linked computers only over Tailscale (a Sprite); a server with its own public
+ * address (an EC2 instance) reaches them without it, and connects only for the person's other devices.
+ */
+export type TailscaleSetup = { kind: 'set_up_here'; host: TailscaleHost; neededForComputers: boolean } | { kind: 'not_needed' }
 
 /** Tailscale names hosts with letters, digits and hyphens. */
 export function tailscaleHostnameOf(machineName: string): string {
@@ -59,23 +67,80 @@ async function spriteEnv(args: string[], timeoutMs = 60_000): Promise<void> {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/** What `tailscale status` says, through the CLI at `cli`. */
+async function observeThrough(cli: string): Promise<TailscaleObservation> {
+  if (!existsSync(cli)) return { kind: 'not_installed' }
+  let status: { BackendState?: unknown; AuthURL?: unknown; TailscaleIPs?: unknown }
+  try {
+    status = JSON.parse(await run('sudo', [cli, 'status', '--json'], 10_000)) as typeof status
+  } catch {
+    return { kind: 'stopped' } // the daemon isn't up
+  }
+  if (status.BackendState === 'Running') {
+    const ips = Array.isArray(status.TailscaleIPs) ? status.TailscaleIPs.filter((ip): ip is string => typeof ip === 'string') : []
+    return { kind: 'running', ip: ips.find((ip) => ip.includes('.')) ?? null }
+  }
+  if (typeof status.AuthURL === 'string' && status.AuthURL !== '') return { kind: 'needs_login', loginUrl: status.AuthURL }
+  return { kind: 'stopped' }
+}
+
+/** Starts `tailscale up` once the daemon's socket is there, and leaves it running for the person's approval. */
+async function startLoginThrough(cli: string, hostname: string): Promise<void> {
+  for (let attempt = 0; attempt < 20 && !existsSync(SOCKET); attempt++) await delay(500)
+  if (!existsSync(SOCKET)) throw new TailscaleStepFailed('the Tailscale daemon did not start')
+  spawn('sudo', [cli, 'up', `--hostname=${hostname}`, '--accept-dns=false'], { detached: true, stdio: 'ignore' }).unref()
+}
+
+/** The package's CLI, and the files its repository adds to apt: Tailscale's signing key, and a source list bound to it. */
+const SYSTEMD_CLI = '/usr/bin/tailscale'
+const APT_KEYRING = '/usr/share/keyrings/tailscale-archive-keyring.gpg'
+const APT_LIST = '/etc/apt/sources.list.d/tailscale.list'
+/** A freshly booted machine's own updates often hold apt's lock for a few minutes; wait for it rather than fail. */
+const APT_LOCK_WAIT_S = 240
+
+/**
+ * Installs the `tailscale` package from Tailscale's apt repository, as the installer adds Node's, gh's and Caddy's: apt
+ * checks every package against the repository's key, so nothing unsigned runs as root. Ubuntu and Debian only.
+ */
+const APT_INSTALL = `set -o pipefail; . /etc/os-release
+case "$ID" in ubuntu|debian) ;; *) echo "Tailscale installs here only on Ubuntu or Debian, not $ID" >&2; exit 1 ;; esac
+[ -n "\${VERSION_CODENAME:-}" ] || { echo "this $ID has no release codename for Tailscale's repository" >&2; exit 1; }
+curl -fsSL "https://pkgs.tailscale.com/stable/$ID/$VERSION_CODENAME.noarmor.gpg" | sudo tee ${APT_KEYRING} >/dev/null
+echo "deb [signed-by=${APT_KEYRING}] https://pkgs.tailscale.com/stable/$ID $VERSION_CODENAME main" | sudo tee ${APT_LIST} >/dev/null
+sudo apt-get -o DPkg::Lock::Timeout=${APT_LOCK_WAIT_S} update -qq
+sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=${APT_LOCK_WAIT_S} install -y -qq tailscale >/dev/null`
+
+/** On a Linux machine with systemd and passwordless sudo, such as an EC2 server: Tailscale's own package and service. */
+export function systemdTailscale(): TailscaleHost {
+  const startDaemon = () => run('sudo', ['systemctl', 'enable', '--now', SERVICE], 60_000)
+  return {
+    observe: () => observeThrough(SYSTEMD_CLI),
+
+    async install() {
+      if (!existsSync(SYSTEMD_CLI)) await bash(APT_INSTALL, 600_000)
+      await startDaemon()
+    },
+
+    async startLogin(hostname) {
+      // Installed but stopped (a remove that failed half-way, or a daemon that didn't start after the install): connect
+      // skips install() then, so the daemon is started here. Starting one that runs changes nothing.
+      await startDaemon()
+      await startLoginThrough(SYSTEMD_CLI, hostname)
+    },
+
+    async remove() {
+      await run('sudo', [SYSTEMD_CLI, 'logout'], 20_000).catch(() => {}) // already logged out, or never installed
+      await bash(`sudo systemctl disable --now ${SERVICE} 2>/dev/null || true
+if dpkg -s tailscale >/dev/null 2>&1; then sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=${APT_LOCK_WAIT_S} purge -y tailscale; fi
+sudo rm -f ${APT_LIST} ${APT_KEYRING}
+sudo rm -rf /var/lib/tailscale`, (APT_LOCK_WAIT_S + 120) * 1000)
+    },
+  }
+}
+
 export function spriteTailscale(): TailscaleHost {
   return {
-    async observe() {
-      if (!existsSync(CLI)) return { kind: 'not_installed' }
-      let status: { BackendState?: unknown; AuthURL?: unknown; TailscaleIPs?: unknown }
-      try {
-        status = JSON.parse(await run('sudo', [CLI, 'status', '--json'], 10_000)) as typeof status
-      } catch {
-        return { kind: 'stopped' } // the daemon isn't up
-      }
-      if (status.BackendState === 'Running') {
-        const ips = Array.isArray(status.TailscaleIPs) ? status.TailscaleIPs.filter((ip): ip is string => typeof ip === 'string') : []
-        return { kind: 'running', ip: ips.find((ip) => ip.includes('.')) ?? null }
-      }
-      if (typeof status.AuthURL === 'string' && status.AuthURL !== '') return { kind: 'needs_login', loginUrl: status.AuthURL }
-      return { kind: 'stopped' }
-    },
+    observe: () => observeThrough(CLI),
 
     async install() {
       try {
@@ -101,11 +166,7 @@ rm -rf "$d"`, 180_000)
         [DAEMON, '--state=/var/lib/tailscale/tailscaled.state', `--socket=${SOCKET}`].join(','), '--dir', '/tmp', '--no-stream'])
     },
 
-    async startLogin(hostname) {
-      for (let attempt = 0; attempt < 20 && !existsSync(SOCKET); attempt++) await delay(500)
-      if (!existsSync(SOCKET)) throw new TailscaleStepFailed('the Tailscale daemon did not start')
-      spawn('sudo', [CLI, 'up', `--hostname=${hostname}`, '--accept-dns=false'], { detached: true, stdio: 'ignore' }).unref()
-    },
+    startLogin: (hostname) => startLoginThrough(CLI, hostname),
 
     async remove() {
       await run('sudo', [CLI, 'logout'], 20_000).catch(() => {}) // already logged out, or never installed
