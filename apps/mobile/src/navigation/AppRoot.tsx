@@ -218,7 +218,6 @@ export function AppRoot({ core, hostedServers, updates, lock, push, otherServers
                       <Stack.Screen name="GitHub" component={GitHubScreen} options={{ title: 'GitHub' }} />
                       <Stack.Screen name="AWS" component={AwsScreen} options={{ title: 'AWS' }} />
                       <Stack.Screen name="Sprites" component={SpritesScreen} options={{ title: 'Sprites' }} />
-                      <Stack.Screen name="Pair" options={{ title: 'Add a server' }}>{(props) => <PairScreen onBack={() => props.navigation.goBack()} />}</Stack.Screen>
                     </Stack.Group>
                   </Stack.Navigator>
                 </NavigationContainer>

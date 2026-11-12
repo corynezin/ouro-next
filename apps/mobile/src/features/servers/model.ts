@@ -1,7 +1,8 @@
 // The servers as rows: the ones saved on this phone, each with how it is linked to the open one, then the computers the
 // open one is linked to that this phone isn't paired with. Pure: Screen.tsx only draws this.
 import { NETWORK_NAME_PATTERN } from '@ouro/contract'
-import type { ComputerEntity, HostedServer, MachineProvider, NetworkEntity, NewMachine, ProvisioningStep } from '@ouro/contract'
+import type { ComputerEntity, HostedServer, MachineProvider, NetworkEntity, NetworkKind, NetworkRole, NewMachine, ProvisioningStep } from '@ouro/contract'
+import { pairingTarget } from '../pair/model.ts'
 import { sameServerUrl } from '../../core/accounts/savedServers.ts'
 import type { SavedServer } from '../../core/accounts/savedServers.ts'
 import type { ServerPlace } from '../../core/servers/otherServersUnread.ts'
@@ -92,14 +93,6 @@ export interface NetworkSection {
 const networkDetail = (network: NetworkEntity): string =>
   network.role === 'extra' ? 'Shared · visiting' : network.kind === 'private' ? 'Private' : 'Shared'
 
-/** The line at the top: where the open server lives and which networks it visits. Null without networks. */
-export function networksSummary(networks: readonly NetworkEntity[], server: string): string | null {
-  const home = networks.find((network) => network.role === 'home')
-  const visits = networks.filter((network) => network.role === 'extra').map((network) => network.name)
-  if (!home) return null
-  return `${server} lives in ${home.name}${visits.length ? ` and visits ${visits.join(', ')}` : ''}.`
-}
-
 const EMPTY_PLACE: ServerPlace = { networks: [], computers: [] }
 
 /**
@@ -164,8 +157,9 @@ export function networkSections(rows: readonly ServerRow[], unpaired: readonly U
 
 /** Where a new server can go: a network a saved server holds a key for (invited from the open server when it holds it,
  * else the first saved server that does), or a private network the person started that no server is in yet, which this
- * server then makes. A server the person already runs may also stay as it is. Networks are started on their own page,
- * and someone else's is joined with Network… first; either is then one of these. `group`: the section it's listed in. */
+ * server then makes. A server the person already runs may also stay as it is; a new one may go in no network (and is then
+ * linked with the others while no saved server uses networks). Networks are started on their own page, and someone else's
+ * is joined with Network… first; either is then one of these. `group`: the section it's listed in. */
 export interface NewServerNetworkChoice {
   key: string; title: string; detail: string | null; group: 'keep' | 'private' | 'shared'
   /** Null: it stays as it is. */
@@ -181,20 +175,28 @@ export function newServerNetworkChoices(places: ReadonlyMap<string, ServerPlace>
     .sort((a, b) => a.network.name.localeCompare(b.network.name))
     .map(({ network, hostServerId }): NewServerNetworkChoice => ({
       key: network.id, title: network.name, detail: null, group: kind,
-      plan: { kind: 'join', networkId: network.id, networkName: network.name, hostServerId },
+      plan: { kind: 'join', networkId: network.id, networkName: network.name, networkKind: network.kind, hostServerId },
     }))
   const takenNames = new Set([...seen.values()].map(({ network }) => network.name))
   const pending = pendingPrivate.filter((name) => !takenNames.has(name)).map((name): NewServerNetworkChoice => ({
     key: `pending:${name}`, title: name, detail: NETWORKS_COPY.pendingDetail, group: 'private', plan: { kind: 'new_private', name },
   }))
-  return [
-    ...(existing ? [{ key: 'keep', title: NETWORKS_COPY.keepChoice, detail: NETWORKS_COPY.keepFooter, group: 'keep' as const, plan: null }] : []),
-    ...known('private'),
-    ...pending,
-    ...known('shared'),
-  ]
+  const stay: NewServerNetworkChoice = existing
+    ? { key: KEEP_CHOICE, title: NETWORKS_COPY.keepChoice, detail: NETWORKS_COPY.keepFooter, group: 'keep', plan: null }
+    : { key: NO_NETWORK_CHOICE, title: NETWORKS_COPY.noneChoice, detail: NETWORKS_COPY.noneFooter, group: 'keep', plan: null }
+  return [stay, ...known('private'), ...pending, ...known('shared')]
 }
 
+const KEEP_CHOICE = 'keep'
+const NO_NETWORK_CHOICE = 'none'
+
+/** What step 3 has picked before the person taps one: the open server's own network for a new server, as most new servers
+ * join the person's other ones; otherwise staying as it is (or in no network). */
+export function defaultNetworkChoiceKey(choices: readonly NewServerNetworkChoice[], openNetworks: readonly NetworkEntity[]): string | null {
+  const home = openNetworks.find((network) => network.role === 'home')
+  if (home && choices.some((choice) => choice.key === home.id && choice.plan !== null)) return home.id
+  return choices.find((choice) => choice.plan === null)?.key ?? null
+}
 /** Where a new server can run, as the first step lists it: a cloud account or hosted, one to connect first, or one the
  * person already runs. */
 export interface WhereChoice { key: string; title: string; detail: string; kind: 'make' | 'set_up' | 'existing'; route: IntegrationRoute | null }
@@ -206,6 +208,24 @@ export const EXISTING_SERVER = 'existing'
 export function detailsHintOf(where: string, detail: string): string {
   if (where === EXISTING_SERVER) return NEW_SERVER_COPY.linkHint
   return where === 'hosted' ? NEW_SERVER_COPY.hint : NEW_SERVER_COPY.hintFor(detail)
+}
+
+/** What tapping a where-row does: on to step 2, or, for a provider not set up yet, to its integration's screen first (or
+ * nothing, for one this app doesn't know how to set up). */
+export type WhereAction = { kind: 'details' } | { kind: 'set_up'; route: IntegrationRoute } | { kind: 'none' }
+
+export function whereActionOf(choice: WhereChoice): WhereAction {
+  if (choice.kind !== 'set_up') return { kind: 'details' }
+  return choice.route === null ? { kind: 'none' } : { kind: 'set_up', route: choice.route }
+}
+
+/** A server already run, as typed in step 2: the pairing link `ouro pair` prints, or its address and code, as the old
+ * Pair form took them. Null: neither. */
+export function existingServerTargetOf(typed: string): { url: string; code: string } | null {
+  const fromLink = pairingTarget({ link: typed, address: '', code: '' })
+  if (fromLink) return fromLink
+  const [address, code, ...rest] = typed.trim().split(/\s+/)
+  return address && code && rest.length === 0 ? pairingTarget({ link: '', address, code }) : null
 }
 
 export function whereChoices(providers: readonly MachineProvider[], hostedAvailable: boolean): WhereChoice[] {
@@ -243,19 +263,66 @@ export function networkNameOf(typed: string): { name: string } | { error: string
   return NETWORK_NAME_PATTERN.test(name) ? { name } : { error: NETWORKS_COPY.badName }
 }
 
-/** How another saved server can join one of the open server's networks: as its home, or, into a shared network, holding the
- * key as an extra key so a private server can look, pull and push there. */
-export interface JoinChoice { networkId: string; role: 'home' | 'extra'; title: string }
+/**
+ * How the open server joins a network from an invite, by the kind the person says it is: as its home when it has none;
+ * into a shared network, from a private home, as a visitor holding an extra key. A private network is only ever a home,
+ * and a shared server visits nowhere, so those are refused with what to do instead.
+ */
+export type JoinRole = { kind: 'join'; role: NetworkRole } | { kind: 'refused'; why: string }
 
-export function joinChoices(networks: readonly NetworkEntity[]): JoinChoice[] {
-  return networks.flatMap((network) => network.kind === 'shared'
-    ? [{ networkId: network.id, role: 'home' as const, title: NETWORKS_COPY.joinShared(network.name) }, { networkId: network.id, role: 'extra' as const, title: NETWORKS_COPY.visit(network.name) }]
-    : [{ networkId: network.id, role: 'home' as const, title: NETWORKS_COPY.joinPrivate(network.name) }])
+export function joinRoleOf(kind: NetworkKind, openNetworks: readonly NetworkEntity[]): JoinRole {
+  const home = openNetworks.find((network) => network.role === 'home') ?? null
+  if (home === null) return { kind: 'join', role: 'home' }
+  if (kind === 'private') return { kind: 'refused', why: NETWORKS_COPY.privateNeedsNewServer }
+  return home.kind === 'private' ? { kind: 'join', role: 'extra' } : { kind: 'refused', why: NETWORKS_COPY.sharedFromShared }
 }
 
-/** A network invite to send someone: the code and the server that takes it, with how to use it. */
-export const inviteMessage = (network: NetworkEntity, invite: { address: string; code: string }) =>
-  `Join the Ouro network "${network.name}" within 30 minutes (the code works once).\nServer: ${invite.address}\nCode: ${invite.code}\nIn the Ouro app, open your server, tap Servers > Add > Join a network, and paste this whole message.`
+/** The kinds the person picks from before joining, shared first: an invite from someone else is the usual case, and
+ * taking a private network's key makes its owner and this server's one person, with each other's memory. */
+export const JOIN_KINDS: readonly { kind: NetworkKind; title: string }[] = [
+  { kind: 'shared', title: 'A shared network (with others)' },
+  { kind: 'private', title: 'My own private network' },
+]
+
+/** How another saved server can join one of the open server's networks: as its home, or, into a shared network, holding the
+ * key as an extra key so a private server can look, pull and push there. */
+export interface JoinChoice { networkId: string; kind: NetworkKind; role: NetworkRole; title: string }
+
+export function joinChoices(networks: readonly NetworkEntity[]): JoinChoice[] {
+  return networks.flatMap((network): JoinChoice[] => network.kind === 'shared'
+    ? [{ networkId: network.id, kind: 'shared', role: 'home', title: NETWORKS_COPY.joinShared(network.name) }, { networkId: network.id, kind: 'shared', role: 'extra', title: NETWORKS_COPY.visit(network.name) }]
+    : [{ networkId: network.id, kind: 'private', role: 'home', title: NETWORKS_COPY.joinPrivate(network.name) }])
+}
+
+/** Whether a section is one network's (not "Not in a network", the one list before networks, or one only started): a
+ * server removed from it still holds its key. */
+export const isNetworkSection = (section: NetworkSection): boolean => section.key !== 'outside' && section.key !== 'all' && !section.key.startsWith('pending:')
+
+/** A removal's or unlink's words, with the note that a server in a network still holds its key. */
+export const withNetworkKeyNote = (message: string, inNetwork: boolean): string => inNetwork ? `${message} ${SERVERS_COPY.networkKeyNote}` : message
+
+/** A network invite to send someone: the code and the server that takes it, how long it lasts (from its `expiresAt`), what
+ * kind of network it is, and how to use it, in the app or on the server itself. */
+export function inviteMessage(network: NetworkEntity, invite: { address: string; code: string; expiresAt: number; command: string }, now: number): string {
+  const minutes = Math.max(1, Math.round((invite.expiresAt - now) / 60_000))
+  const kind = network.kind === 'shared' ? 'shared' : 'private'
+  return [
+    `Join the ${kind} Ouro network "${network.name}" within ${minutes} minute${minutes === 1 ? '' : 's'} (the code works once).`,
+    `Server: ${invite.address}`,
+    `Code: ${invite.code}`,
+    `In the Ouro app, open your server, tap Servers → ${NETWORKS_COPY.button} → ${NETWORKS_COPY.join}, paste this whole message, and choose ${kind === 'shared' ? 'a shared network' : 'my own private network'}.`,
+    `Or on the server itself: ${invite.command} --kind ${kind}`,
+  ].join('\n')
+}
+
+/** How a saved server still to be put in its network shows under its name. */
+export function placementText(placement: { kind: 'placing'; plan: NetworkPlan } | { kind: 'failed'; plan: NetworkPlan; why: string }): string {
+  const network = placement.plan.kind === 'join' ? placement.plan.networkName : placement.plan.name
+  switch (placement.kind) {
+    case 'placing': return NETWORKS_COPY.placing(network)
+    case 'failed': return NETWORKS_COPY.notPlaced(network, placement.why)
+  }
+}
 
 export const NETWORKS_COPY = {
   outside: 'Not in a network',
@@ -272,9 +339,15 @@ export const NETWORKS_COPY = {
   sharedFromShared: 'Start a shared network from one of your private servers.',
   privateSection: 'Private',
   sharedSection: 'Shared',
-  noNetworks: 'No networks yet.',
   keepChoice: 'Leave it as it is',
   keepFooter: 'It stays in whatever network it is in now, if any.',
+  noneChoice: 'No network',
+  noneFooter: 'You can add it to one later from Servers.',
+  privateNeedsNewServer: 'This server is in a network already, and a private network is only ever a server\'s home. Join it from a new server: New server, then pick it.',
+  placing: (network: string) => `Joining ${network}…`,
+  notPlaced: (network: string, why: string) => `Not in ${network} yet: ${why}`,
+  retry: 'Retry',
+  joinKindTitle: 'What kind of network is it?',
   badName: 'A network name is letters, digits, spaces, dots, dashes or underscores, up to 64, starting with a letter or digit.',
   empty: 'No servers yet',
   leftOut: (names: readonly string[]) => `Left out (they had limited trust): ${names.join(', ')}. Add or remove them by hand.`,
@@ -371,7 +444,7 @@ export const NEW_SERVER_COPY = {
   whereTitle: 'Where will it run?',
   nameTitle: 'Name it',
   linkTitle: 'Pairing link',
-  linkHint: 'On that server, run ouro pair and paste the link it prints.',
+  linkHint: 'On that server, run ouro pair and paste the link it prints, or its address and code.',
   networkTitle: 'Which network?',
   addExisting: 'Add',
   hosted: 'Ouro hosted',
@@ -484,6 +557,7 @@ export const SERVERS_COPY = {
   notOnPhone: 'Not on this phone',
   unlinkFailed: 'Could not unlink it.',
   trustFailed: 'Could not change its trust.',
-  offlineNote: 'An offline server comes back by itself when it wakes.',
+  /** A server in a network still holds its key once removed or unlinked, and can come back with it. */
+  networkKeyNote: 'It still holds the network\'s key, so it can come back: to keep it out for good, start a new network and move your other servers to it.',
   linkByCommand: 'Link a computer with a command',
 } as const

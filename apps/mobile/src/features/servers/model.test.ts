@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { ComputerEntity, HostedServer } from '@ouro/contract'
-import { NETWORKS_COPY, parseInvite, networksSummary, checkingNote, createFailureText, hostedRows, inviteMessage, joinChoices, networkSections, newServerLabelOf, renamedLabel, serverRows, unpairedComputerRows } from './model.ts'
+import { NETWORKS_COPY, parseInvite, checkingNote, createFailureText, hostedRows, inviteMessage, joinChoices, networkSections, newServerLabelOf, renamedLabel, serverRows, unpairedComputerRows } from './model.ts'
 
 const server = (id: string, personName: string | null = null) => ({ id, label: `L${id}`, url: `https://${id}`, deviceName: 'mac', deviceId: 'd', personName, hostedServerId: null })
 
@@ -179,20 +179,35 @@ test('every server is shown in the network it lives in, the same whichever is op
 
 test('a server joins a private network as its home; a shared one as a shared server, or holding its key while visiting', () => {
   const choices = joinChoices([network('p', 'private', 'private', 'home'), network('s', 'team', 'shared', 'extra')])
-  assert.deepEqual(choices.map((choice) => [choice.networkId, choice.role]), [['p', 'home'], ['s', 'home'], ['s', 'extra']])
+  assert.deepEqual(choices.map((choice) => [choice.networkId, choice.kind, choice.role]), [['p', 'private', 'home'], ['s', 'shared', 'home'], ['s', 'shared', 'extra']])
 })
 
-test('an invite carries the server and code, never the key', () => {
-  const text = inviteMessage(network('s', 'team', 'shared', 'extra'), { address: 'http://100.64.0.1:7777', code: 'abc' })
-  assert.match(text, /team/)
+const invited = { address: 'http://100.64.0.1:7777', code: 'abc', expiresAt: 30 * 60_000, command: 'ouro networks join http://100.64.0.1:7777 abc' }
+
+test('an invite carries the server and code, never the key; its time comes from when it expires, and it names the real menu and command', () => {
+  const text = inviteMessage(network('s', 'team', 'shared', 'extra'), invited, 0)
+  assert.match(text, /shared Ouro network "team" within 30 minutes/)
   assert.match(text, /http:\/\/100\.64\.0\.1:7777/)
   assert.match(text, /Code: abc/)
+  assert.match(text, /Servers → Network… → Join a network with an invite/)
+  assert.match(text, /ouro networks join http:\/\/100\.64\.0\.1:7777 abc --kind shared/)
+  assert.match(inviteMessage(network('p', 'home', 'private', 'home'), invited, 29 * 60_000), /private Ouro network "home" within 1 minute \(/)
 })
 
-test('the top line says where the open server lives and what it visits; an empty network says how to add a server', () => {
+test('joining from an invite: as the home of a server in none; into a shared network from a private home as a visitor; never a private network on a server already in one', async () => {
+  const { joinRoleOf, JOIN_KINDS } = await import('./model.ts')
+  const priv = network('p', 'private', 'private', 'home')
+  const shared = network('t', 'team', 'shared', 'home')
+  assert.deepEqual(JOIN_KINDS.map((choice) => choice.kind), ['shared', 'private'], 'shared first')
+  assert.deepEqual(joinRoleOf('shared', []), { kind: 'join', role: 'home' })
+  assert.deepEqual(joinRoleOf('private', []), { kind: 'join', role: 'home' })
+  assert.deepEqual(joinRoleOf('shared', [priv]), { kind: 'join', role: 'extra' })
+  assert.deepEqual(joinRoleOf('private', [priv]), { kind: 'refused', why: NETWORKS_COPY.privateNeedsNewServer })
+  assert.deepEqual(joinRoleOf('shared', [shared]), { kind: 'refused', why: NETWORKS_COPY.sharedFromShared })
+})
+
+test('an empty network says how to add a server', () => {
   const networks = [network('p', 'private', 'private', 'home'), network('s', 'studio', 'shared', 'extra')]
-  assert.equal(networksSummary(networks, 'work'), 'work lives in private and visits studio.')
-  assert.equal(networksSummary([], 'work'), null)
   const rows = serverRows([server('a')], 'a', { counts: new Map(), checking: false })
   const sections = networkSections(rows, [], new Map([['a', { networks, computers: [] }]]))
   assert.equal(sections[0]!.emptyNote, 'No servers yet')
@@ -200,7 +215,7 @@ test('the top line says where the open server lives and what it visits; an empty
 })
 
 test('an invite is read from the whole shared message, or from an address and a code', () => {
-  const message = inviteMessage(network('s', 'team', 'shared', 'extra'), { address: 'https://a.example', code: 'c0de' })
+  const message = inviteMessage(network('s', 'team', 'shared', 'extra'), { ...invited, address: 'https://a.example', code: 'c0de' }, 0)
   assert.deepEqual(parseInvite(message), { address: 'https://a.example', code: 'c0de' })
   assert.deepEqual(parseInvite('ouro networks join http://100.64.0.1:8080 abc'), { address: 'http://100.64.0.1:8080', code: 'abc' })
   assert.equal(parseInvite('hello'), null)
@@ -213,12 +228,25 @@ test('a new server can go into any network a saved server holds, private ones th
     ['s', { networks: [network('t', 'team', 'shared', 'home')], computers: [] }],
   ])
   assert.deepEqual(newServerNetworkChoices(places, 's', false, ['work', 'private']).map((choice) => [choice.group, choice.title, choice.plan]), [
-    ['private', 'private', { kind: 'join', networkId: 'p', networkName: 'private', hostServerId: 'r' }],
+    ['keep', NETWORKS_COPY.noneChoice, null],
+    ['private', 'private', { kind: 'join', networkId: 'p', networkName: 'private', networkKind: 'private', hostServerId: 'r' }],
     ['private', 'work', { kind: 'new_private', name: 'work' }],
-    ['shared', 'team', { kind: 'join', networkId: 't', networkName: 'team', hostServerId: 's' }],
+    ['shared', 'team', { kind: 'join', networkId: 't', networkName: 'team', networkKind: 'shared', hostServerId: 's' }],
   ])
   const already = newServerNetworkChoices(places, 's', true)
   assert.deepEqual([already[0]!.key, already[0]!.group, already[0]!.plan], ['keep', 'keep', null])
+})
+
+test('a new server can be made when no saved server has a network: in no network, picked from the start', async () => {
+  const { defaultNetworkChoiceKey, newServerNetworkChoices } = await import('./model.ts')
+  const choices = newServerNetworkChoices(new Map([['s', { networks: [], computers: [] }]]), 's', false)
+  assert.deepEqual(choices.map((choice) => [choice.key, choice.plan]), [['none', null]])
+  assert.equal(defaultNetworkChoiceKey(choices, []), 'none')
+  const home = network('p', 'private', 'private', 'home')
+  const inHome = newServerNetworkChoices(new Map([['s', { networks: [home], computers: [] }]]), 's', false)
+  assert.equal(defaultNetworkChoiceKey(inHome, [home]), 'p', "the open server's own network")
+  assert.equal(defaultNetworkChoiceKey(newServerNetworkChoices(new Map([['s', { networks: [home], computers: [] }]]), 's', true), [home]), 'p')
+  assert.equal(defaultNetworkChoiceKey(newServerNetworkChoices(new Map(), 's', true), []), 'keep')
 })
 
 test('a network is started where it can live: a private one on a server in none, else kept until a server is put in it', async () => {
@@ -261,6 +289,46 @@ test('a place a server can run that is not connected yet is listed by its name, 
     ['Sprite', 'set_up', 'Connect Sprites in Integrations first.'],
     ['A server I already run', 'existing', 'Pair it with the link it prints for ouro pair.'],
   ])
+})
+
+test('a place not set up yet opens its integration first; one this app has no screen for does nothing', async () => {
+  const { whereActionOf, whereChoices } = await import('./model.ts')
+  const providers = [
+    { id: 'sprite', name: 'Sprite', available: false, detail: '', setup: 'sprites' },
+    { id: 'aws', name: 'AWS', available: false, detail: '', setup: 'aws' },
+    { id: 'x', name: 'X', available: false, detail: '', setup: 'unknown' },
+    { id: 'ok', name: 'OK', available: true, detail: '', setup: null },
+  ]
+  assert.deepEqual(whereChoices(providers, false).map(whereActionOf), [
+    { kind: 'set_up', route: 'Sprites' }, { kind: 'set_up', route: 'AWS' }, { kind: 'none' }, { kind: 'details' }, { kind: 'details' },
+  ])
+})
+
+test('a server already run is paired from its link, or from its address and code', async () => {
+  const { existingServerTargetOf } = await import('./model.ts')
+  assert.deepEqual(existingServerTargetOf('ouronext://pair?url=https%3A%2F%2Fa.test&code=c0de'), { url: 'https://a.test', code: 'c0de' })
+  assert.equal(existingServerTargetOf('https://b.test c0de')?.code, 'c0de')
+  assert.equal(existingServerTargetOf('https://b.test'), null)
+  assert.equal(existingServerTargetOf('https://b.test c0de extra'), null)
+})
+
+test('a server still to be put in its network says so, with why it did not go in', async () => {
+  const { placementText } = await import('./model.ts')
+  assert.equal(placementText({ kind: 'placing', plan: { kind: 'new_private', name: 'work' } }), 'Joining work…')
+  assert.equal(placementText({ kind: 'failed', plan: { kind: 'join', networkId: 'n', networkName: 'team', networkKind: 'shared', hostServerId: 's' }, why: 'asleep' }), 'Not in team yet: asleep')
+})
+
+test('removing or unlinking a server listed in a network says it keeps the key, and how to keep it out for good', async () => {
+  const { isNetworkSection, SERVERS_COPY, withNetworkKeyNote } = await import('./model.ts')
+  const rows = serverRows([server('a')], 'a', { counts: new Map(), checking: false })
+  const [inNetwork] = networkSections(rows, [], new Map([['a', { networks: [network('p', 'private', 'private', 'home')], computers: [] }]]), ['work'])
+  assert.equal(isNetworkSection(inNetwork!), true)
+  const [all] = networkSections(rows, [], new Map())
+  assert.equal(isNetworkSection(all!), false)
+  assert.equal(isNetworkSection({ ...all!, key: 'pending:work' }), false)
+  assert.equal(withNetworkKeyNote('Gone.', false), 'Gone.')
+  assert.equal(withNetworkKeyNote('Gone.', true), `Gone. ${SERVERS_COPY.networkKeyNote}`)
+  assert.match(SERVERS_COPY.networkKeyNote, /new network/)
 })
 
 test("step 2's hint: the pairing link for a server already run, the provider's own words for one made there", async () => {

@@ -37,7 +37,7 @@ test('Servers: networks set up and joined from the phone, a new server left for 
     await phone.switchTo(alphaSaved)
     const session = phone.activeSession!
     await waitFor('alpha open', () => (session.store.server?.networks ?? []).length === 2)
-    assert.equal(await phone.addToNetwork(teamSaved, alphaSaved, shared.value.network.id, 'home'), null)
+    assert.equal(await phone.addToNetwork(teamSaved, alphaSaved, { networkId: shared.value.network.id, kind: 'shared', role: 'home' }), null)
     const teamComputer = await waitFor('team online in alpha', () => [...session.store.computers.values()].find((computer) => computer.name === 'team' && computer.status === 'online'))
     assert.equal(teamComputer.networkId, shared.value.network.id)
     assert.equal(canPull(teamComputer, session.store.server!.networks!), true)

@@ -14,12 +14,14 @@ import { accent } from '../../design/theme.ts'
 import { useCore, useHostedServers, useOtherServersUnread, useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
 import type { ScreenProps } from '../../navigation/routes.ts'
 import { HostedServerSetupView, MachineSetupView } from '../onboarding/SetupScreen.tsx'
-import { NOTHING_USABLE_TO_PAIR_WITH, PairingGate, pairingTarget } from '../pair/model.ts'
+import { NOTHING_USABLE_TO_PAIR_WITH, PairingGate } from '../pair/model.ts'
 import {
-  createFailureText, detailsHintOf, EXISTING_SERVER, machineAsHosted, NETWORKS_COPY, NEW_SERVER_COPY, networkNameOf, networkStartOf,
-  newServerLabelOf, newServerNetworkChoices, whereChoices,
+  createFailureText, defaultNetworkChoiceKey, detailsHintOf, EXISTING_SERVER, existingServerTargetOf, machineAsHosted, NETWORKS_COPY,
+  NEW_SERVER_COPY, networkNameOf, networkStartOf, newServerLabelOf, newServerNetworkChoices, whereActionOf, whereChoices,
 } from './model.ts'
 import type { NewServerNetworkChoice } from './model.ts'
+import { createNewServer } from './newServer.ts'
+import type { NewServerPorts, SettingUp } from './newServer.ts'
 
 // ---- Step 1: where it runs ----
 
@@ -46,10 +48,20 @@ export function NewServerScreen({ navigation }: ScreenProps<'NewServer'>) {
     <Step title={NEW_SERVER_COPY.whereTitle}>
       {machines === undefined && <ActivityIndicator style={{ marginTop: 12 }} />}
       <Rows>
-        {choices.map((choice) => (
-          <Row key={choice.key} title={choice.title} detail={choice.detail} chevron={choice.kind !== 'set_up'} disabled={choice.kind === 'set_up'}
-            onPress={() => navigation.navigate('NewServerDetails', { where: choice.key, detail: choice.detail })} />
-        ))}
+        {choices.map((choice) => {
+          const action = whereActionOf(choice)
+          return (
+            <Row key={choice.key} title={choice.title} detail={choice.detail} chevron={action.kind !== 'none'} disabled={action.kind === 'none'}
+              onPress={() => {
+                switch (action.kind) {
+                  case 'details': return navigation.navigate('NewServerDetails', { where: choice.key, detail: choice.detail })
+                  // Connected there, it comes back here (focus reloads the providers) and is then one to make.
+                  case 'set_up': return navigation.navigate(action.route)
+                  case 'none': return
+                }
+              }} />
+          )
+        })}
       </Rows>
     </Step>
   )
@@ -62,7 +74,7 @@ export function NewServerDetailsScreen({ navigation, route }: ScreenProps<'NewSe
   const existing = where === EXISTING_SERVER
   const [typed, setTyped] = useState('')
   const named = existing ? null : newServerLabelOf(typed)
-  const target = existing ? pairingTarget({ link: typed, address: '', code: '' }) : null
+  const target = existing ? existingServerTargetOf(typed) : null
   const problem = named !== null && 'error' in named ? named.error : existing && typed.trim() && target === null ? NOTHING_USABLE_TO_PAIR_WITH : null
   const label = named !== null && 'label' in named ? named.label : null
   const ready = existing ? target !== null : label !== null
@@ -104,7 +116,7 @@ export function NewServerNetworkScreen({ navigation, route }: ScreenProps<'NewSe
   const [chosenKey, setChosenKey] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
-  const [settingUp, setSettingUp] = useState<{ id: string; label: string; machine: boolean } | null>(null)
+  const [settingUp, setSettingUp] = useState<SettingUp | null>(null)
   const [gate] = useState(() => new PairingGate())
 
   // Again on coming back from Start a network, which may have added one.
@@ -118,52 +130,39 @@ export function NewServerNetworkScreen({ navigation, route }: ScreenProps<'NewSe
   const openNetworks = session.store.server?.networks ?? []
   places.set(activeId, { networks: openNetworks, computers: [...session.store.computers.values()] })
   const choices = newServerNetworkChoices(places, activeId, existing, pending)
-  const home = openNetworks.find((network) => network.role === 'home')
-  const chosen = choices.find((choice) => choice.key === (chosenKey ?? (existing ? 'keep' : home?.id))) ?? null
+  const chosen = choices.find((choice) => choice.key === (chosenKey ?? defaultNetworkChoiceKey(choices, openNetworks))) ?? null
   const action = existing ? NEW_SERVER_COPY.addExisting : 'Create'
 
+  const ports: NewServerPorts = {
+    newId: () => core.deps.ids.newId(),
+    createHosted: async (name) => {
+      if (!account) return { ok: false, why: NEW_SERVER_COPY.failed }
+      const created = await hostedServers.api.createServer(account.token, { label: name })
+      return created.ok ? { ok: true, id: created.value.id, label: created.value.label } : { ok: false, why: createFailureText(created.failure) }
+    },
+    createMachine: async (provider, name) => {
+      const created = await session.api.createMachine({ provider, label: name })
+      return created.ok ? { ok: true, id: created.value.id, label: created.value.label } : { ok: false, why: `${NEW_SERVER_COPY.failed} ${failureText(created.failure)}` }
+    },
+    keepPlan: (setupId, plan) => core.networkPlans.set(setupId, plan),
+    forgetPlan: (setupId) => core.networkPlans.clear(setupId),
+    // Pairing switches to the server, and with it the whole stack, these steps too.
+    pair: async (target, setupId) => { await core.pairAndActivate(target.url, target.code, { setupId }) },
+  }
   const create = async () => {
     if (chosen === null || busy) return
-    if (existing) {
-      const target = pairingTarget({ link: link ?? '', address: '', code: '' })
-      if (target === null) return
-      setBusy(true)
-      setFailure(null)
-      await gate.run(async () => {
-        const setupId = `pair-${core.deps.ids.newId()}`
-        try {
-          if (chosen.plan) await core.networkPlans.set(setupId, chosen.plan)
-          // Pairing switches to the server, and with it the whole stack, these steps too.
-          await core.pairAndActivate(target.url, target.code, { setupId })
-        } catch (failed) {
-          // Not paired: the network picked stays with the steps, not on the phone.
-          if (!(failed instanceof Error && failed.name === 'NetworkPlacementFailed')) await core.networkPlans.clear(setupId)
-          setBusy(false)
-          setFailure(failed instanceof Error ? failed.message : String(failed))
-        }
-      })
-      return
-    }
     setBusy(true)
     setFailure(null)
-    const name = label ?? ''
-    let made: { id: string; label: string; machine: boolean } | string
-    if (where === 'hosted') {
-      const created = account ? await hostedServers.api.createServer(account.token, { label: name }) : null
-      made = created?.ok ? { id: created.value.id, label: created.value.label, machine: false } : created ? createFailureText(created.failure) : NEW_SERVER_COPY.failed
-    } else {
-      const created = await session.api.createMachine({ provider: where, label: name })
-      made = created.ok ? { id: created.value.id, label: created.value.label, machine: true } : `${NEW_SERVER_COPY.failed} ${failureText(created.failure)}`
-    }
-    if (typeof made === 'string') {
-      setBusy(false)
-      setFailure(made)
-      return
-    }
-    // Kept before setup starts, which pairs as soon as the server is ready. If it can't be kept, the server is still made
-    // and set up, and is put in a network from Servers.
-    if (chosen.plan) await core.networkPlans.set(made.id, chosen.plan).catch(() => {})
-    setSettingUp(made)
+    await gate.run(async () => {
+      const outcome = await createNewServer(ports, existing ? { kind: 'existing', typed: link ?? '', plan: chosen.plan } : { kind: 'make', where, label: label ?? '', plan: chosen.plan })
+      switch (outcome.kind) {
+        case 'paired': return
+        case 'setting_up': return setSettingUp(outcome.setup)
+        case 'failed':
+          setBusy(false)
+          return setFailure(outcome.why)
+      }
+    })
   }
 
   const backToServers = () => navigation.navigate('Servers')
@@ -173,11 +172,11 @@ export function NewServerNetworkScreen({ navigation, route }: ScreenProps<'NewSe
       : { title: NEW_SERVER_COPY.button, headerRight: () => <HeaderButton title={busy ? `${action}…` : action} bold disabled={busy || chosen === null} onPress={() => { void create() }} /> })
   })
 
-  if (settingUp?.machine) {
+  if (settingUp?.kind === 'machine') {
     const { id } = settingUp
     return <MachineSetupView label={settingUp.label} read={async () => machineAsHosted(await session.api.machine(id))} onLeave={backToServers} />
   }
-  if (settingUp && account) return <HostedServerSetupView account={account} server={settingUp} onLeave={backToServers} />
+  if (settingUp?.kind === 'hosted' && account) return <HostedServerSetupView account={account} server={settingUp} onLeave={backToServers} />
 
   const group = (title: string | null, inGroup: NewServerNetworkChoice[]) => inGroup.length === 0 ? null : (
     <View key={title ?? 'keep'}>
@@ -194,7 +193,6 @@ export function NewServerNetworkScreen({ navigation, route }: ScreenProps<'NewSe
       {group(null, choices.filter((choice) => choice.group === 'keep'))}
       {group(NETWORKS_COPY.privateSection, choices.filter((choice) => choice.group === 'private'))}
       {group(NETWORKS_COPY.sharedSection, choices.filter((choice) => choice.group === 'shared'))}
-      {choices.length === 0 && <Text style={s.hint}>{NETWORKS_COPY.noNetworks}</Text>}
       <Pressable onPress={() => navigation.navigate('NewNetwork')} style={s.link}>
         <Text style={s.linkText}>{NETWORKS_COPY.start}</Text>
       </Pressable>

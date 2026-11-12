@@ -49,7 +49,6 @@ export type Routes = {
   AWS: undefined
   /** A Sprites API token, for making new servers as Sprites. */
   Sprites: undefined
-  Pair: undefined
   SelectText: { text: string }
   /** A file sent in a chat, fetched with the session's authorisation. */
   File: { attachmentId: string; fileName: string; isImage: boolean }
