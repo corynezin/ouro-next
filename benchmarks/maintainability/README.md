@@ -115,6 +115,10 @@ allowance: start with `--every 10` (10 tasks) before all 100. On a small machine
 take minutes each and always run one at a time. `--skip-gates` saves that time at the cost of the regression evidence.
 `--solver command --solver-command "…"` runs anything that reads the prompt on its input (or `$BENCH_PROMPT_FILE`).
 
+A one-task pilot validated the whole path on this revision: T003 with Claude Sonnet 5.5 at low effort took 184
+seconds and $0.07 (158,229 input tokens, 147,785 cached; 1,255 output), kept every gate green, and an agent reviewer
+judged it complete. That is a check of the harness, not a result.
+
 ### Debugging tasks need private regressions
 
 The 30 `debug` prompts describe a symptom of a bug planted in the starting point. On clean source there is no bug, so

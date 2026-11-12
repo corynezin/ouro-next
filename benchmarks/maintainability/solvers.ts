@@ -92,25 +92,27 @@ function jsonLines(output: string): Array<Record<string, unknown>> {
 
 type Parsed = Pick<SolverRun, 'usage' | 'cost_usd' | 'turns' | 'models' | 'final_message'> & { reportedError: boolean }
 
-// Claude Code's stream ends with a `result` event; its input count leaves out cache reads and writes, so they are added back.
+// Claude Code's stream ends with a `result` event. Its `modelUsage` holds the whole session's totals per model (its
+// `usage` is only the last call's); input there leaves out cache reads and writes, so they are added back.
 export function parseClaude(output: string): Parsed {
   const events = jsonLines(output)
   const result = events.findLast((event) => event.type === 'result') as {
-    usage?: Record<string, number>, total_cost_usd?: number, num_turns?: number, result?: string, is_error?: boolean, modelUsage?: Record<string, unknown>
+    total_cost_usd?: number, num_turns?: number, result?: string, is_error?: boolean, modelUsage?: Record<string, Record<string, number>>
   } | undefined
+  const perModel = Object.values(result?.modelUsage ?? {})
+  const sum = (key: string): number => perModel.reduce((total, usage) => total + (typeof usage[key] === 'number' ? usage[key] : 0), 0)
   const models = new Set<string>(Object.keys(result?.modelUsage ?? {}))
   for (const event of events) {
     const model = (event.message as { model?: string } | undefined)?.model
     if (event.type === 'assistant' && model && model !== '<synthetic>') models.add(model)
   }
-  const usage = result?.usage
   return {
-    usage: usage ? {
-      input_tokens: (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0),
-      cached_input_tokens: usage.cache_read_input_tokens ?? 0,
-      cache_write_input_tokens: usage.cache_creation_input_tokens ?? 0,
-      output_tokens: usage.output_tokens ?? 0,
-      reasoning_output_tokens: null,
+    usage: perModel.length ? {
+      input_tokens: sum('inputTokens') + sum('cacheReadInputTokens') + sum('cacheCreationInputTokens'),
+      cached_input_tokens: sum('cacheReadInputTokens'),
+      cache_write_input_tokens: sum('cacheCreationInputTokens'),
+      output_tokens: sum('outputTokens'),
+      reasoning_output_tokens: perModel.some((usage) => typeof usage.thinkingTokens === 'number') ? sum('thinkingTokens') : null,
     } : null,
     cost_usd: result?.total_cost_usd ?? null,
     turns: result?.num_turns ?? null,

@@ -97,12 +97,14 @@ test('solver output becomes usage in the initial results\' shape, and unknown st
   const claude = [
     '{"type":"system"}',
     '{"type":"assistant","message":{"model":"claude-x","content":[]}}',
-    '{"type":"result","is_error":false,"num_turns":4,"total_cost_usd":0.5,"result":"Done.","usage":{"input_tokens":10,"cache_read_input_tokens":100,"cache_creation_input_tokens":20,"output_tokens":7}}',
+    '{"type":"result","is_error":false,"num_turns":4,"total_cost_usd":0.5,"result":"Done.","usage":{"input_tokens":1,"output_tokens":1},'
+      + '"modelUsage":{"claude-x":{"inputTokens":6,"outputTokens":5,"cacheReadInputTokens":60,"cacheCreationInputTokens":10,"thinkingTokens":1},'
+      + '"claude-y":{"inputTokens":4,"outputTokens":2,"cacheReadInputTokens":40,"cacheCreationInputTokens":10,"thinkingTokens":0}}}',
   ].join('\n')
   const parsed = parseClaude(claude)
-  assert.deepEqual(parsed.usage, { input_tokens: 130, cached_input_tokens: 100, cache_write_input_tokens: 20, output_tokens: 7, reasoning_output_tokens: null })
+  assert.deepEqual(parsed.usage, { input_tokens: 130, cached_input_tokens: 100, cache_write_input_tokens: 20, output_tokens: 7, reasoning_output_tokens: 1 })
   assert.equal(parsed.cost_usd, 0.5)
-  assert.deepEqual(parsed.models, ['claude-x'])
+  assert.deepEqual(parsed.models, ['claude-x', 'claude-y'])
   assert.equal(parseClaude('{"type":"system"}\nnot json').usage, null)
   const codex = parseCodex([
     '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":40,"output_tokens":5,"reasoning_output_tokens":2}}',
