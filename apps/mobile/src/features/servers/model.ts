@@ -79,6 +79,9 @@ export interface NetworkSection {
   network: NetworkEntity | null
   /** A saved server holding the network's key, the open one first: Invite asks it for the invite. Null: none does. */
   inviteVia: { serverId: string; network: NetworkEntity } | null
+  /** The open server's copy of a network it only visits: Leave lets go of its key. Null: it holds none, or holds the
+   * network as its home, whose key is replaced rather than removed. */
+  leave: NetworkEntity | null
   /** Null: no server has networks, so the list is one, as before networks. */
   title: string | null
   /** Under the title: what the network is and, for one the open server visits, that it does. */
@@ -116,8 +119,8 @@ export function networkSections(rows: readonly ServerRow[], unpaired: readonly U
   const knownNames = new Set([...known.values()].map((network) => network.name))
   // A private network started but with no server yet (see core/servers/networkPlans.ts): shown, empty, until one is.
   const pending: NetworkSection[] = pendingPrivate.filter((name) => !knownNames.has(name))
-    .map((name) => ({ key: `pending:${name}`, network: null, inviteVia: null, title: name, detail: 'Private', emptyNote: NETWORKS_COPY.pendingNote, rows: [], unpaired: [] }))
-  if (known.size === 0) return [{ key: 'all', network: null, inviteVia: null, title: pending.length ? NETWORKS_COPY.outside : null, detail: null, emptyNote: null, rows: [...rows], unpaired: [...unpaired] }, ...pending]
+    .map((name) => ({ key: `pending:${name}`, network: null, inviteVia: null, leave: null, title: name, detail: 'Private', emptyNote: NETWORKS_COPY.pendingNote, rows: [], unpaired: [] }))
+  if (known.size === 0) return [{ key: 'all', network: null, inviteVia: null, leave: null, title: pending.length ? NETWORKS_COPY.outside : null, detail: null, emptyNote: null, rows: [...rows], unpaired: [...unpaired] }, ...pending]
 
   const livesIn = (computer: ComputerEntity | undefined, view: ServerPlace): string | null =>
     computer && !computer.visiting && computer.networkId && view.networks.some((network) => network.id === computer.networkId) ? computer.networkId : null
@@ -146,12 +149,13 @@ export function networkSections(rows: readonly ServerRow[], unpaired: readonly U
     if (own === null && others === 0) return []
     const holderId = viewIds[views.findIndex((view) => view.networks.some((held) => held.id === network.id))] ?? null
     return [{
-      key: network.id, network: own, inviteVia: holderId === null ? null : { serverId: holderId, network }, title: network.name,
+      key: network.id, network: own, inviteVia: holderId === null ? null : { serverId: holderId, network },
+      leave: own?.role === 'extra' ? own : null, title: network.name,
       detail: own ? networkDetail(own) : network.kind === 'private' ? 'Private' : 'Shared',
       emptyNote: own && others === 0 ? NETWORKS_COPY.empty : null, rows: inIt, unpaired: unpairedInIt,
     }]
   })
-  const outside = { key: 'outside', network: null, inviteVia: null, title: NETWORKS_COPY.outside, detail: null, emptyNote: null, rows: rows.filter((row) => networkOfRow(row) === null), unpaired: unpaired.filter((row) => networkOfUnpaired(row) === null) }
+  const outside = { key: 'outside', network: null, inviteVia: null, leave: null, title: NETWORKS_COPY.outside, detail: null, emptyNote: null, rows: rows.filter((row) => networkOfRow(row) === null), unpaired: unpaired.filter((row) => networkOfUnpaired(row) === null) }
   return [...sections, ...pending, ...(outside.rows.length + outside.unpaired.length > 0 ? [outside] : [])]
 }
 
@@ -353,6 +357,9 @@ export const NETWORKS_COPY = {
   empty: 'No servers yet',
   leftOut: (names: readonly string[]) => `Left out (they had limited trust): ${names.join(', ')}. Add or remove them by hand.`,
   invite: 'Invite',
+  leave: 'Leave',
+  leaveTitle: (name: string) => `Leave ${name}?`,
+  leaveMessage: 'This server lets go of the network\'s key and stops reaching the servers in it: their agents leave its lists, and messages still waiting for them are dropped. They keep running. To come back, it needs a new invite.',
   addTo: 'Add to a network',
   joinPrivate: (name: string) => `Join ${name}`,
   joinShared: (name: string) => `Make it a shared server in ${name}`,

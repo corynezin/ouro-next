@@ -1,9 +1,9 @@
 // Every server in one list, grouped by the network it lives in: tap one to open it; its … menu renames, removes, adds it
 // to a network, links it or sets its trust (before networks), or destroys the machine the open server made for it. Each
-// network offers Invite. Then the servers being set up, and two buttons: New server (NewServerScreen.tsx) and Network…,
-// to start a network or join one with an invite. Names and invites are typed in native prompts, so the keyboard never
-// covers them. Destroy also reaches a machine the open server made that is paired with another phone. Renders
-// servers/model.ts; Remove and Destroy follow servers/actions.ts.
+// network offers Invite, and one the open server only visits offers Leave. Then the servers being set up, and two
+// buttons: New server (NewServerScreen.tsx) and Network…, to start a network or join one with an invite. Names and
+// invites are typed in native prompts, so the keyboard never covers them. Destroy also reaches a machine the open server
+// made that is paired with another phone. Renders servers/model.ts; Remove and Destroy follow servers/actions.ts.
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { ActivityIndicator, Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
@@ -192,6 +192,13 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
       },
     })))
   })
+  /** The open server lets go of a network it only visits: its key, and the servers it reached through it. */
+  const leave = (network: NetworkEntity) => confirm(NETWORKS_COPY.leaveTitle(network.name), NETWORKS_COPY.leaveMessage, NETWORKS_COPY.leave, () => {
+    void run('network', async () => {
+      const left = await session.command('remove_network', { networkId: network.id })
+      return left.ok ? null : NETWORKS_COPY.failed(failureText(left.failure))
+    })
+  })
   /** Made by the server holding the network's key: the open one when it does, else another of the person's. */
   const invite = (via: { serverId: string; network: NetworkEntity }) => run('invite', async () => {
     const holder = savedOf(via.serverId)
@@ -299,6 +306,11 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
                 <Text style={s.sectionTitle}>{section.title}</Text>
                 {section.detail !== null && <Text style={s.sectionDetail}>{section.detail}</Text>}
               </View>
+              {section.leave !== null && isOwner && (
+                <Pressable onPress={() => leave(section.leave!)} disabled={busy !== null} hitSlop={8} style={s.invite}>
+                  <Text style={[s.inviteText, { color: C.red }]}>{NETWORKS_COPY.leave}</Text>
+                </Pressable>
+              )}
               {section.inviteVia !== null && isOwner && (
                 <Pressable onPress={() => { void invite(section.inviteVia!) }} disabled={busy !== null} hitSlop={8} style={s.invite}>
                   <Symbol name="person.badge.plus" size={14} color="blue" />
