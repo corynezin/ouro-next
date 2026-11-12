@@ -492,3 +492,24 @@ test('sign out clears the update home; a preferences reset keeps it', async () =
   await ctx.core.signOut()
   assert.equal(ctx.core.preferences.current.updateHomeServerId, null)
 })
+
+test('pairing a server leaves it unlinked; one the person just made here is linked with the other saved servers', async () => {
+  const ctx = setup()
+  await ctx.core.start()
+  for (const url of [A, B]) {
+    ctx.network.routeJson('POST', `${url}/v2/pair`, pairResponse)
+    ctx.network.routeJson('POST', `${url}/v2/commands/create_computer_invite`, { code: `code-${url}`, expiresAt: 1, command: 'words for people', address: url })
+    ctx.network.routeJson('POST', `${url}/v2/commands/join_computer`, {})
+  }
+  await ctx.core.pairAndActivate(A, 'code')
+  await ctx.core.pairAndActivate(B, 'code')
+  await settle()
+  assert.deepEqual(ctx.network.bodiesTo('/join_computer'), [], 'a plain pairing links nothing by itself')
+
+  await ctx.core.removeServer((await ctx.core.servers.list()).find((server) => server.url === B)!.id)
+  await ctx.core.pairAndActivate(B, 'code', { label: 'Made', afterPairing: 'link_with_other_servers' })
+  await settle()
+  const joins = ctx.network.requests.filter((request) => request.url.includes('/join_computer'))
+  assert.deepEqual(joins.map((request) => [request.url.split('/v2/')[0], (JSON.parse(request.body!) as { input: unknown }).input]), [[B, { address: A, code: `code-${A}` }]])
+  ctx.core.activeSession?.dispose()
+})

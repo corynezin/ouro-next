@@ -33,7 +33,11 @@ export const ComputerEntity = z.object({
 export type ComputerEntity = z.infer<typeof ComputerEntity>
 
 /** One open invite at a time: making one replaces the last. `command` is the line to run on the other computer. */
-export const ComputerInvite = z.object({ code: z.string(), expiresAt: z.number().int(), command: z.string() })
+/**
+ * A one-use invite to link a computer. `command` is for a person to run (`ouro computers join <address> <code>`); a
+ * program joins with `address` and `code`. `address` is absent from servers before it was sent.
+ */
+export const ComputerInvite = z.object({ code: z.string(), expiresAt: z.number().int(), command: z.string(), address: z.string().optional() })
 export type ComputerInvite = z.infer<typeof ComputerInvite>
 
 // Machine to machine.

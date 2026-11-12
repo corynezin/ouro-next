@@ -163,7 +163,7 @@ export class ServerApi {
   spritesSetToken(token: string) { return this.integrationRoute('POST', 'sprites/token', { token }, SpritesActionResult) }
   spritesDisconnect() { return this.integrationRoute('POST', 'sprites/disconnect', null, SpritesActionResult) }
 
-  /** Where this server can make new servers, and the ones it is making or made that no phone has paired with yet. */
+  /** Where this server can make new servers, and every server it made and hasn't destroyed: being made, failed, or ready (paired or not). */
   machines() { return this.read('/v2/machines', MachineList) }
   /** Poll this while it is made: once ready it carries a pairing code. */
   machine(id: string) { return this.read(`/v2/machines/${encodeURIComponent(id)}`, NewMachine) }

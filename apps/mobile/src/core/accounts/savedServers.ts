@@ -33,6 +33,9 @@ export class ServerListDamaged extends Error {
 
 const withoutTrailingSlashes = (url: string) => url.replace(/\/+$/, '')
 
+/** Whether two addresses name the same server: the one place trailing slashes are let go when comparing them. */
+export const sameServerUrl = (a: string, b: string) => withoutTrailingSlashes(a) === withoutTrailingSlashes(b)
+
 export class SavedServers {
   private readonly storage: SecureStorage
   private readonly ids: IdSource
