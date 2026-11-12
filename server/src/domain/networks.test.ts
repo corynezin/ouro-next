@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { acceptance, holdingRefusal, joinedKindRefusal, ownerAddressFrom, peerMay, sharesMemoryWith, showsAgentDetailsTo, signingFor } from './networks.ts'
+import { acceptance, holdingRefusal, joinedKindRefusal, ownerAddressFrom, peerMay, sharesMemoryWith, showsAgentDetailsTo, signingFor, visitingAfter } from './networks.ts'
 import type { HeldNetwork, PeerAction, PeerPlace } from './networks.ts'
 
 const privateHome: HeldNetwork = { id: 'p', kind: 'private', role: 'home' }
@@ -112,4 +112,12 @@ test('a join is refused when the network is not the kind the person expects', ()
   assert.equal(joinedKindRefusal('private', 'private'), null)
   assert.match(joinedKindRefusal('shared', 'private') ?? '', /private network/)
   assert.match(joinedKindRefusal('private', 'shared') ?? '', /shared network/)
+})
+
+test('a visitor of a network stays one there, whatever it says later; elsewhere it is as it says', () => {
+  assert.equal(visitingAfter(true, null, 's'), true)
+  assert.equal(visitingAfter(false, null, 's'), false, 'first heard from as a member: kept as one')
+  assert.equal(visitingAfter(false, { networkId: 's', visiting: true }, 's'), true)
+  assert.equal(visitingAfter(false, { networkId: 'other', visiting: true }, 's'), false)
+  assert.equal(visitingAfter(false, { networkId: 's', visiting: false }, 's'), false)
 })

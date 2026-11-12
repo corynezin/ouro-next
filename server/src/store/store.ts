@@ -1,7 +1,7 @@
 // The only code that touches SQL. One connection, one writer: `ourod`. Every call is synchronous, so a transaction can't
 // interleave with anything else in the process.
 import { DatabaseSync } from 'node:sqlite'
-import { AgentState, DEFAULT_NOTIFICATION_SETTINGS, DeliveryState, PeerHello, PromptCacheLifetime } from '@ouro/contract'
+import { AgentPulled, AgentState, DEFAULT_NOTIFICATION_SETTINGS, DeliveryState, PeerHello, PromptCacheLifetime } from '@ouro/contract'
 import type {
   AgentEntity, AskEntity, AttachmentRef, ChatEntity, DeliveryWake, DeviceEntity, EntityKind, IntegrationEntity, IntegrationProvider, MessageEntity, MessagePurpose,
   AskLevel, AskSnooze, ComputerTrust, NetworkKind, NetworkRole, NotificationSettings, PeerGroupPost, PeerGroupUpdate, PeerMessage, PeerOwnerAsk, PeerOwnerMessage, PersonEntity, PlanWindow, RemoteAskEntity, RemoteDelivery, PushTokenRegistration, ReadStateEntity, SummaryEntity, SummaryRecord,
@@ -64,7 +64,6 @@ export interface TakenMessageRow {
   answeredInChat: boolean
 }
 
-export interface AgentPulled { from: string; network: string; at: number; awaitingStart: boolean }
 
 export interface NewAgent {
   id: string
@@ -399,7 +398,7 @@ export class Store {
       repliesSettledThroughSeq: row.replies_settled_through_seq as number,
       worktree: row.worktree_json === null ? null : JSON.parse(row.worktree_json as string) as AgentWorktree,
       promptCacheLifetime: PromptCacheLifetime.parse(row.prompt_cache_lifetime),
-      pulled: row.pulled_json === null || row.pulled_json === undefined ? null : JSON.parse(row.pulled_json as string) as AgentPulled,
+      pulled: row.pulled_json === null || row.pulled_json === undefined ? null : AgentPulled.parse(JSON.parse(row.pulled_json as string)),
       promptCache: row.prompt_cache_json === null ? null : JSON.parse(row.prompt_cache_json as string) as PromptCacheRecord,
     }
   }
@@ -1153,9 +1152,9 @@ export class Store {
 
   /** It signed with a network's key: where it lives now, and never again without a signature. A visitor stays one in that
    * network whatever it says: it lives there only once let in by an invite as a home. */
-  notePeerNetwork(machineId: string, networkId: string, said: boolean): void {
+  /** `visiting`: as decided by visitingAfter. */
+  notePeerNetwork(machineId: string, networkId: string, visiting: boolean): void {
     const before = this.peerById(machineId)
-    const visiting = said || (before !== null && before.visiting && before.networkId === networkId)
     if (!before || (before.networkId === networkId && before.visiting === visiting && !before.unkeyedAllowed)) return
     this.run('UPDATE peers SET network_id = ?, visiting = ?, unkeyed_allowed = 0, trust = \'full\' WHERE machine_id = ?', networkId, visiting ? 1 : 0, machineId)
     this.markChanged('computer', machineId)

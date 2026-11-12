@@ -18,8 +18,20 @@ export interface PeerPlace {
   ownerName: string | null
 }
 
-/** What a request says about its network, and whether its network signature checks out with this server's home key. */
+/**
+ * What a request says about its network, and whether its network signature checks out with this server's home key.
+ * `visiting` is the sender's own word: members and visitors hold the same key, so nothing proves it. A server that first
+ * introduces itself as a member is kept as one. That is safe only because it grants nothing a visitor lacks: in a shared
+ * network both get the same (see peerMay), and a private network has no visitors (see holdingRefusal). What the flag
+ * changes is only whether this server contacts it, and whose address book it is in.
+ */
 export interface ClaimedNetwork { networkId: string; visiting: boolean; signatureValid: boolean }
+
+/** Whether a server heard from in a network is kept as visiting it: as it says, and once a visitor of a network always
+ * one there, so saying otherwise later doesn't make it a member whose word on others is taken (see learnAddresses). */
+export function visitingAfter(said: boolean, before: { networkId: string | null; visiting: boolean } | null, networkId: string): boolean {
+  return said || (before !== null && before.visiting && before.networkId === networkId)
+}
 
 export type Acceptance =
   | { kind: 'accepted'; network: { id: string; visiting: boolean } | null }

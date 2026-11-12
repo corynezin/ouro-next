@@ -2111,6 +2111,8 @@ export class OuroCore {
       case 'pull_agent': return this.commandPullAgent(caller, input as never, prepared)
       case 'start_pulled_agent': return this.commandStartPulledAgent(caller, input as never)
       case 'push_memory': {
+        // Its whole effect is on the other server, sent before this transaction as a control of an agent there is: nothing
+        // here changes, so this only answers, and a retry with the same key answers the same without sending again.
         if (prepared.memoryPushed === null) throw new CommandRefused('invalid_request', 'pushing memory needs the other computer to answer first')
         return { notes: prepared.memoryPushed }
       }

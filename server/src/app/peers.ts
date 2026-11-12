@@ -10,7 +10,7 @@ import { networkSignatureValid, PeerRefused, PeerUnreachable, peerRequest, sha25
 import type { MachineKey, NetworkKeyFile, NetworkSigner } from '../adapters/peer-transport.ts'
 import { helloToSleeperDue } from '../domain/host-hold.ts'
 import { COMPUTER_INVITE_LIFETIME_MS, computerStatusOf, PEER_CLOCK_SKEW_MS, PEER_HELLO_INTERVAL_MS, peerRetryDelayMs, protocolProblem, signedPayload, withinClockSkew } from '../domain/peers.ts'
-import { acceptance, joinedKindRefusal, peerMay, sharesMemoryWith, showsAgentDetailsTo, signingFor } from '../domain/networks.ts'
+import { acceptance, joinedKindRefusal, peerMay, sharesMemoryWith, showsAgentDetailsTo, signingFor, visitingAfter } from '../domain/networks.ts'
 import type { ClaimedNetwork, HeldNetwork, PeerAction, Signing } from '../domain/networks.ts'
 import { CommandRefused } from './failure.ts'
 import type { NetworkRow, PeerRow, Store } from '../store/store.ts'
@@ -301,12 +301,7 @@ export class Peers {
 
   /** A server heard from in a network, with its key: kept, or updated, as it says it is now. */
   private admitInNetwork(peer: PeerIdentity, networkId: string, visiting: boolean, ownerName: string | null): void {
-    if (peer.machineId === this.config.machineId) throw new PeerRequestRefused('invalid_request', 'A computer cannot join itself.')
-    if (peer.name === this.config.machineName) throw new PeerRequestRefused('invalid_request', `This computer is called "${peer.name}" too: rename one of them first.`)
-    const sameName = this.config.store.peerByName(peer.name)
-    if (sameName && sameName.machineId !== peer.machineId) throw new PeerRequestRefused('invalid_request', `Another computer here is called "${peer.name}" already.`)
-    const problem = protocolProblem(peer)
-    if (problem) throw new PeerRequestRefused('incompatible', problem)
+    this.refuseIfUnadmittable(peer)
     const known = this.config.store.peerById(peer.machineId)
     // A machine's key is believed the first time only: after that, nothing rebinds its id to another key.
     if (known && known.publicKey !== '' && known.publicKey !== peer.publicKey) throw new PeerRequestRefused('unauthenticated', `${peer.name} is known here with another key`)
@@ -314,7 +309,9 @@ export class Peers {
   }
 
   /** Servers another one says live in a network this one holds a key for: kept as addresses, until each is heard from
-   * itself. Only ones unknown here, and never one the person removed from that network; what is known stays as it is. */
+   * itself. Only ones unknown here, and never one the person removed from that network; what is known stays as it is.
+   * An address isn't checked: any member can name any URL, and this server then POSTs its signed hello there (and, once
+   * answered, asks for its agents). The key it keeps is the one the answer gives for that machine id, never rebound after. */
   private learnAddresses(networkId: string, addresses: NonNullable<PeerHello['addresses']>): void {
     if (!this.config.store.networkById(networkId)) return
     for (const entry of addresses) {
@@ -412,13 +409,19 @@ export class Peers {
   }
 
   private admit(peer: PeerIdentity): void {
+    this.refuseIfUnadmittable(peer)
+    this.config.store.savePeer({ machineId: peer.machineId, name: peer.name, address: peer.address, publicKey: peer.publicKey, trust: 'full', joinedAt: this.config.now() })
+  }
+
+  /** What every server taken in must be: not this one, not named as this one or another computer here, and able to work
+   * with it. */
+  private refuseIfUnadmittable(peer: PeerIdentity): void {
     if (peer.machineId === this.config.machineId) throw new PeerRequestRefused('invalid_request', 'A computer cannot join itself.')
     if (peer.name === this.config.machineName) throw new PeerRequestRefused('invalid_request', `This computer is called "${peer.name}" too: rename one of them first.`)
     const sameName = this.config.store.peerByName(peer.name)
     if (sameName && sameName.machineId !== peer.machineId) throw new PeerRequestRefused('invalid_request', `Another computer here is called "${peer.name}" already.`)
     const problem = protocolProblem(peer)
     if (problem) throw new PeerRequestRefused('incompatible', problem)
-    this.config.store.savePeer({ machineId: peer.machineId, name: peer.name, address: peer.address, publicKey: peer.publicKey, trust: 'full', joinedAt: this.config.now() })
   }
 
   // Signed requests
@@ -453,7 +456,7 @@ export class Peers {
     if (network !== null) {
       this.config.commit(() => {
         if (introduction) this.admitInNetwork(introduction, network.id, network.visiting, null)
-        else this.config.store.notePeerNetwork(machineId, network.id, network.visiting)
+        else this.config.store.notePeerNetwork(machineId, network.id, visitingAfter(network.visiting, known, network.id))
       })
     }
     return this.config.store.peerById(machineId)!

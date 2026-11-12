@@ -132,6 +132,11 @@ export const CacheState = z.object({
 })
 export type CacheState = z.infer<typeof CacheState>
 
+/** A copy pulled from a shared network: the agent it copies, as `name@machine`, the network's name, and when. It arrives
+ * paused: nothing wakes it until the owner or an agent here starts it (`start_pulled_agent`). */
+export const AgentPulled = z.object({ from: z.string(), network: z.string(), at: z.number().int(), awaitingStart: z.boolean() })
+export type AgentPulled = z.infer<typeof AgentPulled>
+
 export const AgentEntity = z.object({
   id: z.string(),
   name: z.string(),
@@ -170,9 +175,8 @@ export const AgentEntity = z.object({
    * directly, or once archiving merged the branch and removed the worktree. A done agent keeps both.
    */
   branch: z.object({ name: z.string(), base: z.string() }).nullable(),
-  /** A copy pulled from a shared network: the agent it copies, as `name@machine`, the network's name, and when. It arrives
-   * paused: nothing wakes it until the owner or an agent here starts it (`start_pulled_agent`). Absent: not pulled. */
-  pulled: z.object({ from: z.string(), network: z.string(), at: z.number().int(), awaitingStart: z.boolean() }).optional(),
+  /** Absent: not pulled. */
+  pulled: AgentPulled.optional(),
 })
 export type AgentEntity = z.infer<typeof AgentEntity>
 
