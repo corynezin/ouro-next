@@ -7,25 +7,22 @@ import { Symbol } from './Symbol.tsx'
 import { linkify, parseBlocks, parseInline, type InlineRun } from './messageText.ts'
 import { wordsPresses } from './bubbleActions.ts'
 import { parseUpdateMarkUrl } from '@ouro/contract'
-import { updateMarkInlineText, updateMarkStatus, updateMarkText, type UpdateMarkStatus } from '../core/updates/updateFlow.ts'
-import { runningCode } from '../native/updates.ts'
+import { useUpdateMark, type UpdateMarkTone } from './UpdateMarks.tsx'
 
 // [light, dark]: deeper tones than the system colors, which read garish as text on a gray bubble.
 type MarkLook = { symbol: string; ink: [string, string]; wash: [string, string] }
-const UNSURE_LOOK: MarkLook = { symbol: 'questionmark.circle.fill', ink: ['#6C6C70', '#AEAEB2'], wash: ['rgba(127,127,127,0.14)', 'rgba(127,127,127,0.22)'] }
-const MARK_LOOK: Record<UpdateMarkStatus, MarkLook> = {
+const MARK_LOOK: Record<UpdateMarkTone, MarkLook> = {
   in_app: { symbol: 'checkmark.circle.fill', ink: ['#1F7A3A', '#5BD88A'], wash: ['rgba(52,199,89,0.16)', 'rgba(48,209,88,0.18)'] },
   not_yet: { symbol: 'arrow.down.circle.fill', ink: ['#A65A00', '#FFB547'], wash: ['rgba(255,149,0,0.16)', 'rgba(255,159,10,0.18)'] },
-  elsewhere: UNSURE_LOOK,
-  unknown: UNSURE_LOOK,
+  unsure: { symbol: 'questionmark.circle.fill', ink: ['#6C6C70', '#AEAEB2'], wash: ['rgba(127,127,127,0.14)', 'rgba(127,127,127,0.22)'] },
 }
 
-/** An agent's `ouro publish` mark: whether that update is in this app. The running code changes only with a restart. */
+/** An agent's `ouro publish` mark: whether that update is in this app, as the root says, in this kit's colors. */
 function useMark(updateNumber: number, machineId: string) {
   const dark = useDark() ? 1 : 0
-  const status = updateMarkStatus({ updateNumber, machineId }, runningCode())
-  const look = MARK_LOOK[status]
-  return { text: updateMarkText(updateNumber, status), inlineText: updateMarkInlineText(updateNumber, status), symbol: look.symbol, ink: look.ink[dark], wash: look.wash[dark] }
+  const mark = useUpdateMark(updateNumber, machineId)
+  const look = MARK_LOOK[mark.tone]
+  return { text: mark.text, inlineText: mark.inlineText, symbol: look.symbol, ink: look.ink[dark], wash: look.wash[dark] }
 }
 
 /** A mark inside a sentence: tinted text. */

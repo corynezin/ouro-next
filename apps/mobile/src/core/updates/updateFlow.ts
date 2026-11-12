@@ -308,17 +308,31 @@ export function runningCodeText(code: RunningCode) {
 /** Whether an update an agent marked in a message (`ouro publish` prints the mark) is in the app that's running. */
 export type UpdateMarkStatus = 'in_app' | 'not_yet' | 'elsewhere' | 'unknown'
 
-export function updateMarkStatus(mark: { updateNumber: number; machineId: string }, code: RunningCode): UpdateMarkStatus {
+/**
+ * `updateReady`: a newer update is downloaded and the banner offers it. The built-in bundle carries no number to compare,
+ * so on it the mark is "not yet" only when there is a banner to tap; otherwise the app can't tell (a new build usually
+ * has the change already, and this phone may take its updates from another computer).
+ */
+export function updateMarkStatus(mark: { updateNumber: number; machineId: string }, code: RunningCode, updateReady: boolean): UpdateMarkStatus {
   switch (code.kind) {
     case 'development': return 'unknown'
-    // No update has been taken since the app was installed.
-    case 'embedded': return 'not_yet'
+    case 'embedded': return updateReady ? 'not_yet' : 'unknown'
     case 'update':
       if (code.updateNumber === null || code.machineId === null) return 'unknown'
       // Numbers count per computer: another computer's update 12 says nothing about this one's.
       if (code.machineId !== mark.machineId) return 'elsewhere'
       // Every update is built from the same source and numbers only rise, so a later one includes it.
       return code.updateNumber >= mark.updateNumber ? 'in_app' : 'not_yet'
+  }
+}
+
+/** The mark as the screens draw it: its words both ways, and how sure the app is. */
+export function updateMarkView(mark: { updateNumber: number; machineId: string }, code: RunningCode, updateReady: boolean): { text: string; inlineText: string; tone: 'in_app' | 'not_yet' | 'unsure' } {
+  const status = updateMarkStatus(mark, code, updateReady)
+  return {
+    text: updateMarkText(mark.updateNumber, status),
+    inlineText: updateMarkInlineText(mark.updateNumber, status),
+    tone: status === 'in_app' || status === 'not_yet' ? status : 'unsure',
   }
 }
 

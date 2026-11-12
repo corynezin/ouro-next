@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildUpdateManifest, UpdateManifest } from './updates.ts'
+import { buildUpdateManifest, parseUpdateMarkUrl, UpdateManifest, updateMarkOf } from './updates.ts'
 
 const update = {
   id: '0b6c6f1e-8a2a-4a51-9a39-2f3c3e2f5a10',
@@ -40,8 +40,7 @@ test("a key is its content hash, so expo-updates can never mistake one update's 
   assert.equal(UpdateManifest.safeParse({ ...first, launchAsset: { ...first.launchAsset, key: 'bundle' } }).success, false)
 })
 
-test('an update mark round-trips, and other links are not marks', async () => {
-  const { updateMarkOf, parseUpdateMarkUrl } = await import('./updates.ts')
+test('an update mark round-trips, and other links are not marks', () => {
   const mark = updateMarkOf(12, 'm a/b')
   const url = /\]\((.*)\)$/.exec(mark)![1]!
   assert.match(mark, /^\[update 12\]\(ouro:\/\/update\/12\?computer=/)
