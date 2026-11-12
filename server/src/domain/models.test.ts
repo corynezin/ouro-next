@@ -1,14 +1,23 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { catalogModel, launchModelFor, runtimeOf } from './models.ts'
+import { catalogModel, launchModelFor, MODEL_CATALOG, runtimeOf } from './models.ts'
 
 test('a model is run by its provider; an unknown name is a Claude model by that name', () => {
   assert.equal(catalogModel('deepseek').provider, 'openrouter')
   assert.equal(catalogModel('deepseek').providerModelId, 'deepseek/deepseek-v4-pro')
   assert.equal(catalogModel('haiku').provider, 'anthropic')
-  assert.deepEqual(catalogModel('fable'), { id: 'fable', label: 'Claude Fable', provider: 'anthropic', providerModelId: 'claude-fable-5-2' })
+  assert.deepEqual(catalogModel('fable'), { id: 'fable', label: 'Claude Fable 5.2', provider: 'anthropic', providerModelId: 'claude-fable-5-2' })
+  assert.deepEqual(catalogModel('opus'), { id: 'opus', label: 'Claude Opus 5.5', provider: 'anthropic', providerModelId: 'claude-opus-5-5' })
   assert.deepEqual(catalogModel('claude-opus-5-5'), { id: 'claude-opus-5-5', label: 'claude-opus-5-5', provider: 'anthropic', providerModelId: 'claude-opus-5-5' })
   assert.equal(catalogModel('stand-in').provider, 'stand_in')
+})
+
+test("Claude's models run by full model id, and each label says that id's version", () => {
+  for (const model of MODEL_CATALOG.filter((entry) => entry.provider === 'anthropic')) {
+    const pinned = /^claude-([a-z]+)-(\d+)-(\d+)$/.exec(model.providerModelId)
+    assert.ok(pinned, `${model.id} runs a full model id, not an alias: ${model.providerModelId}`)
+    assert.equal(model.label.toLowerCase(), `claude ${pinned[1]} ${pinned[2]}.${pinned[3]}`)
+  }
 })
 
 test('an OpenRouter model without OpenRouter set up runs on the fallback, and says what it replaced', () => {

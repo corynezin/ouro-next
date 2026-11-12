@@ -1,5 +1,6 @@
 // The New agent sheet as data. The server says which models exist; this groups them as the pickers show them.
 import type { CommandInput, ComputerEntity, ModelOption, PromptCacheLifetime } from '@ouro/contract'
+import type { ApiFailure, ApiResult } from '../../core/session/serverApi.ts'
 
 export interface ModelGroup { title: string; models: { id: string; label: string }[] }
 
@@ -10,7 +11,8 @@ const GROUP_TITLES: { provider: ModelOption['provider']; title: string }[] = [
   { provider: 'stand_in', title: 'Stand-in' },
 ]
 
-/** How the reference names a model in the pickers. The server's label says more (a version, a route), for agents. */
+/** How the reference names a model in the pickers. The server's label says more (a version, a route), for agents.
+ * The versions of Claude's own are the ones the server's catalog runs (server/src/domain/models.ts): change both together. */
 const MODEL_NAMES: Record<string, string> = {
   fable: 'Fable 5.2', opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', haiku: 'Haiku 5.5',
   deepseek: 'DeepSeek', 'deepseek-flash': 'DeepSeek Flash',
@@ -41,12 +43,37 @@ export function modelGroups(models: readonly ModelOption[], current: string | nu
 }
 
 /** Files don't go to another computer yet: with some picked, an agent there can't start until they are removed. */
-export const canStartAgent = (task: string, busy: boolean, fileCount = 0, remote = false) => !busy && !!task.trim() && !(remote && fileCount > 0)
+export const canStartAgent = (task: string, busy: boolean, files: { count: number; toAnotherComputer: boolean }) =>
+  !busy && !!task.trim() && !(files.toAnotherComputer && files.count > 0)
 
 export const FILES_COPY = {
   add: 'Add files',
   remoteRefused: "Files can't go to another computer yet: remove them to start it there.",
 } as const
+
+export interface FileToUpload { localId: string; uri: string; fileName: string; mimeType: string }
+export type UploadedFiles = { ok: true; attachmentIds: string[] } | { ok: false; fileName: string; failure: ApiFailure }
+
+/**
+ * Uploads the picked files, in order, before the agent is made: the first that fails stops the start, and nothing is made.
+ * `uploaded` remembers each file's upload by its local id, so a Start tried again (after a refusal, say) sends none twice.
+ */
+export async function uploadFilesOnce(
+  files: readonly FileToUpload[], uploaded: Map<string, string>, upload: (file: FileToUpload) => Promise<ApiResult<{ id: string }>>,
+): Promise<UploadedFiles> {
+  const attachmentIds: string[] = []
+  for (const file of files) {
+    let id = uploaded.get(file.localId)
+    if (id === undefined) {
+      const result = await upload(file)
+      if (!result.ok) return { ok: false, fileName: file.fileName, failure: result.failure }
+      id = result.value.id
+      uploaded.set(file.localId, id)
+    }
+    attachmentIds.push(id)
+  }
+  return { ok: true, attachmentIds }
+}
 
 /** An agent name has no spaces: they are stripped as it is typed, as in the reference. */
 export const typedAgentName = (typed: string) => typed.replace(/\s/g, '')

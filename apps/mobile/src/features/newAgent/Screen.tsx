@@ -13,7 +13,7 @@ import { uploadFailureText } from '../../core/session/outbox.ts'
 import { useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
 import type { ScreenProps } from '../../navigation/routes.ts'
 import type { PromptCacheLifetime } from '@ouro/contract'
-import { canStartAgent, FILES_COPY, hasPromptCache, machineFooter, machineOptions, modelGroups, newAgentInput, newRemoteAgentInput, PROMPT_CACHE_OPTIONS, typedAgentName } from './model.ts'
+import { canStartAgent, FILES_COPY, hasPromptCache, machineFooter, machineOptions, modelGroups, newAgentInput, newRemoteAgentInput, PROMPT_CACHE_OPTIONS, typedAgentName, uploadFilesOnce } from './model.ts'
 
 export function NewAgentScreen({ navigation }: ScreenProps<'New'>) {
   const session = useSession()
@@ -54,18 +54,9 @@ export function NewAgentScreen({ navigation }: ScreenProps<'New'>) {
       return
     }
     // Uploaded here, before the agent is made: a file that doesn't upload stops the start, and nothing is made.
-    const attachmentIds: string[] = []
-    for (const file of files) {
-      let id = uploadedIds.current.get(file.localId)
-      if (id === undefined) {
-        const uploaded = await session.api.uploadAttachment({ uri: file.uri, fileName: file.fileName, mimeType: file.mimeType })
-        if (!uploaded.ok) return failed(uploadFailureText(file.fileName, uploaded.failure))
-        id = uploaded.value.id
-        uploadedIds.current.set(file.localId, id)
-      }
-      attachmentIds.push(id)
-    }
-    const made = await session.command('create_agent', newAgentInput(task, name, model, cacheChoice, attachmentIds))
+    const uploaded = await uploadFilesOnce(files, uploadedIds.current, (file) => session.api.uploadAttachment(file))
+    if (!uploaded.ok) return failed(uploadFailureText(uploaded.fileName, uploaded.failure))
+    const made = await session.command('create_agent', newAgentInput(task, name, model, cacheChoice, uploaded.attachmentIds))
     if (!made.ok) return failed(failureText(made.failure))
     navigation.goBack()
     navigation.navigate('Chat', { agentRef: made.value.agent.id })
@@ -83,7 +74,7 @@ export function NewAgentScreen({ navigation }: ScreenProps<'New'>) {
   }
 
   const remote = remoteComputerId !== null
-  const canStart = canStartAgent(task, busy, files.length, remote)
+  const canStart = canStartAgent(task, busy, { count: files.length, toAnotherComputer: remote })
   useLayoutEffect(() => {
     navigation.setOptions({
       title: 'New agent',

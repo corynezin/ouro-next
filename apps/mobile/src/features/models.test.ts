@@ -11,7 +11,7 @@ import {
   asksPanel, asksStrip, ChoiceTapGuard, chatItems, choicesForMessage, composedFilesOf, composerPlaceholder, directSend, historyFooter, foldDoneReports, goalBar, messageFiles, outboxBubble,
   recipientLastOutputOf, routedAgents, statusBar, summaryBar, chatMoreMenu, FAILED_SEND_ACTIONS, nextUnreadLabel, STOP_COPY,
 } from './chat/model.ts'
-import { canStartAgent, hasPromptCache, machineFooter, machineOptions, modelGroups, modelName, newAgentInput, newRemoteAgentInput, typedAgentName } from './newAgent/model.ts'
+import { canStartAgent, hasPromptCache, machineFooter, machineOptions, modelGroups, modelName, newAgentInput, newRemoteAgentInput, typedAgentName, uploadFilesOnce } from './newAgent/model.ts'
 import { LOG_COPY, LOG_FOLLOW_EVERY_MS, LogReader, logLine } from './log/model.ts'
 import { archivedRows, unarchivedNote } from './archived/model.ts'
 import { branchMergeText, DETAILS_COPY, detailsModel, screensAboutAgent } from './details/model.ts'
@@ -524,9 +524,10 @@ test('models are named as the reference names them; one it does not name keeps t
 })
 
 test('starting needs a task; a blank name lets the server generate one', () => {
-  assert.equal(canStartAgent('  ', false), false)
-  assert.equal(canStartAgent('do it', true), false)
-  assert.equal(canStartAgent('do it', false), true)
+  const noFiles = { count: 0, toAnotherComputer: false }
+  assert.equal(canStartAgent('  ', false, noFiles), false)
+  assert.equal(canStartAgent('do it', true, noFiles), false)
+  assert.equal(canStartAgent('do it', false, noFiles), true)
   assert.equal(typedAgentName('my bot '), 'mybot', 'spaces are stripped as the name is typed')
   assert.deepEqual(newAgentInput('do it', '  ', 'opus', '5m'), { task: 'do it', name: null, model: 'opus', folder: null })
   assert.equal(newAgentInput('do it', ' bob ', null, null).name, 'bob')
@@ -544,9 +545,27 @@ test('starting needs a task; a blank name lets the server generate one', () => {
 test('files picked for a task go with it, by their uploaded ids, and keep it from starting on another computer', () => {
   assert.deepEqual(newAgentInput('read this', '', null, null, ['att1', 'att2']).attachmentIds, ['att1', 'att2'])
   assert.equal('attachmentIds' in newAgentInput('do it', '', null, null, []), false, 'no files sends none')
-  assert.equal(canStartAgent('read this', false, 2, false), true)
-  assert.equal(canStartAgent('read this', false, 2, true), false, 'files to another computer are refused there')
-  assert.equal(canStartAgent('read this', false, 0, true), true)
+  assert.equal(canStartAgent('read this', false, { count: 2, toAnotherComputer: false }), true)
+  assert.equal(canStartAgent('read this', false, { count: 2, toAnotherComputer: true }), false, 'files to another computer are refused there')
+  assert.equal(canStartAgent('read this', false, { count: 0, toAnotherComputer: true }), true)
+})
+
+test('files upload once each, in order, and the first failure stops the start; Start again sends none twice', async () => {
+  const file = (localId: string) => ({ localId, uri: `file:///${localId}`, fileName: `${localId}.txt`, mimeType: 'text/plain' })
+  const uploaded = new Map<string, string>()
+  const sent: string[] = []
+  let failing: string | null = 'b'
+  const upload = async (picked: { localId: string }) => {
+    sent.push(picked.localId)
+    return picked.localId === failing ? { ok: false as const, failure: { kind: 'timed_out' as const } } : { ok: true as const, value: { id: `att-${picked.localId}` } }
+  }
+  const first = await uploadFilesOnce([file('a'), file('b'), file('c')], uploaded, upload)
+  assert.equal(first.ok, false)
+  assert.equal(!first.ok && first.fileName, 'b.txt')
+  assert.deepEqual(sent, ['a', 'b'], 'nothing after the one that failed')
+  failing = null
+  assert.deepEqual(await uploadFilesOnce([file('a'), file('b'), file('c')], uploaded, upload), { ok: true, attachmentIds: ['att-a', 'att-b', 'att-c'] })
+  assert.deepEqual(sent, ['a', 'b', 'b', 'c'], 'the file already uploaded is not sent again')
 })
 
 test('the Machine picker: here, then fully trusting computers by name; none of them, no picker', () => {

@@ -310,7 +310,7 @@ const RemoteAgentRow = memo(function RemoteAgentRow(row: RemoteAgentRowModel & {
   const status = useSteady({ text: row.statusText, tone: row.statusTone }, statusKey)
   return (
     <Pressable onPress={() => row.onOpen(row.remoteAgentId)} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.background }]}>
-      <View style={[s.rowInner, row.statusTone === 'offline' && { opacity: 0.5 }]}>
+      <View style={[s.rowInner, status.tone === 'offline' && { opacity: 0.5 }]}>
         <Avatar seed={row.name} kind="agent" model={row.model ?? undefined} size={52} />
         <View style={{ flex: 1, gap: 3 }}>
           <View style={s.line}>
