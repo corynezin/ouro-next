@@ -1,7 +1,8 @@
 // An attempt's workspace: a fresh copy of one source revision with a single starting commit and no history,
 // the benchmark itself left out, an optional private regression folded in, and the base checkout's installed packages.
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { git } from './gates.ts'
 import { isTestPath } from './metrics.ts'
@@ -34,8 +35,11 @@ export function applyInjection(root: string, injection: Injection): void {
 
 export interface AttemptPaths { root: string, source: string, bin: string, tmp: string }
 
+// `tmp` is a link to a short directory in the system's: tests make Unix sockets there, and a socket path over
+// about 100 characters can't be listened on, which deep run folders would otherwise reach.
 export function attemptPaths(root: string): AttemptPaths {
-  return { root, source: join(root, 'src'), bin: join(root, 'bin'), tmp: join(root, 'tmp') }
+  const link = join(root, 'tmp')
+  return { root, source: join(root, 'src'), bin: join(root, 'bin'), tmp: existsSync(link) ? realpathSync(link) : link }
 }
 
 // Gives the copy the base checkout's installed packages, except the workspace links (@ouro/*), which must point at the
@@ -72,9 +76,10 @@ const commitEnv = {
 }
 
 export function prepareAttempt(options: { repo: string, revision: string, root: string, dependencies: string, injection?: Injection }): AttemptPaths {
+  if (existsSync(join(options.root, 'src'))) throw new Error(`${options.root} already has a copy`)
+  for (const dir of ['src', 'bin']) mkdirSync(join(options.root, dir), { recursive: true })
+  symlinkSync(mkdtempSync(join(tmpdir(), 'ob-')), join(options.root, 'tmp'))
   const paths = attemptPaths(options.root)
-  if (existsSync(paths.source)) throw new Error(`${paths.source} already exists`)
-  for (const dir of [paths.source, paths.bin, paths.tmp]) mkdirSync(dir, { recursive: true })
   const archive = execFileSync('git', ['archive', '--format=tar', options.revision, '--', '.', ':(exclude)benchmarks'],
     { cwd: options.repo, maxBuffer: 1024 * 1024 * 1024 })
   execFileSync('tar', ['-x', '-C', paths.source], { input: archive })

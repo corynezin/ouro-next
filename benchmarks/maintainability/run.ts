@@ -140,7 +140,7 @@ export async function runTask(task: Task, options: RunOptions, baseline: Baselin
       result.gates_after = Object.fromEntries(Object.entries(gates).map(([name, { tail: _, ...gate }]) => [name, gate]))
     }
     result.health_changes = compareHealth(baseline.health.health, measureTree(trackedSources(paths.source)).health)
-      .filter((delta) => delta.verdict !== 'same')
+      .filter((delta) => delta.change !== 0)
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error)
   }
