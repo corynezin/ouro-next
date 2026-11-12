@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
-import { migrations } from './schema.ts'
+import { migrations, runMigration } from './schema.ts'
 import { Store } from './store.ts'
 
 test('the change log keeps only the latest change per entity', () => {
@@ -62,7 +62,7 @@ test('a delivery left in a turn by a schema 21 server is taken in, and older cod
   try {
     const path = join(dir, 'ouro.db')
     const old = new DatabaseSync(path)
-    for (const migration of migrations.slice(0, 21)) old.exec(migration)
+    for (const migration of migrations.slice(0, 21)) runMigration(old, migration)
     old.exec('PRAGMA user_version = 21; PRAGMA foreign_keys = OFF')
     const inTurn = { state: 'in_turn', since: 5, turnId: 't', attemptId: 'a', possiblySeen: false }
     old.prepare(`INSERT INTO deliveries (id, message_id, message_seq, recipient, agent_id, wake, state_name, state_json) VALUES ('d', 'm', 1, 'alice', 'agent', 'wake', 'in_turn', ?)`).run(JSON.stringify(inTurn))
@@ -82,7 +82,7 @@ test("a schema 23 plan reading's windows take its time as when each was read", (
   try {
     const path = join(dir, 'ouro.db')
     const old = new DatabaseSync(path)
-    for (const migration of migrations.slice(0, 23)) old.exec(migration)
+    for (const migration of migrations.slice(0, 23)) runMigration(old, migration)
     old.exec('PRAGMA user_version = 23; PRAGMA foreign_keys = OFF')
     const fiveHour = { windowMinutes: 300, usedFraction: 0.1, resetsAt: 50, status: 'allowed' }
     const weekly = { windowMinutes: 10_080, usedFraction: 0.2, resetsAt: 90, status: null }
@@ -104,7 +104,7 @@ test('a schema 24 copy of an ask from another computer is not snoozed and was la
   try {
     const path = join(dir, 'ouro.db')
     const old = new DatabaseSync(path)
-    for (const migration of migrations.slice(0, 24)) old.exec(migration)
+    for (const migration of migrations.slice(0, 24)) runMigration(old, migration)
     old.exec('PRAGMA user_version = 24; PRAGMA foreign_keys = OFF')
     old.exec(`INSERT INTO peers (machine_id, name, address, public_key, trust, joined_at) VALUES ('m', 'beta', 'http://beta', 'k', 'full', 1)`)
     old.exec(`INSERT INTO remote_asks (id, peer_machine_id, agent_name, level, text, choices_json, asked_at, chat_id) VALUES ('a', 'm', 'asker', 'blocked', 'Ship it?', '[]', 40, 'c')`)
@@ -159,4 +159,64 @@ test('a savepoint that throws undoes only its own writes, and the transaction ar
   assert.equal(store.getMeta('after'), '1')
   assert.throws(() => store.savepoint(() => 1), /inside a transaction/)
   store.close()
+})
+
+test("a database that ran the 27 and 28 from before base 6 is brought to base 6's shape, its pins kept", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ouro-store-'))
+  try {
+    const path = join(dir, 'ouro.db')
+    const old = new DatabaseSync(path)
+    for (const migration of migrations.slice(0, 26)) runMigration(old, migration)
+    // The 27 and 28 from before base 6: pins by kind, reference and position, and networks without 28's later additions.
+    const own27 = (migrations[26] as string).replace(/target_key TEXT NOT NULL,\s*target_json TEXT NOT NULL,/, "target_kind TEXT NOT NULL, target_ref TEXT NOT NULL, position REAL NOT NULL,")
+      .replace('UNIQUE (person_id, target_key)', 'UNIQUE (person_id, target_kind, target_ref)')
+    const own28 = (migrations[27] as string).split('ALTER TABLE people ADD COLUMN origin_machine_id')[0]!
+    assert.notEqual(own27, migrations[26])
+    old.exec(own27)
+    old.exec(own28)
+    old.exec(migrations[28] as string)
+    old.exec('PRAGMA user_version = 29; PRAGMA foreign_keys = OFF')
+    old.exec(`INSERT INTO people (id, name, address, is_owner, joined_at) VALUES ('p', 'Owner', 'human', 1, 1)`)
+    old.exec(`INSERT INTO pins (id, person_id, target_kind, target_ref, position, pinned_at) VALUES ('a', 'p', 'agent', 'ag1', 0, 5), ('b', 'p', 'remote_agent', 'x@beta', 1, 6), ('c', 'p', 'chat', 'ch1', 2, 7)`)
+    old.close()
+
+    const store = new Store(path)
+    assert.deepEqual(store.listPins('p').map((pin) => pin.target), [
+      { kind: 'agent', agentId: 'ag1' }, { kind: 'remote_agent', address: 'x@beta' }, { kind: 'chat', chatId: 'ch1' },
+    ])
+    assert.equal(store.pinOf('p', { kind: 'chat', chatId: 'ch1' })?.id, 'c')
+    store.close()
+    const after = new DatabaseSync(path)
+    const columns = (table: string) => (after.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((column) => column.name)
+    assert.ok(columns('people').includes('origin_machine_id'))
+    assert.ok(columns('network_removed_peers').includes('machine_id'))
+    assert.ok(columns('pins').includes('target_kind'), 'a release from before still finds its columns')
+    after.close()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("a database that ran base 6's own 27 and 28 is left as it was, its pins kept", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ouro-store-'))
+  try {
+    const path = join(dir, 'ouro.db')
+    const old = new DatabaseSync(path)
+    for (const migration of migrations.slice(0, 29)) runMigration(old, migration)
+    old.exec('PRAGMA user_version = 29; PRAGMA foreign_keys = OFF')
+    old.exec(`INSERT INTO people (id, name, address, is_owner, joined_at) VALUES ('p', 'Owner', 'human', 1, 1)`)
+    old.exec(`INSERT INTO pins (id, person_id, target_key, target_json, pinned_at) VALUES ('a', 'p', 'agent:ag1', '{"kind":"agent","agentId":"ag1"}', 5)`)
+    const shape = (db: DatabaseSync) => db.prepare(`SELECT type, name, sql FROM sqlite_schema ORDER BY name`).all()
+    const before = shape(old)
+    old.close()
+
+    const store = new Store(path)
+    assert.deepEqual(store.listPins('p').map((pin) => pin.target), [{ kind: 'agent', agentId: 'ag1' }])
+    store.close()
+    const after = new DatabaseSync(path)
+    assert.deepEqual(shape(after), before)
+    after.close()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

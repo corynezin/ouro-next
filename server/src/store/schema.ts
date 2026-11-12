@@ -1,6 +1,16 @@
 // Migrations are expand-then-contract only. A rollback restores code, not data, so a release must keep working on a
 // schema newer than itself until the older releases that could return are gone.
-export const migrations: readonly string[] = [
+import type { DatabaseSync } from 'node:sqlite'
+
+/** SQL, or, where a database may come from either of two histories, a step that looks before it changes anything. */
+export type Migration = string | ((db: DatabaseSync) => void)
+
+export function runMigration(db: DatabaseSync, migration: Migration): void {
+  if (typeof migration === 'string') db.exec(migration)
+  else migration(db)
+}
+
+export const migrations: readonly Migration[] = [
   `
   CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
 
@@ -555,6 +565,56 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE agents ADD COLUMN background_tasks_json TEXT;
   `,
+  // 30: a database that ran earlier versions of 27 and 28, from before base 6 reworked them, is brought to base 6's
+  // shape: pins found by target_key with their target as JSON, and 28's people.origin_machine_id and
+  // network_removed_peers. A database that ran base 6's 27 and 28 is left as it is. Expand only: the old pins columns stay,
+  // now nullable, so a release from before still reads its pins; rows it adds without target_json aren't read here.
+  reconcileWithBase6,
 ]
+
+function columnsOf(db: DatabaseSync, table: string): Set<string> {
+  return new Set((db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((column) => column.name))
+}
+
+/** Each change is made only where it is missing, so this is a no-op on a database that ran base 6's own 27 and 28. */
+function reconcileWithBase6(db: DatabaseSync): void {
+  if (!columnsOf(db, 'pins').has('target_key')) {
+    db.exec(`
+    CREATE TABLE pins_reconciled (
+      id TEXT PRIMARY KEY,
+      person_id TEXT NOT NULL REFERENCES people(id),
+      target_key TEXT,
+      target_json TEXT,
+      pinned_at INTEGER NOT NULL,
+      target_kind TEXT,
+      target_ref TEXT,
+      position REAL,
+      UNIQUE (person_id, target_key),
+      UNIQUE (person_id, target_kind, target_ref)
+    ) STRICT;
+    INSERT INTO pins_reconciled (id, person_id, target_key, target_json, pinned_at, target_kind, target_ref, position)
+      SELECT id, person_id, target_kind || ':' || target_ref,
+        CASE target_kind
+          WHEN 'agent' THEN json_object('kind', 'agent', 'agentId', target_ref)
+          WHEN 'remote_agent' THEN json_object('kind', 'remote_agent', 'address', target_ref)
+          ELSE json_object('kind', 'chat', 'chatId', target_ref)
+        END,
+        pinned_at, target_kind, target_ref, position
+      FROM pins;
+    DROP TABLE pins;
+    ALTER TABLE pins_reconciled RENAME TO pins;
+    `)
+  }
+  if (!columnsOf(db, 'people').has('origin_machine_id')) db.exec('ALTER TABLE people ADD COLUMN origin_machine_id TEXT')
+  db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS people_origin_machine ON people(origin_machine_id) WHERE origin_machine_id IS NOT NULL;
+  CREATE TABLE IF NOT EXISTS network_removed_peers (
+    network_id TEXT NOT NULL,
+    machine_id TEXT NOT NULL,
+    removed_at INTEGER NOT NULL,
+    PRIMARY KEY (network_id, machine_id)
+  ) STRICT;
+  `)
+}
 
 export const SCHEMA_VERSION = migrations.length
