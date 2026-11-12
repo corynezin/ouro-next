@@ -212,7 +212,12 @@ export const commands = {
     agentLimit: z.number().int().min(1).max(64),
     budgetUsd: z.number().positive().nullable(),
   }), z.object({ server: ServerEntity })),
-  /** Reads the plan's usage windows from its provider now, rather than after the next turn. */
+  /**
+   * Asks the base repository for a newer base now, rather than at the server's next half-hourly check; a newer one comes
+   * back as `server.release.base.offered`. Refused with `provider_unreachable` when the repository can't be read, and
+   * `base_not_offered` when this machine takes no bases or has no repository to take them from.
+   */
+  check_base_offer: defineCommand(['person', 'agent'], Empty, z.object({ server: ServerEntity })),
   /** Starts taking base `n`, the one offered. The owner's, or an agent's for them. */
   take_base_update: defineCommand(['person', 'agent'], z.object({ n: z.number().int().positive() }), z.object({ server: ServerEntity })),
   /** Carries on with a base update once its conflicts are resolved and the merge is committed beside the live source. */

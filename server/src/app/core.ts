@@ -2114,6 +2114,10 @@ export class OuroCore {
     // A retry of a command that already ran answers as it did then, without going to the network again.
     if (this.store.idempotentResult(callerKeyOf(caller), idempotencyKey)) return nothing
     if (name === 'refresh_plan_usage') return { ...nothing, planUsageRead: await this.readUsageNow(rawInput) }
+    if (name === 'check_base_offer') {
+      await this.baseUpdates.checkNow()
+      return nothing
+    }
     if (caller.kind === 'person' && commandBringsWork(name, rawInput) && !(await this.holdHostForWork())) {
       throw new CommandRefused('host_hold_refused', `${this.config.machineName} couldn't stay awake for it; try again`)
     }
@@ -2258,6 +2262,7 @@ export class OuroCore {
       case 'set_auto_archive': return this.commandSetAutoArchive(caller, input as never)
       case 'set_reply_reminders': return this.commandSetReplyReminders(caller, input as never)
       case 'refresh_plan_usage': return this.commandRefreshPlanUsage(prepared)
+      case 'check_base_offer': return { server: this.serverEntity() }
       case 'take_base_update': return this.commandTakeBaseUpdate(caller, input as never)
       case 'continue_base_update': return this.commandContinueBaseUpdate()
       case 'resolve_base_update': return this.commandResolveBaseUpdate(caller)

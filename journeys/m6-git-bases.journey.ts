@@ -1,6 +1,6 @@
 // Taking bases from a git repository (J-34, M6): a computer taking bases from a repository (a local bare one stands in for
 // the public one) is offered the newest base, takes it and has it live, merged into its person's own branch. A withdrawn
-// base is offered no more, and its files stay in the repository.
+// base is offered no more, and its files stay in the repository. A check finds a new base at once.
 import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
 import { appendFileSync, cpSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
@@ -74,4 +74,13 @@ test('a withdrawn base is offered no more, and its files stay in the repository'
   await repo.withdraw(1)
   assert.match(await repo.git(['show', `base-1:${STARTER_PROTOCOL}`]), /Base 1 was here\./)
   assert.equal((await takerBase())?.integrated, 1)
+})
+
+test('a check asks the repository now, so a new base is offered without waiting for the half-hourly check', async () => {
+  const tree = join(baseDir, 'base-2')
+  cpSync(taker.source, tree, { recursive: true, filter: (path) => !path.includes('/.git') && !path.includes('node_modules') })
+  appendFileSync(join(tree, STARTER_PROTOCOL), '\nBase 2 was here.\n')
+  await repo.release(2, 'the starter protocol gains another line', tree)
+  const checked = await phone.command('check_base_offer', {}) as { server: { release: { base: BaseStatus } } }
+  assert.equal(checked.server.release.base.kind === 'taker' && checked.server.release.base.offered?.n, 2)
 })
