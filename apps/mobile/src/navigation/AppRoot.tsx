@@ -19,7 +19,6 @@ import { LockCover } from './LockCover.tsx'
 import { runningCode, useUpdatesDownloadedAtLaunch } from '../native/updates.ts'
 import { updateMarkView } from '../core/updates/updateFlow.ts'
 import { UpdateMarkProvider, type UpdateMarkReader } from '../design/UpdateMarks.tsx'
-import { ModelAvatarsEnabled } from '../design/Avatar.tsx'
 import { C } from '../design/colors.ts'
 import { accent } from '../design/theme.ts'
 import { toast, ToastHost } from '../design/Toast.tsx'
@@ -155,7 +154,6 @@ export function AppRoot({ core, hostedServers, updates, lock, push, otherServers
           <UpdateFlowProvider value={updates}>
           <PushProvider value={push}>
           <OtherServersUnreadProvider value={otherServersUnread}>
-          <ModelAvatarsEnabled.Provider value={core.preferences.current.modelAvatars}>
           <UpdateMarkProvider value={readUpdateMark}>
             <UpdateBanner flow={updates} onHeight={setBannerHeight} />
             {banner && (
@@ -220,7 +218,6 @@ export function AppRoot({ core, hostedServers, updates, lock, push, otherServers
             <ToastHost />
             <LockCover gate={lock} />
           </UpdateMarkProvider>
-          </ModelAvatarsEnabled.Provider>
           </OtherServersUnreadProvider>
           </PushProvider>
           </UpdateFlowProvider>

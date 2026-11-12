@@ -56,7 +56,6 @@ export const SETTINGS_COPY = {
   replyRemindersFooter: 'An agent whose turn ends with a message still owed a reply is reminded once. While off, owed replies are let go, so turning it on again reminds of nothing from before.',
   autoArchiveFooter: 'Finished agents quiet that long, with nothing still depending on them, are archived. Their history stays, and Archived brings them back.',
   foldFooter: 'Agents quiet that long (not busy, nothing unread or waiting) go into an Idle section at the bottom.',
-  avatarsFooter: 'Agents use Notionists faces. The circle’s ring identifies the company: Anthropic terracotta, OpenAI green, Google red, DeepSeek blue, Qwen purple. Backgrounds go from light (fast) to medium (balanced) to dark (flagship); gray means unclassified. Turn this off to restore the original avatars.',
   appFooter: 'Screens and logic update over the air, without an app build.',
   updatesFromFooter: 'Updates come from this server, whichever server is open. With none, the built-in version runs.',
   faceIdMissing: 'Face ID is not set up on this phone.',
