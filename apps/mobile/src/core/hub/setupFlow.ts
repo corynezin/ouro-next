@@ -90,6 +90,7 @@ export class SetupFlow {
           await this.deps.pair(status.address, status.pairing.code, server)
           if (run === this.run) this.set({ stage: 'done' })
         } catch (failure) {
+          // A network that couldn't take it doesn't fail pairing: Servers shows that, with Retry (see AppCore.placements).
           if (run === this.run) this.set({ stage: 'failed', message: SETUP_COPY.pairingFailed(failure instanceof Error ? failure.message : String(failure)) })
         }
       }

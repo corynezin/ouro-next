@@ -57,10 +57,13 @@ export const defaultAgentPolicy: AgentPolicy = {
   idleExitMs: 30 * 60_000,
 }
 
-/** The app's answer to "may this agent run now?": slots, budget and provider holds, evaluated in the same transaction. */
+/** The app's answer to "may this agent run now?": slots, budget and provider holds, evaluated in the same transaction.
+ * `awaiting_start`: a copy pulled from another person's server, which runs only once someone here starts it; until then
+ * nothing wakes it, and it isn't held either: there is nothing to retry. */
 export type WakeAdmission =
   | { kind: 'granted' }
   | { kind: 'refused'; hold: HoldReason; retryAt: number | null }
+  | { kind: 'awaiting_start' }
 
 /**
  * - `model_refused`: the model declined this input, such as a safeguards flag. Retrying the same input can't succeed,
@@ -147,6 +150,7 @@ export type RefusalReason =
   | 'not_applicable_in_state'
   | 'archived'
   | 'held'
+  | 'awaiting_start'
 
 const refuse = (why: RefusalReason): AgentDecision => ({ outcome: 'refused', why })
 
@@ -327,6 +331,7 @@ function decideWake(context: DecisionContext, admission: WakeAdmission, reason: 
       // Already up, or on its way somewhere; whoever asked has its message queued and the scheduler will deliver it.
       return refuse('not_applicable_in_state')
   }
+  if (admission.kind === 'awaiting_start') return refuse('awaiting_start')
   if (admission.kind === 'refused') {
     return transition(context, { state: 'held', since: state.state === 'held' ? state.since : context.now, hold: admission.hold, retryAt: admission.retryAt }, `wake refused: ${admission.hold}`)
   }

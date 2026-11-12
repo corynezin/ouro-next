@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useHeaderHeight } from '@react-navigation/elements'
 import type { AgentEntity, CommandInput, CommandName, MessageEntity } from '@ouro/contract'
-import { STOP_ATTEMPTS } from '../../core/session/serverApi.ts'
+import { failureText, STOP_ATTEMPTS } from '../../core/session/serverApi.ts'
 import type { ServerSession } from '../../core/session/serverSession.ts'
 import type { OutboxEntry } from '../../core/session/outbox.ts'
 import { AskChoices } from '../../design/AskChoices.tsx'
@@ -27,7 +27,7 @@ import { openSnoozeSheet } from '../shared/snoozeSheet.ts'
 import {
   asksPanel, ChoiceTapGuard, chatItems, choicesForMessage, composedFilesOf, composerPlaceholder, directSend, goalBar, messageFiles, outboxBubble, recipientLastOutputOf,
   JUMP_PAGE_SIZE, routedAgents, statusBar, summaryBar,
-  chatMoreMenu, FAILED_SEND_ACTIONS, nextUnreadLabel, STOP_COPY,
+  chatMoreMenu, FAILED_SEND_ACTIONS, nextUnreadLabel, pulledBar, STOP_COPY,
 } from './model.ts'
 import type { ChatItem, ChatMenuAction, MessageAt, StatusBarModel } from './model.ts'
 import { Marked, useJumpToMessage } from './useJumpToMessage.tsx'
@@ -195,6 +195,7 @@ function Conversation({ agent, session, navigation, at }: {
   }
 
   const asks = asksOf(store, agent)
+  const pulled = pulledBar(agent)
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: C.background }} behavior="padding" keyboardVerticalOffset={headerHeight + bannerHeight}>
       <FlatList
@@ -214,6 +215,18 @@ function Conversation({ agent, session, navigation, at }: {
         onEndReachedThreshold={0.3}
         ListFooterComponent={<HistoryFooter footer={footer} onLoad={() => { void loadOlder() }} />}
       />
+      {pulled !== null && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 18, paddingVertical: 6, backgroundColor: C.bar }}>
+          <Text style={{ color: C.orange, fontSize: 12, flex: 1 }} numberOfLines={2}>{pulled.text}</Text>
+          {pulled.canStart && (
+            <Pressable onPress={() => confirm(`Start ${agent.name}?`, 'It was shaped in a shared network by the people you share it with. Once started, it runs on this private server like any of your agents.', 'Start', () => {
+              void session.command('start_pulled_agent', { agentId: agent.id }).then((done) => { if (!done.ok) setNote(failureText(done.failure)) })
+            }, { destructive: false })}>
+              <Text style={{ color: C.blue, fontSize: 13, fontWeight: '600' }}>Start</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
       <Bars agent={agent} session={session} note={note} asks={asks} answeringAskId={answeringAskId} setAnsweringAskId={setAnsweringAskId} onChoose={chooseAnswer}
         onOpenGoal={() => navigation.navigate('Goal', { agentRef: agent.id })}
         onOpenSummaries={() => navigation.navigate('Summaries', { agentRef: agent.id })} onError={setNote} />

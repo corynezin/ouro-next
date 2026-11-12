@@ -87,7 +87,10 @@ export class Memory {
   /** A moved agent's project notes, added to this machine's memory of the project where it lacks them: what this machine
    * already has stays as it is. */
   takeSharedNotes(projectKey: string, notes: { file: string; text: string }[]): void {
-    const dir = join(this.config.projectsDir, projectFolderName(projectKey))
+    const folder = projectFolderName(projectKey)
+    // Pushed from another server, so the key is only what it says: nothing outside the projects folder.
+    if (folder === '' || folder === '.' || folder === '..') return
+    const dir = join(this.config.projectsDir, folder)
     mkdirSync(dir, { recursive: true })
     for (const note of notes) {
       if (!isNoteFile(note.file) || note.file.includes('/') || isPersonalNote(note.text)) continue

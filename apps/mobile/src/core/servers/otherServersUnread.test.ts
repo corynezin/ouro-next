@@ -50,3 +50,33 @@ test('other servers are counted from one snapshot each, at most once a minute, a
   stop()
   core.activeSession?.dispose()
 })
+
+test('the open server is read for its place too, so it is known once another is open; a failed read keeps the last place', async () => {
+  const secureStorage = new MemorySecureStorage()
+  const network = new FakeNetwork()
+  const clock = new FakeClock()
+  const lifecycle = new FakeLifecycle()
+  const ids = new FakeIds()
+  const core = new AppCore({ secureStorage, durableStore: new MemoryDurableStore(), network, clock, lifecycle, ids })
+  const servers = new SavedServers(secureStorage, ids)
+  const a = await servers.add(paired(A))
+  const b = await servers.add(paired(B))
+  const base = snapshotOf()
+  const home = { id: 'n', name: 'private', kind: 'private' as const, role: 'home' as const, addedAt: 1 }
+  network.routeJson('GET', `${A}/v2/snapshot`, snapshotOf())
+  network.routeJson('GET', `${B}/v2/snapshot`, { ...base, server: { ...base.server, networks: [home] } })
+  await core.start()
+  assert.equal(core.activeSession?.serverId, b.id)
+
+  const unread = new OtherServersUnread({ core, unreadOf: unreadTotal })
+  await unread.checkIfDue()
+  assert.deepEqual(unread.places.get(b.id)?.networks, [home], 'the open server has a place')
+  assert.equal(unread.counts.has(b.id), false, 'but no count: its badge is live')
+  assert.ok(unread.places.has(a.id))
+
+  network.routeJson('GET', `${B}/v2/snapshot`, { error: 'down' }, 502)
+  await clock.advance(OTHER_SERVERS_CHECK_INTERVAL_MS)
+  await unread.checkIfDue()
+  assert.deepEqual(unread.places.get(b.id)?.networks, [home], 'kept after a failed read')
+  core.activeSession?.dispose()
+})

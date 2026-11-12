@@ -6,7 +6,8 @@ import { agentOf, directChatOf, messageOf, readStateOf, snapshotOf, VIEWER_ADDRE
 import { agentsListModel, searchAgents } from '../agents/model.ts'
 import { asksPanel, choicesForMessage } from '../chat/model.ts'
 import { openCopyOf } from '../shared/agentFacts.ts'
-import { remoteActionsOf, remoteAsksOf, remoteChatModel, remoteListEntries, remoteSend, remoteStatusText } from './model.ts'
+import { canPull, remoteActionsOf, remoteAsksOf, remoteChatModel, remoteListEntries, remoteSend, remoteStatusText } from './model.ts'
+import { pulledBar } from '../chat/model.ts'
 
 const NOW = 10_000_000
 const computer = (partial: Partial<ComputerEntity> = {}): ComputerEntity => ({
@@ -179,4 +180,30 @@ test('its chat runs a timer while it works and shows its latest summary, as a lo
   assert.equal(working.summaryLine, 'Fixing the build')
   const offline = remoteChatModel(remoteOf({ details: thinking, activity: 'running' }), computer({ status: 'offline' }), NOW)
   assert.equal(offline.statusText, '⊘ mac offline', 'no timer for a computer that is not answering')
+})
+
+test('a copy is pulled only by a private server, from a shared network it holds a key for', () => {
+  const home = { id: 'p', name: 'private', kind: 'private' as const, role: 'home' as const, addedAt: 1 }
+  const team = { id: 's', name: 'team', kind: 'shared' as const, role: 'extra' as const, addedAt: 1 }
+  assert.equal(canPull(computer({ networkId: 's' }), [home, team]), true)
+  assert.equal(canPull(computer({ networkId: 'p' }), [home, team]), false, 'not from its own network')
+  assert.equal(canPull(computer({ networkId: 's' }), []), false)
+  assert.equal(canPull(computer({ networkId: 's' }), [{ ...team, role: 'home' }]), false, 'not from a shared server')
+  assert.equal(canPull(computer({ networkId: 's', visiting: true }), [home, team]), false)
+})
+
+test('a pulled copy says where it came from, and offers Start while it waits', () => {
+  const agent = agentOf({ id: 'a1', name: 'researcher' })
+  assert.equal(pulledBar(agent), null)
+  const waiting = pulledBar({ ...agent, pulled: { from: 'researcher@team', network: 'team', at: 1, awaitingStart: true } })
+  assert.deepEqual(waiting, { text: 'Copy of researcher@team, from the shared network team. Paused: it runs once started.', canStart: true })
+  assert.equal(pulledBar({ ...agent, pulled: { from: 'researcher@team', network: 'team', at: 1, awaitingStart: false } })?.canStart, false)
+})
+
+test('a pulled copy is marked in the list as a copy, paused until started', async () => {
+  const { pulledPrefix } = await import('../agents/model.ts')
+  const agent = agentOf({ id: 'a1', name: 'researcher' })
+  assert.equal(pulledPrefix(agent), '')
+  assert.equal(pulledPrefix({ ...agent, pulled: { from: 'researcher@team', network: 'team', at: 1, awaitingStart: true } }), 'copy from team, paused · ')
+  assert.equal(pulledPrefix({ ...agent, pulled: { from: 'researcher@team', network: 'team', at: 1, awaitingStart: false } }), 'copy from team · ')
 })

@@ -121,7 +121,7 @@ function agentRow(store: StoreView, agent: AgentEntity, now: number): AgentRowMo
     runningOldRelease: agent.runningOldRelease,
     costText: payAsYouGoCostText(store, agent),
     timeText: ago(activityTime(agent, now), now),
-    statusText: statusLine(agent, goal, store.viewer?.address, now),
+    statusText: pulledPrefix(agent) + statusLine(agent, goal, store.viewer?.address, now),
     statusTone: isBusy(agent) ? 'busy' : 'quiet',
     summaryLine: summary?.line ?? null,
     previewText: preview ? (preview.mine ? 'you: ' : '') + oneLine(preview.text) : null,
@@ -305,4 +305,10 @@ export function swipeActionsOf(store: StoreView & PinView, agent: AgentEntity): 
   if (!running) actions.push({ kind: 'archive' })
   if (running) actions.push({ kind: 'stop' })
   return actions
+}
+
+/** A copy pulled from a shared network says so in the list, beside its original's `name@machine`. */
+export function pulledPrefix(agent: AgentEntity): string {
+  if (!agent.pulled) return ''
+  return agent.pulled.awaitingStart ? `copy from ${agent.pulled.network}, paused · ` : `copy from ${agent.pulled.network} · `
 }

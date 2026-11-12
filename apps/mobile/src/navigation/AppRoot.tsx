@@ -41,6 +41,7 @@ import { NewAgentScreen } from '../features/newAgent/Screen.tsx'
 import { AddToChatScreen, NewGroupScreen } from '../features/newChat/Screen.tsx'
 import { PairScreen } from '../features/pair/Screen.tsx'
 import { PersonScreen } from '../features/person/Screen.tsx'
+import { NewNetworkScreen, NewServerDetailsScreen, NewServerNetworkScreen, NewServerScreen } from '../features/servers/NewServerScreen.tsx'
 import { ServersScreen } from '../features/servers/Screen.tsx'
 import { SettingsScreen } from '../features/settings/Screen.tsx'
 import { InviteScreen } from '../features/settings/InviteScreen.tsx'
@@ -214,13 +215,16 @@ export function AppRoot({ core, hostedServers, updates, lock, push, otherServers
                       <Stack.Screen name="Computers" component={ComputersScreen} />
                       <Stack.Screen name="Tailscale" component={TailscaleScreen} options={{ title: 'Tailscale' }} />
                       <Stack.Screen name="Servers" component={ServersScreen} options={{ title: 'Servers' }} />
+                      <Stack.Screen name="NewServer" component={NewServerScreen} options={{ title: 'New server' }} />
+                      <Stack.Screen name="NewServerDetails" component={NewServerDetailsScreen} options={{ title: 'New server' }} />
+                      <Stack.Screen name="NewServerNetwork" component={NewServerNetworkScreen} options={{ title: 'New server' }} />
+                      <Stack.Screen name="NewNetwork" component={NewNetworkScreen} options={{ title: 'Start a network' }} />
                       <Stack.Screen name="Claude" component={ClaudeScreen} options={{ title: 'Claude Code' }} />
                       <Stack.Screen name="ChatGPT" component={ChatGptScreen} options={{ title: 'ChatGPT' }} />
                       <Stack.Screen name="OpenRouter" component={OpenRouterScreen} options={{ title: 'OpenRouter' }} />
                       <Stack.Screen name="GitHub" component={GitHubScreen} options={{ title: 'GitHub' }} />
                       <Stack.Screen name="AWS" component={AwsScreen} options={{ title: 'AWS' }} />
                       <Stack.Screen name="Sprites" component={SpritesScreen} options={{ title: 'Sprites' }} />
-                      <Stack.Screen name="Pair" options={{ title: 'Add a server' }}>{(props) => <PairScreen onBack={() => props.navigation.goBack()} />}</Stack.Screen>
                     </Stack.Group>
                   </Stack.Navigator>
                 </NavigationContainer>

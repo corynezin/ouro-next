@@ -1,10 +1,10 @@
 // The only code that touches SQL. One connection, one writer: `ourod`. Every call is synchronous, so a transaction can't
 // interleave with anything else in the process.
 import { DatabaseSync } from 'node:sqlite'
-import { AgentState, DEFAULT_NOTIFICATION_SETTINGS, DeliveryState, PeerHello, PinTarget, pinTargetKey, PromptCacheLifetime, StandingInstructions } from '@ouro/contract'
+import { AgentPulled, AgentState, DEFAULT_NOTIFICATION_SETTINGS, DeliveryState, PeerHello, PinTarget, pinTargetKey, PromptCacheLifetime, StandingInstructions } from '@ouro/contract'
 import type {
   AgentEntity, AskEntity, AttachmentRef, ChatEntity, DeliveryWake, DeviceEntity, EntityKind, IntegrationEntity, IntegrationProvider, MessageEntity, MessagePurpose,
-  AskLevel, AskSnooze, ComputerTrust, NotificationSettings, PeerGroupPost, PeerGroupUpdate, PeerMessage, PeerOwnerAsk, PeerOwnerMessage, PersonEntity, PinEntity, PlanWindow, RemoteAskEntity, RemoteDelivery, PushTokenRegistration, ReadStateEntity, SummaryEntity, SummaryRecord,
+  AskLevel, AskSnooze, ComputerTrust, NetworkKind, NetworkRole, NotificationSettings, PeerGroupPost, PeerGroupUpdate, PeerMessage, PeerOwnerAsk, PeerOwnerMessage, PersonEntity, PinEntity, PlanWindow, RemoteAskEntity, RemoteDelivery, PushTokenRegistration, ReadStateEntity, SummaryEntity, SummaryRecord,
 } from '@ouro/contract'
 import type { AgentLifecycle } from '../domain/agent.ts'
 import { cacheStateOf } from '../domain/compaction.ts'
@@ -51,6 +51,8 @@ export interface AgentRow {
   promptCacheLifetime: PromptCacheLifetime
   /** Standing instructions added to the agent's rules, such as the starter agent's; null for none. */
   instructions: StandingInstructions | null
+  /** A copy pulled from a shared network; null: not one. */
+  pulled: AgentPulled | null
   /** Null until a turn reports its context, and for models without a timed prompt cache. */
   promptCache: PromptCacheRecord | null
 }
@@ -63,6 +65,7 @@ export interface TakenMessageRow {
   followsOwnMessage: boolean
   answeredInChat: boolean
 }
+
 
 export interface NewAgent {
   id: string
@@ -272,9 +275,16 @@ export class Store {
 
   // People and devices
 
-  insertPerson(person: PersonRow): void {
-    this.run('INSERT INTO people (id, name, address, is_owner, joined_at) VALUES (?, ?, ?, ?, ?)', person.id, person.name, person.address, person.isOwner ? 1 : 0, person.joinedAt)
+  /** `originMachineId`: for the owner of another server in a shared network, that server, which is who they are. */
+  insertPerson(person: PersonRow, originMachineId: string | null = null): void {
+    this.run('INSERT INTO people (id, name, address, is_owner, joined_at, origin_machine_id) VALUES (?, ?, ?, ?, ?, ?)', person.id, person.name, person.address, person.isOwner ? 1 : 0, person.joinedAt, originMachineId)
     this.markChanged('person', person.id)
+  }
+
+  /** The owner of that other server, as kept here, removed or not. */
+  personFromMachine(machineId: string): PersonRow | null {
+    const row = this.get<Parameters<Store['toPersonRow']>[0]>('SELECT * FROM people WHERE origin_machine_id = ?', machineId)
+    return row ? this.toPersonRow(row) : null
   }
 
   private toPersonRow(row: { id: string; name: string; address: string; is_owner: number; joined_at: number }): PersonRow {
@@ -411,6 +421,7 @@ export class Store {
       worktree: row.worktree_json === null ? null : JSON.parse(row.worktree_json as string) as AgentWorktree,
       promptCacheLifetime: PromptCacheLifetime.parse(row.prompt_cache_lifetime),
       instructions: row.instructions === null ? null : StandingInstructions.parse(JSON.parse(row.instructions as string)),
+      pulled: row.pulled_json === null || row.pulled_json === undefined ? null : AgentPulled.parse(JSON.parse(row.pulled_json as string)),
       promptCache: row.prompt_cache_json === null ? null : JSON.parse(row.prompt_cache_json as string) as PromptCacheRecord,
     }
   }
@@ -921,7 +932,13 @@ export class Store {
       planShare,
       lastTurnFailure: row.lastTurnFailure,
       branch: row.worktree === null ? null : { name: row.worktree.branch, base: row.worktree.base },
+      ...(row.pulled === null ? {} : { pulled: row.pulled }),
     }
+  }
+
+  setAgentPulled(id: string, pulled: AgentPulled | null): void {
+    this.run('UPDATE agents SET pulled_json = ? WHERE id = ?', pulled === null ? null : JSON.stringify(pulled), id)
+    this.markChanged('agent', id)
   }
 
   messageEntity(row: MessageRow): MessageEntity {
@@ -1182,12 +1199,13 @@ export class Store {
     return this.all<PeerRecord>('SELECT * FROM peers ORDER BY name').map(peerRowOf)
   }
 
-  /** A machine joining again keeps its trust and history of contact; its name, address and key are what it says now. */
+  /** A machine joining again keeps its trust and history of contact; its name, address and key are what it says now. A link
+   * made this way, before networks, may speak unsigned until it signs with a network's key, if it is trusted fully. */
   savePeer(peer: { machineId: string; name: string; address: string; publicKey: string; trust: ComputerTrust; joinedAt: number }): void {
     this.run(
-      `INSERT INTO peers (machine_id, name, address, public_key, trust, joined_at) VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO peers (machine_id, name, address, public_key, trust, joined_at, unkeyed_allowed) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (machine_id) DO UPDATE SET name = excluded.name, address = excluded.address, public_key = excluded.public_key`,
-      peer.machineId, peer.name, peer.address, peer.publicKey, peer.trust, peer.joinedAt,
+      peer.machineId, peer.name, peer.address, peer.publicKey, peer.trust, peer.joinedAt, peer.trust === 'full' ? 1 : 0,
     )
     this.markChanged('computer', peer.machineId)
   }
@@ -1196,8 +1214,93 @@ export class Store {
     this.run('UPDATE peers SET last_seen_at = ?, hello_json = ? WHERE machine_id = ?', at, JSON.stringify(hello), machineId)
   }
 
+  /** A machine heard from in a network, or named in an address book (`publicKey` ''): what it says now replaces what was
+   * kept, but an address book never replaces a key already heard. */
+  savePeerInNetwork(peer: { machineId: string; name: string; address: string; publicKey: string; networkId: string; visiting: boolean; ownerName: string | null; joinedAt: number }): void {
+    this.run(
+      `INSERT INTO peers (machine_id, name, address, public_key, trust, joined_at, network_id, visiting, unkeyed_allowed, owner_name) VALUES (?, ?, ?, ?, 'full', ?, ?, ?, 0, ?)
+       ON CONFLICT (machine_id) DO UPDATE SET name = excluded.name, address = excluded.address,
+         public_key = CASE WHEN excluded.public_key = '' THEN peers.public_key ELSE excluded.public_key END,
+         network_id = excluded.network_id, visiting = excluded.visiting, owner_name = COALESCE(excluded.owner_name, peers.owner_name)`,
+      peer.machineId, peer.name, peer.address, peer.publicKey, peer.joinedAt, peer.networkId, peer.visiting ? 1 : 0, peer.ownerName,
+    )
+    this.markChanged('computer', peer.machineId)
+  }
+
+  /** It signed with a network's key: where it lives now, and never again without a signature. A visitor stays one in that
+   * network whatever it says: it lives there only once let in by an invite as a home. */
+  /** `visiting`: as decided by visitingAfter. */
+  notePeerNetwork(machineId: string, networkId: string, visiting: boolean): void {
+    const before = this.peerById(machineId)
+    if (!before || (before.networkId === networkId && before.visiting === visiting && !before.unkeyedAllowed)) return
+    this.run('UPDATE peers SET network_id = ?, visiting = ?, unkeyed_allowed = 0, trust = \'full\' WHERE machine_id = ?', networkId, visiting ? 1 : 0, machineId)
+    this.markChanged('computer', machineId)
+  }
+
+  notePeerOwnerName(machineId: string, ownerName: string): void {
+    this.run('UPDATE peers SET owner_name = ? WHERE machine_id = ? AND (owner_name IS NULL OR owner_name != ?)', ownerName, machineId, ownerName)
+  }
+
+  /** A link from before networks given a network: it lives there now, still unkeyed until it signs once. */
+  setPeerNetwork(machineId: string, networkId: string | null): void {
+    this.run('UPDATE peers SET network_id = ? WHERE machine_id = ?', networkId, machineId)
+    this.markChanged('computer', machineId)
+  }
+
+  // Networks
+
+  listNetworks(): NetworkRow[] {
+    return this.all<NetworkRecord>("SELECT * FROM networks ORDER BY role = 'home' DESC, name").map(networkRowOf)
+  }
+
+  networkById(id: string): NetworkRow | null {
+    const row = this.get<NetworkRecord>('SELECT * FROM networks WHERE id = ?', id)
+    return row ? networkRowOf(row) : null
+  }
+
+  homeNetwork(): NetworkRow | null {
+    const row = this.get<NetworkRecord>("SELECT * FROM networks WHERE role = 'home'")
+    return row ? networkRowOf(row) : null
+  }
+
+  /** A network held again keeps its id; held as home, it replaces the home network held before, which is let go. */
+  saveNetwork(network: { id: string; name: string; kind: NetworkKind; role: NetworkRole; addedAt: number }): void {
+    if (network.role === 'home') this.run("DELETE FROM networks WHERE role = 'home' AND id != ?", network.id)
+    this.run(
+      `INSERT INTO networks (id, name, kind, role, added_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (id) DO UPDATE SET name = excluded.name, kind = excluded.kind, role = excluded.role`,
+      network.id, network.name, network.kind, network.role, network.addedAt,
+    )
+    this.markChanged('server', 'server')
+  }
+
+  /** With the computers it removed from it: they mean nothing once its key is gone. */
+  deleteNetwork(id: string): void {
+    this.run('DELETE FROM networks WHERE id = ?', id)
+    this.run('DELETE FROM network_removed_peers WHERE network_id = ?', id)
+    this.markChanged('server', 'server')
+  }
+
+  /** A computer the person removed from a network stays out of it here: see schema 28. */
+  noteRemovedFromNetwork(networkId: string, machineId: string, at: number): void {
+    this.run('INSERT INTO network_removed_peers (network_id, machine_id, removed_at) VALUES (?, ?, ?) ON CONFLICT (network_id, machine_id) DO NOTHING', networkId, machineId, at)
+  }
+
+  /** Invited back on purpose: no longer kept out. */
+  forgetRemovedFromNetwork(networkId: string, machineId: string): void {
+    this.run('DELETE FROM network_removed_peers WHERE network_id = ? AND machine_id = ?', networkId, machineId)
+  }
+
+  removedFromNetwork(networkId: string, machineId: string): boolean {
+    return this.get<{ one: number }>('SELECT 1 AS one FROM network_removed_peers WHERE network_id = ? AND machine_id = ?', networkId, machineId) !== undefined
+  }
+
+  setNetworkInvite(id: string, inviteHash: string | null, expiresAt: number | null): void {
+    this.run('UPDATE networks SET invite_hash = ?, invite_expires_at = ? WHERE id = ?', inviteHash, expiresAt, id)
+  }
+
   setPeerTrust(machineId: string, trust: ComputerTrust): void {
-    this.run('UPDATE peers SET trust = ? WHERE machine_id = ?', trust, machineId)
+    this.run('UPDATE peers SET trust = ?, unkeyed_allowed = ? WHERE machine_id = ?', trust, trust === 'full' ? 1 : 0, machineId)
     this.markChanged('computer', machineId)
   }
 
@@ -1479,15 +1582,30 @@ export interface PeerRow {
   machineId: string
   name: string
   address: string
+  /** '': known only from an address book, not yet heard from. */
   publicKey: string
   trust: ComputerTrust
   joinedAt: number
   lastSeenAt: number | null
   /** What it last said in a hello; null until it has. */
   hello: PeerHello | null
+  /** The network it lives in, of this server's; null: none of them. */
+  networkId: string | null
+  /** It lives elsewhere and visits this server's home network with an extra key. */
+  visiting: boolean
+  /** A full trust link from before networks that hasn't yet signed with a network's key. */
+  unkeyedAllowed: boolean
+  ownerName: string | null
 }
 
-interface PeerRecord { machine_id: string; name: string; address: string; public_key: string; trust: ComputerTrust; joined_at: number; last_seen_at: number | null; hello_json: string | null }
+export interface NetworkRow { id: string; name: string; kind: NetworkKind; role: NetworkRole; addedAt: number; inviteHash: string | null; inviteExpiresAt: number | null }
+
+interface PeerRecord { machine_id: string; name: string; address: string; public_key: string; trust: ComputerTrust; joined_at: number; last_seen_at: number | null; hello_json: string | null; network_id: string | null; visiting: number; unkeyed_allowed: number; owner_name: string | null }
+interface NetworkRecord { id: string; name: string; kind: NetworkKind; role: NetworkRole; added_at: number; invite_hash: string | null; invite_expires_at: number | null }
+
+function networkRowOf(row: NetworkRecord): NetworkRow {
+  return { id: row.id, name: row.name, kind: row.kind, role: row.role, addedAt: row.added_at, inviteHash: row.invite_hash, inviteExpiresAt: row.invite_expires_at }
+}
 
 function peerRowOf(row: PeerRecord): PeerRow {
   return {
@@ -1500,5 +1618,9 @@ function peerRowOf(row: PeerRecord): PeerRow {
     lastSeenAt: row.last_seen_at,
     // Parsed, so a hello kept from an older machine gains the fields it didn't say.
     hello: row.hello_json === null ? null : PeerHello.parse(JSON.parse(row.hello_json)),
+    networkId: row.network_id,
+    visiting: row.visiting === 1,
+    unkeyedAllowed: row.unkeyed_allowed === 1,
+    ownerName: row.owner_name,
   }
 }

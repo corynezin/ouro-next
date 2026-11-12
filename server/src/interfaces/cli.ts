@@ -48,6 +48,15 @@ const HELP = `ouro: talk to your agents, and to the other agents if you are one
   ouro computers invite                                          a one-use command to run on another computer, for 30 minutes
   ouro computers join <address> <code>                           on the other computer: join the one that made the invite
   ouro computers trust <name> full|limited | remove <name>
+  ouro networks                                                  the networks this server holds keys for, and the computers in each
+  ouro networks invite [<network>]                               (a person only) a one-use command for another server, for 30 minutes
+  ouro networks join <address> <code> --kind shared|private [--visit]
+                                                                 (a person only) join a network with an invite, as the kind you expect;
+                                                                 private: your own servers, one person with one memory. --visit: hold a
+                                                                 shared network's key from your private server, to look, pull and push
+  ouro pull <agent@computer> [--name <n>]                        a paused copy of an agent in a shared network; the original stays
+  ouro start-pulled <agent>                                      let a pulled copy run
+  ouro push-memory <computer> [--folder <dir>]                   send a project's shared notes into a shared network (yours if no folder)
   ouro memory sync                                               share your personal notes with every project, and take in theirs
   ouro deploy [<commit>]                                         build, verify and switch to a server version; waits for the truth
   ouro release-status                                            what's live and what's the last proven version
@@ -289,6 +298,47 @@ async function runComputers(client: Client, args: string[], print: (text: string
       return
     }
     default: throw new CliFailure(`unknown: ouro computers ${action}. See: ouro help`)
+  }
+}
+
+async function runNetworks(client: Client, args: string[], print: (text: string) => void): Promise<void> {
+  const [action, ...rest] = args
+  switch (action) {
+    case undefined: {
+      const snapshot = await client.snapshot()
+      const networks = snapshot.server.networks ?? []
+      if (networks.length === 0) {
+        print('no networks: this server links with computers as before networks. See: ouro computers\n')
+        return
+      }
+      const lines = networks.map((network) => {
+        const members = snapshot.computers.filter((computer) => computer.networkId === network.id)
+        const named = members.map((computer) => `${computer.name}${computer.visiting ? ' (visiting)' : ''}`).join(', ') || 'no other computers yet'
+        return `${network.name}: ${network.kind}, ${network.role === 'home' ? 'home key' : 'extra key'}; ${named}`
+      })
+      print(`${lines.join('\n')}\n`)
+      return
+    }
+    case 'invite': {
+      const networks = (await client.snapshot()).server.networks ?? []
+      const named = rest[0]
+      const network = named === undefined ? networks.find((found) => found.role === 'home') : networks.find((found) => found.name === named)
+      if (!network) throw new CliFailure(named === undefined ? 'this server is in no network. See: ouro networks' : `no network called ${named}. See: ouro networks`)
+      const invite = await client.command('create_network_invite', { networkId: network.id })
+      print(`Run this on the other server, within 30 minutes (it works once), to join ${network.name}, a ${network.kind} network:\n${invite.command}\n`)
+      return
+    }
+    case 'join': {
+      const parsed = parseArguments(rest, ['--kind'], ['--visit'])
+      const [address, code] = parsed.positionals
+      const kind = parsed.flags.get('--kind')?.[0]
+      if (!address || !code || (kind !== 'shared' && kind !== 'private')) throw new CliFailure('ouro networks join <address> <code> --kind shared|private [--visit]')
+      const { network, leftOut } = await client.command('join_network', { address, code, kind, role: parsed.switches.has('--visit') ? 'extra' : 'home' })
+      const left = leftOut.length === 0 ? '' : `\nNot taken into it, for you to add or remove: ${leftOut.join(', ')}`
+      print(`joined ${network.name}, a ${network.kind} network, with ${network.role === 'home' ? 'its key as this server\'s home' : 'an extra key, visiting'}${left}\n`)
+      return
+    }
+    default: throw new CliFailure(`unknown: ouro networks ${action}. See: ouro help`)
   }
 }
 
@@ -601,6 +651,29 @@ export async function runCli(args: string[], environment: NodeJS.ProcessEnv, std
       return
     }
     case 'computers': return await runComputers(client, rest, print)
+    case 'networks': return await runNetworks(client, rest, print)
+    case 'pull': {
+      const parsed = parseArguments(rest, ['--name'], [])
+      const address = parsed.positionals[0]
+      if (!address) throw new CliFailure('ouro pull <agent@computer> [--name <n>]')
+      const remote = await requireRemoteAgent(client, address)
+      const { agent } = await client.command('pull_agent', { remoteAgentId: remote.id, name: parsed.flags.get('--name')?.[0] ?? null })
+      print(`${agent.name} is a copy of ${address}, paused until started: ouro start-pulled ${agent.name}\n`)
+      return
+    }
+    case 'start-pulled': {
+      const agent = await requireAgent(client, rest[0])
+      await client.command('start_pulled_agent', { agentId: agent.id })
+      print(`${agent.name} may run now\n`)
+      return
+    }
+    case 'push-memory': {
+      const parsed = parseArguments(rest, ['--folder'], [])
+      const computer = await requireComputer(client, parsed.positionals[0])
+      const { notes } = await client.command('push_memory', { computerId: computer.id, folder: parsed.flags.get('--folder')?.[0] ?? null })
+      print(`${notes} shared ${notes === 1 ? 'note' : 'notes'} sent to ${computer.name}\n`)
+      return
+    }
     case 'memory': {
       const parsed = parseArguments(rest, [], ['--hook'])
       if (parsed.positionals[0] !== 'sync') throw new CliFailure('ouro memory sync')

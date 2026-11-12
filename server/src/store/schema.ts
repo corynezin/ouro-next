@@ -516,6 +516,41 @@ export const migrations: readonly string[] = [
     UNIQUE (person_id, target_key)
   ) STRICT;
   `,
+  // 28: networks. The networks this server holds keys for (the keys themselves are in a file of their own), at most one
+  // of them its home. Each peer gains the network it lives in
+  // (null: none of this server's), whether it only visits this server's home network, whether it may still speak without
+  // a network's signature (a full trust link from before networks, until it signs once), and its owner's name. A peer
+  // known only from another server's address book has no public key yet: ''. An agent copied from a shared network
+  // keeps where it came from, and whether it still waits to be started. A person arriving from another server in a shared
+  // network is that server's owner, kept by its machine id: their name is a label, never who they are. A computer removed
+  // from a network leaves its machine id behind, so another server's hello or its own introduction doesn't bring it back.
+  // Expand only.
+  `
+  CREATE TABLE networks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('private', 'shared')),
+    role TEXT NOT NULL CHECK (role IN ('home', 'extra')),
+    added_at INTEGER NOT NULL,
+    invite_hash TEXT,
+    invite_expires_at INTEGER
+  ) STRICT;
+  CREATE UNIQUE INDEX networks_one_home ON networks(role) WHERE role = 'home';
+  ALTER TABLE peers ADD COLUMN network_id TEXT;
+  ALTER TABLE peers ADD COLUMN visiting INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE peers ADD COLUMN unkeyed_allowed INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE peers ADD COLUMN owner_name TEXT;
+  UPDATE peers SET unkeyed_allowed = 1 WHERE trust = 'full';
+  ALTER TABLE agents ADD COLUMN pulled_json TEXT;
+  ALTER TABLE people ADD COLUMN origin_machine_id TEXT;
+  CREATE UNIQUE INDEX people_origin_machine ON people(origin_machine_id) WHERE origin_machine_id IS NOT NULL;
+  CREATE TABLE network_removed_peers (
+    network_id TEXT NOT NULL,
+    machine_id TEXT NOT NULL,
+    removed_at INTEGER NOT NULL,
+    PRIMARY KEY (network_id, machine_id)
+  ) STRICT;
+  `,
 ]
 
 export const SCHEMA_VERSION = migrations.length

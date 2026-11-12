@@ -13,10 +13,11 @@ export type SetupOrigin = 'hub' | 'made_here'
  * How the phone keeps the server once paired. A hosted one keeps its hub id. One made here was just asked for by the
  * person from this app, so it is linked with their other servers; nothing else links by itself (see AfterPairing).
  */
-export function pairingDetails(origin: SetupOrigin, server: HostedServer): { label: string; hostedServerId?: string; afterPairing: AfterPairing } {
+export function pairingDetails(origin: SetupOrigin, server: HostedServer): { label: string; hostedServerId?: string; setupId: string; afterPairing: AfterPairing } {
+  // setupId: the network the person picked when naming the server is kept under its id (see networkPlans.ts).
   switch (origin) {
-    case 'hub': return { label: server.label, hostedServerId: server.id, afterPairing: 'nothing' }
-    case 'made_here': return { label: server.label, afterPairing: 'link_with_other_servers' }
+    case 'hub': return { label: server.label, hostedServerId: server.id, setupId: server.id, afterPairing: 'nothing' }
+    case 'made_here': return { label: server.label, setupId: server.id, afterPairing: 'link_with_other_servers' }
   }
 }
 
@@ -44,7 +45,8 @@ export function hostedServerSetup(core: AppCore, hub: HubApi, account: HostedAcc
 
 /**
  * A server the open server makes on a cloud account (Servers → New server → AWS or Sprite), read from the open server as
- * a hosted one is from the hub. Paired, this phone links it with the person's other servers.
+ * a hosted one is from the hub. Paired, this phone puts it in the network picked for it (see networkPlans.ts), or, with
+ * none picked, links it with the person's other servers.
  */
 export function machineServerSetup(core: AppCore, read: () => Promise<HubResult<HostedServer>>, onChange: () => void): SetupFlow {
   return hostedSetup(core, read, onChange, 'made_here')

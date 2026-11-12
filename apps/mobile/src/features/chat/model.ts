@@ -302,3 +302,11 @@ function nearestBefore(items: readonly ChatItem[], seq: number): JumpStep | null
   const nearest = items[index]
   return nearest?.kind === 'message' ? { kind: 'scroll', index, messageId: nearest.message.id } : null
 }
+
+/** A copy pulled from a shared network: where it came from, and, while it waits to be started, the button that starts it.
+ * Null for any other agent. */
+export function pulledBar(agent: AgentEntity): { text: string; canStart: boolean } | null {
+  if (!agent.pulled) return null
+  const { from, network, awaitingStart } = agent.pulled
+  return { text: `Copy of ${from}, from the shared network ${network}${awaitingStart ? '. Paused: it runs once started.' : ''}`, canStart: awaitingStart }
+}

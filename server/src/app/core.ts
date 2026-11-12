@@ -5,7 +5,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, linkSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { isAbsolute, join, relative } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
   AGENT_NAME_PATTERN, Change, turnFailureText, chatHandle, commands, SEARCH_MAX_LIMIT, WATCH_LEASE_MS, DEFAULT_GOAL_INTERVAL_SECONDS, MAX_ASK_SNOOZE_MS, OPT_IN_ENTITIES, OWNER_ADDRESS, parseAddress, PEER_ASK_SNOOZE_PROTOCOL, PEER_OWNER_ASKS_PROTOCOL, PEER_OWNER_MESSAGES_PROTOCOL, personAddress, RESERVED_AGENT_NAMES, updateMarkOf,
 } from '@ouro/contract'
@@ -25,7 +25,9 @@ import { transcriptAt } from '../adapters/transcript-requests.ts'
 import { contextBlockText, contextDetail, contextRows } from '../domain/context.ts'
 import type { TranscriptState } from '../domain/context.ts'
 import type { ConversationStores } from '../adapters/conversations.ts'
-import { loadOrCreateMachineKey } from '../adapters/peer-transport.ts'
+import { loadOrCreateMachineKey, NetworkKeyFile, networkIdOf, newNetworkKey } from '../adapters/peer-transport.ts'
+import { holdingRefusal, joinedKindRefusal, ownerAddressFrom, sharesMemoryWith } from '../domain/networks.ts'
+import type { HeldNetwork } from '../domain/networks.ts'
 import { pushTokenHash } from './notifier.ts'
 import type { BaseSource } from '../adapters/base-source.ts'
 import type { GuardianClient } from '../adapters/guardian-client.ts'
@@ -39,7 +41,7 @@ import type { Summarize } from '../adapters/summarizer.ts'
 import { mergeAgentBranch, placeAgent, removeAgentWorktree } from '../adapters/worktrees.ts'
 import { decideAgent, dueEvent, liveGeneration, longTurnToReport, wakeReasonForQueuedWork } from '../domain/agent.ts'
 import type { AgentDecision, AgentEvent, AgentLifecycle, AgentPolicy, ExternalEffect, TransactionEffect, WakeAdmission, WakeReason } from '../domain/agent.ts'
-import type { AgentState, ComputerTrust, HoldReason, PeerAgentCard, PeerAskSnooze, PeerAskSnoozeResult, PeerControl, PeerControlResult, PeerCreateAgent, PeerCreateAgentResult, PeerOwnerAsk, PeerOwnerMessage, PeerGroupPost, PeerGroupState, PeerGroupUpdate, PeerIdentity, PeerMessage, PeerMessageResult, PeerMove, PeerMoveCheck, PeerMoveCheckResult, PeerMoveResult, PeerSender, RemoteAgentAction, StoppedReason, PromptCacheLifetime } from '@ouro/contract'
+import type { NetworkEntity, NetworkKind, NetworkRole, PeerNetworkJoinResult, AgentState, ComputerTrust, HoldReason, PeerAgentCard, PeerAskSnooze, PeerAskSnoozeResult, PeerControl, PeerControlResult, PeerCreateAgent, PeerCreateAgentResult, PeerOwnerAsk, PeerOwnerMessage, PeerGroupPost, PeerGroupState, PeerGroupUpdate, PeerIdentity, PeerMessage, PeerMessageResult, PeerMove, PeerMoveCheck, PeerMoveCheckResult, PeerMoveResult, PeerSender, RemoteAgentAction, StoppedReason, PromptCacheLifetime } from '@ouro/contract'
 import type { JournalRecord } from '../domain/journal.ts'
 import { agentNames, mentionedMembers } from '../domain/chat.ts'
 import { catalogModel, hasTimedPromptCache, launchModelFor, MODEL_CATALOG, runtimeOf } from '../domain/models.ts'
@@ -198,6 +200,12 @@ const STARTER_META_KEY = 'starter_created'
  * name, so an agent called this was made by Ouro. */
 const LEGACY_STARTER_NAME = 'master'
 const STARTER_INSTRUCTIONS: StandingInstructions = { kind: 'protocol', name: 'starter' }
+/** Where copies pulled from a shared network live, each in a folder of its own name, under the default projects folder:
+ * a copy is shaped by another person's server, so it never names a folder of its own here. */
+const PULLED_FOLDER = 'pulled'
+
+/** The person's name, as other servers in a shared network know them. */
+const OWNER_NAME_KEY = 'owner_name'
 const SUMMARY_PAGE_LIMIT_MAX = 100
 /** A page of the Context list: a screenful or two; a long-lived agent has thousands of requests. */
 const CONTEXT_PAGE_LIMIT_MAX = 100
@@ -263,6 +271,7 @@ export class OuroCore {
   private readonly notifier: Notifier
   readonly integrations: Integrations
   readonly peers: Peers
+  private readonly networkKeys: NetworkKeyFile
   private readonly baseUpdates: BaseUpdates
   private readonly sourceBackup: SourceBackupKeeper
   private readonly memory: Memory
@@ -362,12 +371,15 @@ export class OuroCore {
       log: config.log,
     })
     this.initializeMachine()
+    this.networkKeys = new NetworkKeyFile(config.paths.networkKeys)
     this.peers = new Peers({
       store: this.store,
       machineId: this.store.getMeta('machine_id')!,
       machineName: config.machineName,
+      ownerName: () => this.ownerName(),
       address: config.peerAddress,
       key: loadOrCreateMachineKey(config.paths.machineKey),
+      networkKeys: this.networkKeys,
       release: config.releaseId,
       now: () => config.clock.now(),
       commit: (body) => this.commit(body),
@@ -397,6 +409,8 @@ export class OuroCore {
       },
       moveCheckFromPeer: (peer, check) => this.moveCheckFromPeer(peer, check),
       moveFromPeer: (peer, move) => this.commit(() => this.moveFromPeer(peer, move)),
+      pullForPeer: (agentName) => this.pullForPeer(agentName),
+      memoryPushFromPeer: (_peer, push) => this.commit(() => this.memory.takeSharedNotes(push.projectKey, push.notes)),
       agentCards: (trust) => this.store.listUnarchivedAgents().map((agent) => this.agentCard(agent, trust)),
       claudePlan: () => claudePlanForPeers(this.planReadingKnown('claude'), (since) => this.planCostSince('claude', since), config.clock.now()),
       peerClaudePlanChanged: () => this.markPlanReadingChanged('claude'),
@@ -803,6 +817,7 @@ export class OuroCore {
   }
 
   private admissionFor(agent: AgentRow): WakeAdmission {
+    if (agent.pulled?.awaitingStart) return { kind: 'awaiting_start' }
     // Signed out holds every agent on the provider, not only the one that found out: the rest would only fail too.
     // Agents on another provider carry on.
     const account = this.accountOf(agent)
@@ -1419,7 +1434,245 @@ export class OuroCore {
       models: this.modelOptions(),
       limits: { agentLimit: this.agentLimit(), idleFoldMinutes: 60, budgetUsd: this.budgetUsd(), autoArchiveAfterHours: this.autoArchiveAfterHours(), replyReminders: this.replyRemindersOn() },
       planUsage: { claude: this.planUsageIfRead('claude'), chatgpt: this.planUsageIfRead('chatgpt') },
+      ownerName: this.ownerName(),
+      networks: this.store.listNetworks().map((network) => ({ id: network.id, name: network.name, kind: network.kind, role: network.role, addedAt: network.addedAt })),
     }
+  }
+
+  // Networks
+
+  /** The name this server gives its owner in shared networks: as set, or else the owner's name here. */
+  private ownerName(): string {
+    const set = this.store.getMeta(OWNER_NAME_KEY)
+    return set !== null && set !== '' ? set : this.store.ownerPerson()?.name ?? this.config.machineName
+  }
+
+  private requireOwner(caller: Caller): void {
+    if (caller.kind !== 'person' || !caller.person.isOwner) throw new CommandRefused('forbidden', "only the owner, from a phone, changes this server's networks")
+  }
+
+  /**
+   * Keeps a network's key here as `role`. A server's first private home key takes in the computers it trusted fully
+   * before networks: they live in it, and may speak without a signature until they sign once. Answers the computers left
+   * out, for the person to add or remove.
+   */
+  private holdNetwork(network: { key: string; name: string; kind: NetworkKind }, role: NetworkRole): { network: NetworkEntity; leftOut: string[]; replacedHome: string | null } {
+    const home = this.store.homeNetwork()
+    const refusal = holdingRefusal({ kind: network.kind, role }, this.heldHome())
+    if (refusal !== null) throw new CommandRefused('invalid_request', refusal)
+    const id = networkIdOf(network.key)
+    const held = this.store.networkById(id)
+    if (held?.role === 'home' && role === 'extra') throw new CommandRefused('invalid_request', "that is this server's home network")
+    const addedAt = held?.addedAt ?? this.config.clock.now()
+    // The key first: a network listed here always has its key. The home key it replaces is let go by the caller, last.
+    this.networkKeys.set(id, network.key)
+    this.store.saveNetwork({ id, name: network.name, kind: network.kind, role, addedAt })
+    const leftOut: string[] = []
+    if (role === 'home' && home === null) {
+      for (const peer of this.store.listPeers()) {
+        if (peer.networkId !== null) continue
+        if (network.kind === 'private' && peer.unkeyedAllowed) this.store.setPeerNetwork(peer.machineId, id)
+        else leftOut.push(peer.name)
+      }
+    }
+    return { network: { id, name: network.name, kind: network.kind, role, addedAt }, leftOut, replacedHome: role === 'home' && home !== null && home.id !== id ? home.id : null }
+  }
+
+  /** The key of a home network replaced: let go only after all else a command does has worked, since the key file isn't
+   * rolled back with the database. */
+  private letGoReplacedHome(held: { network: NetworkEntity; leftOut: string[]; replacedHome: string | null }): { network: NetworkEntity; leftOut: string[] } {
+    if (held.replacedHome !== null) this.networkKeys.delete(held.replacedHome)
+    return { network: held.network, leftOut: held.leftOut }
+  }
+
+  private commandCreateNetwork(caller: Caller, input: { name: string; kind: NetworkKind; role: NetworkRole }): { network: NetworkEntity; leftOut: string[] } {
+    this.requireOwner(caller)
+    return this.letGoReplacedHome(this.holdNetwork({ key: newNetworkKey(), name: input.name, kind: input.kind }, input.role))
+  }
+
+  private commandJoinNetwork(caller: Caller, input: { role: NetworkRole; kind: NetworkKind }, prepared: PreparedChecks): { network: NetworkEntity; leftOut: string[] } {
+    this.requireOwner(caller)
+    const joined = prepared.joinedNetwork
+    if (joined === null) throw new CommandRefused('invalid_request', 'joining a network needs the inviting server to answer first')
+    const refusal = joinedKindRefusal(input.kind, joined.network.kind)
+    if (refusal !== null) throw new CommandRefused('forbidden', refusal)
+    const held = this.holdNetwork(joined.network, input.role)
+    this.peers.admitInviter(joined, held.network.id)
+    return this.letGoReplacedHome(held)
+  }
+
+  private commandRemoveNetwork(caller: Caller, input: { networkId: string }): Record<string, never> {
+    this.requireOwner(caller)
+    const network = this.store.networkById(input.networkId)
+    if (!network) throw new CommandRefused('not_found', 'this server holds no key for that network')
+    if (network.role === 'home') throw new CommandRefused('invalid_request', 'a home key is replaced by another, not removed')
+    this.peers.forgetNetwork(network.id)
+    this.store.deleteNetwork(network.id)
+    this.networkKeys.delete(network.id)
+    return {}
+  }
+
+  private commandSetOwnerName(caller: Caller, input: { name: string }): { server: ServerEntity } {
+    this.requireOwner(caller)
+    this.store.setMeta(OWNER_NAME_KEY, input.name)
+    this.store.markChanged('server', 'server')
+    return { server: this.serverEntity() }
+  }
+
+  private sharesMemoryWithPeer(peer: PeerRow): boolean {
+    return sharesMemoryWith(peer, this.heldHome())
+  }
+
+  /** This server's home network as the network decisions take it, without its name or invite. */
+  private heldHome(): HeldNetwork | null {
+    return this.peers.homeNetwork()
+  }
+
+  /** A copy of an agent here, for a server pulling it: as a move would carry it, but without what waits for it or memory. */
+  private pullForPeer(agentName: string): PeerMove | null {
+    const agent = this.store.activeAgentByName(agentName)
+    if (!agent) return null
+    const copy = this.handoffOf(agent, agent.lifecycle.ownershipEpoch)
+    return { ...copy, moveId: `pull:${copy.moveId}:${randomUUID()}`, waiting: [], memory: null }
+  }
+
+  /**
+   * A copy pulled from a shared network becomes an agent here, paused and labelled: nothing wakes it until it is started,
+   * and then it wakes on the note telling it where it came from.
+   * Shaped by others, it gets nothing it names for itself here: its folder is pulled/<its name> under the default projects
+   * folder, whatever the other server said, and its goal, if any, is paused.
+   */
+  private commandPullAgent(caller: Caller, input: { name: string | null }, prepared: PreparedChecks): { agent: AgentEntity } {
+    if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner and agents pull agents')
+    const pulled = prepared.pulledCopy
+    if (pulled === null) throw new CommandRefused('invalid_request', 'pulling an agent needs its computer to answer first')
+    const { peer, copy } = pulled
+    const name = (input.name ?? '').trim() || copy.agent.name
+    if (!AGENT_NAME_PATTERN.test(name)) throw new CommandRefused('invalid_request', `"${name}" isn't a valid agent name`)
+    const refusal = this.whyNotTake(name)
+    if (refusal !== null) throw new CommandRefused('agent_name_taken', `${refusal}: give the copy another name`)
+    const now = this.config.clock.now()
+    const folder = join(this.config.defaultFolder, PULLED_FOLDER, name)
+    const from = `${copy.agent.name}@${peer.name}`
+    const network = peer.networkId === null ? null : this.store.networkById(peer.networkId)
+    const owner = addressOfCaller(caller)
+    const { agent, conversationCame } = this.installArrivingAgent(copy, {
+      name,
+      folder,
+      parent: owner,
+      createdBy: caller.kind === 'agent' ? caller.agent.createdBy : owner,
+      createdAt: now,
+      ownershipEpoch: 1,
+      // Its instructions were another person's server's to give: a copy runs on this server's rules alone.
+      instructions: null,
+      goal: (goal, agentId) => ({
+        ...newGoal({ agentId, text: goal.text, kind: goal.kind, intervalSeconds: goal.chosenIntervalSeconds, setBy: owner, now }),
+        cycleCount: goal.cycleCount,
+        progress: { status: 'paused', by: owner, reason: `pulled from ${from}`, at: now },
+      }),
+    })
+    this.store.setAgentPulled(agent.id, { from, network: network?.name ?? peer.name, at: now, awaitingStart: true })
+    this.postDirect({
+      from: SYSTEM_ADDRESS, fromAgentId: null, toAgent: agent, purpose: 'system_notice', wake: 'wake', clientKey: null, answersAskId: null, relayedBy: null, attachments: [],
+      text: `You are a copy of ${from}, pulled from the network ${network?.name ?? peer.name} to ${this.config.machineName} by ${owner}. ${conversationCame ? 'Your conversation came with you' : 'Your conversation could not come with you'}; your files did not. Your folder is ${folder} on ${this.config.machineName}. The original is still on ${peer.name} and doesn't know about you. Your address is ${name}@${this.config.machineName}. This note needs no reply: to tell ${owner} something, use ouro send ${owner}.`,
+    })
+    return { agent: this.agentEntityOf(this.requireAgentRow(agent.id)) }
+  }
+
+  /**
+   * An agent arriving from another computer, moved or pulled: its conversation written where it will run (when it ran on
+   * the runtime it will run on here), the agent kept stopped, its goal as `goal` makes it, and its goal notes. Refused,
+   * with nothing kept, when its conversation can't be written.
+   */
+  private installArrivingAgent(arriving: PeerMove, placed: {
+    name: string
+    folder: string
+    parent: string
+    createdBy: string
+    createdAt: number
+    ownershipEpoch: number
+    instructions: StandingInstructions | null
+    goal: (goal: NonNullable<PeerMove['goal']>, agentId: string) => GoalRecord
+  }): { agent: AgentRow; conversationCame: boolean } {
+    const now = this.config.clock.now()
+    const agentId = shortId()
+    const runtime = runtimeOf(launchModelFor(arriving.agent.model, { openrouter: this.openrouterConfigured() }).model.provider)
+    const conversation = arriving.conversation !== null && arriving.conversation.runtime === runtime ? arriving.conversation : null
+    if (conversation) {
+      const files = conversation.files.map((file) => ({ path: file.path, content: Buffer.from(file.contentBase64, 'base64') }))
+      try {
+        installConversation(runtime, { providerSessionId: conversation.providerSessionId, ranIn: conversation.ranIn, files }, placed.folder, this.conversationStoresOf(agentId))
+      } catch (error) {
+        throw new CommandRefused('invalid_request', `its conversation couldn't be written here: ${(error as Error).message}`)
+      }
+    }
+    this.store.insertAgent({
+      id: agentId,
+      name: placed.name,
+      task: arriving.agent.task,
+      folder: placed.folder,
+      model: arriving.agent.model,
+      parent: placed.parent,
+      createdBy: placed.createdBy,
+      createdAt: placed.createdAt,
+      // It has run before, on the other computer: its next launch continues its conversation, or starts one seeded from
+      // what's stored here.
+      lifecycle: { state: { state: 'stopped', since: now, stopped: { reason: 'idle' } }, instanceGeneration: 1, consecutiveCrashes: 0, consecutiveCreditFailures: 0, ownershipEpoch: placed.ownershipEpoch, consecutiveStalls: 0 },
+      credentialHash: hashSecret(randomUUID()),
+      // Files go by git, not by worktree: here it works in the folder it is given.
+      worktree: null,
+      promptCacheLifetime: arriving.agent.promptCacheLifetime,
+      instructions: placed.instructions,
+    })
+    if (conversation) this.store.updateAgentFields(agentId, { providerSessionId: conversation.providerSessionId })
+    if (arriving.goal) this.store.saveGoal(placed.goal(arriving.goal, agentId))
+    if (arriving.goalNotes !== '') {
+      mkdirSync(this.config.paths.agentDir(agentId), { recursive: true })
+      writeFileSync(this.goalNotesPath(agentId), arriving.goalNotes)
+    }
+    return { agent: this.requireAgentRow(agentId), conversationCame: conversation !== null }
+  }
+
+  private commandStartPulledAgent(caller: Caller, input: { agentId: string }): { agent: AgentEntity } {
+    if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner and agents start pulled agents')
+    const agent = this.requireAgentRow(input.agentId)
+    if (!agent.pulled?.awaitingStart) throw new CommandRefused('invalid_request', `${agent.name} isn't a pulled copy waiting to start`)
+    this.store.setAgentPulled(agent.id, { ...agent.pulled, awaitingStart: false })
+    // Started is running: it wakes on the note on where it came from, and takes anything that waited for it.
+    this.settleAgent(agent.id)
+    return { agent: this.agentEntityOf(this.requireAgentRow(agent.id)) }
+  }
+
+  /** An address as a peer writes it, as this server writes it: see addressFromPeer. Its owner is this server's `human`
+   * only in a private network; in a shared one, a person of their own. */
+  private addressFromPeerHere(peer: PeerRow, address: string): string {
+    if (address !== OWNER_ADDRESS) return addressFromPeer(address, peer.name, this.config.machineName)
+    return this.personFromPeer(peer)
+  }
+
+  /** Who a peer's owner is here, kept or not yet: see ownerAddressFrom. */
+  private ownerAddressOf(peer: PeerRow): string {
+    // A name is someone's here when a person has it (this server's owner, one invited here, or another server's owner,
+    // removed or not), or this server's owner goes by it in shared networks.
+    const taken = (name: string) => this.store.personByName(name) !== null || name === this.ownerName()
+    return ownerAddressFrom(peer, this.heldHome(), this.store.personFromMachine(peer.machineId)?.address ?? null, taken)
+  }
+
+  /** A peer's owner, as a person here: in a shared network, someone of their own, kept by their server's machine id the
+   * first time they speak, as one invited here would be. */
+  private personFromPeer(peer: PeerRow): string {
+    const address = this.ownerAddressOf(peer)
+    const parsed = parseAddress(address)
+    if (address === OWNER_ADDRESS || parsed.kind !== 'person' || this.store.personFromMachine(peer.machineId)) return address
+    this.store.insertPerson({ id: randomUUID(), name: parsed.person, address, isOwner: false, joinedAt: this.config.clock.now() }, peer.machineId)
+    return address
+  }
+
+  /** The peer's owner talked to this agent from there, so its side of the chat goes there too: unless this server never
+   * contacts that peer, and then it stays here. */
+  private noteOwnerChatPeer(agentId: string, peer: PeerRow): void {
+    if (this.peers.signingFor(peer).kind === 'never') return
+    this.store.addOwnerChatPeer(agentId, peer.machineId, this.config.clock.now())
   }
 
   private planUsageIfRead(account: PlanAccount): PlanUsage | null {
@@ -1845,6 +2098,33 @@ export class OuroCore {
       if (!input.success || (input.data.name ?? '').trim() !== '') return nothing
       return { ...nothing, agentName: { kind: 'suggested', suggestion: await this.suggestAgentName(input.data.task, input.data.model ?? this.config.defaultModel) } }
     }
+    if (name === 'pull_agent') {
+      const input = commands.pull_agent.input.safeParse(rawInput)
+      if (!input.success) return nothing
+      if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner and agents pull agents')
+      return { ...nothing, pulledCopy: await this.peers.pull(input.data.remoteAgentId) }
+    }
+    if (name === 'push_memory') {
+      const input = commands.push_memory.input.safeParse(rawInput)
+      if (!input.success) return nothing
+      if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner and agents push memory')
+      const folder = input.data.folder ?? (caller.kind === 'agent' ? caller.agent.folder : null)
+      if (folder === null) throw new CommandRefused('invalid_request', "name the project's folder")
+      const project = this.memory.projectMemoryOf(folder)
+      if (!project) throw new CommandRefused('invalid_request', `${folder} isn't a project with memory`)
+      const notes = this.memory.sharedNotesOf(project)
+      await this.peers.pushMemory(input.data.computerId, { projectKey: project.projectKey, notes })
+      return { ...nothing, memoryPushed: notes.length }
+    }
+    if (name === 'join_network') {
+      const input = commands.join_network.input.safeParse(rawInput)
+      if (!input.success) return nothing
+      this.requireOwner(caller)
+      // Before the invite is traded: a join this server would refuse anyway mustn't use it up.
+      const refusal = holdingRefusal({ kind: input.data.kind, role: input.data.role }, this.heldHome())
+      if (refusal !== null) throw new CommandRefused('invalid_request', refusal)
+      return { ...nothing, joinedNetwork: await this.peers.askToJoinNetwork(input.data.address, input.data.code, input.data.role, input.data.kind) }
+    }
     if (name === 'join_computer') {
       const input = commands.join_computer.input.safeParse(rawInput)
       return input.success ? { ...nothing, joinedHost: await this.peers.askToJoin(input.data.address, input.data.code) } : nothing
@@ -1963,6 +2243,22 @@ export class OuroCore {
       case 'ask': return this.commandAsk(caller, input as never, idempotencyKey)
       case 'withdraw_ask': return this.commandWithdrawAsk(caller, input as never)
       case 'sync_memory': return this.commandSyncMemory(caller)
+      case 'create_network': return this.commandCreateNetwork(caller, input as never)
+      case 'pull_agent': return this.commandPullAgent(caller, input as never, prepared)
+      case 'start_pulled_agent': return this.commandStartPulledAgent(caller, input as never)
+      case 'push_memory': {
+        // Its whole effect is on the other server, sent before this transaction as a control of an agent there is: nothing
+        // here changes, so this only answers, and a retry with the same key answers the same without sending again.
+        if (prepared.memoryPushed === null) throw new CommandRefused('invalid_request', 'pushing memory needs the other computer to answer first')
+        return { notes: prepared.memoryPushed }
+      }
+      case 'create_network_invite': {
+        this.requireOwner(caller)
+        return this.peers.createNetworkInvite((input as { networkId: string }).networkId)
+      }
+      case 'join_network': return this.commandJoinNetwork(caller, input as never, prepared)
+      case 'remove_network': return this.commandRemoveNetwork(caller, input as never)
+      case 'set_owner_name': return this.commandSetOwnerName(caller, input as never)
       case 'create_computer_invite': return this.requireComputerManager(caller, () => this.peers.createInvite())
       case 'join_computer': return this.requireComputerManager(caller, () => {
         if (prepared.joinedHost === null) throw new CommandRefused('invalid_request', 'joining needs the other computer to answer first')
@@ -2016,20 +2312,23 @@ export class OuroCore {
     return { agent: this.agentEntityOf(this.requireAgentRow(agentId)) }
   }
 
-  /** A fully trusted peer starts an agent here as the owner would, the owner being the same person there; its parent is
-   * the sender, as written here. A retry with the same key answers as the first did. */
+  /** One of the owner's own computers starts an agent here as the owner would, the owner being the same person there (see
+   * peerMay); its parent is the sender, as written here. A retry with the same key answers as the first did. */
   private async createAgentFromPeer(peer: PeerRow, request: PeerCreateAgent): Promise<PeerCreateAgentResult> {
     const callerKey = `peer:${peer.machineId}`
     const asksForName = (request.name ?? '').trim() === '' && !this.store.idempotentResult(callerKey, request.idempotencyKey)
     const nameSuggestion = asksForName ? await this.suggestAgentName(request.task, request.model ?? this.config.defaultModel) : NO_NAME_SUGGESTION
-    const parent = request.from.kind === 'owner' ? OWNER_ADDRESS : `${request.from.name}@${peer.name}`
+    // As anywhere a peer's owner is named: always this server's owner here, since only the owner's own computers start agents.
+    const person = this.ownerAddressOf(peer)
+    const parent = request.from.kind === 'owner' ? person : `${request.from.name}@${peer.name}`
     try {
       return this.commit(() => {
         const earlier = this.store.idempotentResult(callerKey, request.idempotencyKey)
         if (earlier) return JSON.parse(earlier.resultJson) as PeerCreateAgentResult
+        this.personFromPeer(peer)
         // Files don't travel between computers yet, so a request from one names none.
-        const agentId = this.startAgent({ ...request, attachmentIds: [] }, `${callerKey}:${request.idempotencyKey}`, { parent, createdBy: OWNER_ADDRESS, parentAgentId: null, folder: request.folder ?? this.config.defaultFolder }, nameSuggestion)
-        if (request.from.kind === 'owner') this.store.addOwnerChatPeer(agentId, peer.machineId, this.config.clock.now())
+        const agentId = this.startAgent({ ...request, attachmentIds: [] }, `${callerKey}:${request.idempotencyKey}`, { parent, createdBy: person, parentAgentId: null, folder: request.folder ?? this.config.defaultFolder }, nameSuggestion)
+        if (request.from.kind === 'owner') this.noteOwnerChatPeer(agentId, peer)
         const result: PeerCreateAgentResult = { outcome: 'created', agent: this.agentCard(this.requireAgentRow(agentId), 'full') }
         this.store.saveIdempotentResult(callerKey, request.idempotencyKey, 'create_agent', hashSecret(JSON.stringify(request)), JSON.stringify(result), this.config.clock.now())
         return result
@@ -2141,18 +2440,18 @@ export class OuroCore {
     this.store.updateAgentFields(post.fromAgent.id, { lastActivityAt: now })
     this.markUnreadChanged(chatId)
     this.pendingEffects.push({ effect: 'push_message', messageId: message.id, skipPushTokenHashes: [] })
-    if (post.to.isOwner) this.copyToOwnerChatPeers(post.fromAgent, message)
+    this.copyToOwnerChatPeers(post.fromAgent, message, post.to.address)
     return message
   }
 
   /** The person's other computers they talked to this agent from show its side of the chat too. Files don't go to other
    * computers yet, so a message of files alone isn't copied; a peer too old to take it is skipped. */
-  private copyToOwnerChatPeers(agent: AgentRow, message: MessageRow): void {
+  private copyToOwnerChatPeers(agent: AgentRow, message: MessageRow, person: string): void {
     if (message.text.trim() === '' || (message.purpose !== 'message' && message.purpose !== 'done_report')) return
     const asked = message.posesAskId === null ? null : this.store.openAskById(message.posesAskId)
     const senderPushTokenHashes = this.ownerPushTokenHashes()
     const asMessage: PeerOwnerMessage = { messageId: message.id, from: agent.name, text: message.text, purpose: message.purpose, sentAt: message.at, senderPushTokenHashes }
-    for (const peer of this.ownerChatPeersSpeaking(agent.id, PEER_OWNER_MESSAGES_PROTOCOL)) {
+    for (const peer of this.ownerChatPeersSpeaking(agent.id, PEER_OWNER_MESSAGES_PROTOCOL, person)) {
       const recipient = `${OWNER_ADDRESS}@${peer.name}`
       // A peer that takes asks gets the ask with its message; an older one gets the message alone.
       if (asked && (peer.hello?.protocol ?? 0) >= PEER_OWNER_ASKS_PROTOCOL) {
@@ -2170,10 +2469,11 @@ export class OuroCore {
     return owner ? this.store.pushTargetsOf(owner.id).map((target) => pushTokenHash(target.registration.token)) : []
   }
 
-  private ownerChatPeersSpeaking(agentId: string, protocol: number): PeerRow[] {
+  /** The computers whose owner is `person` here and talked to this agent from there, and that this server contacts. */
+  private ownerChatPeersSpeaking(agentId: string, protocol: number, person: string = OWNER_ADDRESS): PeerRow[] {
     return this.store.ownerChatPeersOf(agentId)
       .map((machineId) => this.store.peerById(machineId))
-      .filter((peer): peer is PeerRow => peer !== null && (peer.hello?.protocol ?? 0) >= protocol)
+      .filter((peer): peer is PeerRow => peer !== null && (peer.hello?.protocol ?? 0) >= protocol && this.ownerAddressOf(peer) === person && this.peers.signingFor(peer).kind !== 'never')
   }
 
   /** Snoozes an ask here, or ends its snooze, and tells the person's other computers that have it. `remindNow`: the end is
@@ -2191,7 +2491,8 @@ export class OuroCore {
   private askSnoozeFromPeer(peer: PeerRow, request: PeerAskSnooze): PeerAskSnoozeResult {
     const ask = this.store.openAskById(request.askId)
     if (!ask) return { outcome: 'refused', code: 'ask_closed', message: 'that question is already closed' }
-    const shownThere = ask.source.kind === 'agent' && this.store.personByAddress(ask.to)?.isOwner === true && this.store.ownerChatPeersOf(ask.agentId).includes(peer.machineId)
+    // Only the owner's own computers: another person's server talks to the agent too, but the question isn't theirs.
+    const shownThere = ask.source.kind === 'agent' && this.store.personByAddress(ask.to)?.isOwner === true && this.ownerAddressOf(peer) === OWNER_ADDRESS && this.store.ownerChatPeersOf(ask.agentId).includes(peer.machineId)
     if (!shownThere) return { outcome: 'refused', code: 'not_found', message: 'no such question for that computer' }
     let snooze: AskSnooze | null
     try {
@@ -2293,6 +2594,7 @@ export class OuroCore {
   private sendToPeer(caller: Caller, to: { agentName: string; machine: string }, text: string, attachments: AttachmentRef[], wake: DeliveryWake, answersAskId: string | null, clientKey: string, purpose: MessagePurpose): MessageRow {
     const peer = this.store.peerByName(to.machine)
     if (!peer) throw new CommandRefused('not_found', `no computer called ${to.machine}. See: ouro computers`)
+    this.peers.requireReachable(peer)
     if (attachments.length > 0) throw new CommandRefused('invalid_request', 'files to other computers are not supported yet')
     if (purpose !== 'message' && purpose !== 'done_report') throw new CommandRefused('invalid_request', `a ${purpose} can't go to another computer`)
     if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', "only the owner and agents message other computers")
@@ -2334,7 +2636,8 @@ export class OuroCore {
     return { name: agent.name, activity: working ? 'running' : 'waiting', details }
   }
 
-  /** A fully trusted peer acts on an agent here as the owner would, the owner being the same person there. */
+  /** One of the owner's own computers acts on an agent here as the owner would, the owner being the same person there: only
+   * those may (see peerMay), never another person's server in a shared network. */
   private controlFromPeer(peer: PeerRow, control: PeerControl): PeerControlResult {
     const agent = this.store.activeAgentByName(control.agentName)
     if (!agent) return { outcome: 'refused', code: 'not_found', message: `no agent named ${control.agentName} here` }
@@ -2355,16 +2658,19 @@ export class OuroCore {
     if (this.store.messageById(message.messageId)) return { outcome: 'accepted' }
     const toAgent = this.store.activeAgentByName(message.to)
     if (!toAgent) return { outcome: 'undeliverable', reason: this.whyNoAgentHere(message.to) }
-    const from = message.from.kind === 'owner' ? OWNER_ADDRESS : `${message.from.name}@${peer.name}`
-    const senderKey: ParticipantKey = message.from.kind === 'owner' ? `person:${OWNER_ADDRESS}` : `remote:${from}`
-    if (message.from.kind === 'owner') this.store.addOwnerChatPeer(toAgent.id, peer.machineId, this.config.clock.now())
-    // An answer to an ask that closed meanwhile still arrives, as a plain message; it closes nothing else.
-    const answered = message.from.kind === 'owner' && message.answersAskId !== null ? this.store.openAskById(message.answersAskId) : null
+    const fromOwner = message.from.kind === 'owner'
+    const person = fromOwner ? this.personFromPeer(peer) : this.ownerAddressOf(peer)
+    const from = message.from.kind === 'owner' ? person : `${message.from.name}@${peer.name}`
+    const senderKey: ParticipantKey = fromOwner ? `person:${person}` : `remote:${from}`
+    if (fromOwner) this.noteOwnerChatPeer(toAgent.id, peer)
+    // An answer to an ask that closed meanwhile still arrives, as a plain message; it closes nothing else. Only this
+    // server's owner answers its asks from elsewhere.
+    const answered = fromOwner && person === OWNER_ADDRESS && message.answersAskId !== null ? this.store.openAskById(message.answersAskId) : null
     const answersAskId = answered !== null && answered.agentId === toAgent.id ? answered.id : null
     this.postDirectWithId(message.messageId, senderKey, { from, fromAgentId: null, toAgent, text: message.text, attachments: [], purpose: message.purpose, wake: message.wake, clientKey: null, answersAskId, relayedBy: null })
     if (message.wake === 'wake') this.requestWake(toAgent.id, 'new_message')
     this.settleAgent(toAgent.id)
-    if (message.from.kind === 'owner' && (message.answersAskId === null || answersAskId !== null)) this.closeAsksAnsweredBy(toAgent.name, answersAskId)
+    if (fromOwner && person === OWNER_ADDRESS && (message.answersAskId === null || answersAskId !== null)) this.closeAsksAnsweredBy(toAgent.name, answersAskId)
     return { outcome: 'accepted' }
   }
 
@@ -2395,6 +2701,8 @@ export class OuroCore {
         continue
       }
       const move = this.handoffOf(agent, state.ownershipEpoch)
+      // Memory goes into a shared network only when pushed on purpose.
+      if (!this.sharesMemoryWithPeer(peer)) move.memory = null
       this.handoffsInFlight.add(agent.id)
       void this.peers.handOver(peer, move)
         .then((outcome) => this.commit(() => {
@@ -2527,7 +2835,7 @@ export class OuroCore {
   /** A fully trusted peer hands an agent over. Taken once, by the handoff's id: sent again, it is answered as before, and
    * any message that arrived there meanwhile comes too. */
   private moveFromPeer(peer: PeerRow, move: PeerMove): PeerMoveResult {
-    const here = (address: string) => addressFromPeer(address, peer.name, this.config.machineName)
+    const here = (address: string) => this.addressFromPeerHere(peer, address)
     const taken = this.store.moveTaken(move.moveId)
     if (taken) {
       if (taken.fromMachineId !== peer.machineId) return { outcome: 'refused', reason: 'that handoff came from another computer' }
@@ -2538,51 +2846,31 @@ export class OuroCore {
     const refusal = this.whyNotTake(move.agent.name)
     if (refusal !== null) return { outcome: 'refused', reason: refusal }
     const now = this.config.clock.now()
-    const agentId = shortId()
     const folder = move.agent.folder.kind === 'in_default_folder' ? join(this.config.defaultFolder, move.agent.folder.relativePath) : move.agent.folder.path
-    const runtime = runtimeOf(launchModelFor(move.agent.model, { openrouter: this.openrouterConfigured() }).model.provider)
-    const conversation = move.conversation !== null && move.conversation.runtime === runtime ? move.conversation : null
-    if (conversation) {
-      const files = conversation.files.map((file) => ({ path: file.path, content: Buffer.from(file.contentBase64, 'base64') }))
-      try {
-        installConversation(runtime, { providerSessionId: conversation.providerSessionId, ranIn: conversation.ranIn, files }, folder, this.conversationStoresOf(agentId))
-      } catch (error) {
-        return { outcome: 'refused', reason: `its conversation couldn't be written here: ${(error as Error).message}` }
-      }
-    }
-    this.store.insertAgent({
-      id: agentId,
-      name: move.agent.name,
-      task: move.agent.task,
-      folder,
-      model: move.agent.model,
-      parent: here(move.agent.parent),
-      createdBy: here(move.agent.createdBy),
-      createdAt: move.agent.createdAt,
-      // It has run before, on the other computer: its next launch continues its conversation, or starts one seeded from
-      // what's stored here.
-      lifecycle: { state: { state: 'stopped', since: now, stopped: { reason: 'idle' } }, instanceGeneration: 1, consecutiveCrashes: 0, consecutiveCreditFailures: 0, ownershipEpoch: move.agent.ownershipEpoch, consecutiveStalls: 0 },
-      credentialHash: hashSecret(randomUUID()),
-      // Files go by git, not by worktree: here it works in the folder it is given.
-      worktree: null,
-      promptCacheLifetime: move.agent.promptCacheLifetime,
-      instructions: move.agent.instructions,
-    })
-    if (conversation) this.store.updateAgentFields(agentId, { providerSessionId: conversation.providerSessionId })
-    if (move.goal) {
-      const goal = newGoal({ agentId, text: move.goal.text, kind: move.goal.kind, intervalSeconds: move.goal.chosenIntervalSeconds, setBy: here(move.goal.setBy), now })
-      this.store.saveGoal({
-        ...goal,
-        setAt: move.goal.setAt,
-        cycleCount: move.goal.cycleCount,
-        costUsd: move.goal.costUsd,
-        progress: move.goal.paused ? { status: 'paused', by: OWNER_ADDRESS, reason: `paused on ${peer.name}`, at: now } : { status: 'active' },
+    let installed: { agent: AgentRow; conversationCame: boolean }
+    try {
+      installed = this.installArrivingAgent(move, {
+        name: move.agent.name,
+        folder,
+        parent: here(move.agent.parent),
+        createdBy: here(move.agent.createdBy),
+        createdAt: move.agent.createdAt,
+        ownershipEpoch: move.agent.ownershipEpoch,
+        // Its standing instructions travel with it.
+        instructions: move.agent.instructions,
+        goal: (goal, agentId) => ({
+          ...newGoal({ agentId, text: goal.text, kind: goal.kind, intervalSeconds: goal.chosenIntervalSeconds, setBy: here(goal.setBy), now }),
+          setAt: goal.setAt,
+          cycleCount: goal.cycleCount,
+          costUsd: goal.costUsd,
+          progress: goal.paused ? { status: 'paused', by: OWNER_ADDRESS, reason: `paused on ${peer.name}`, at: now } : { status: 'active' },
+        }),
       })
+    } catch (error) {
+      if (error instanceof CommandRefused) return { outcome: 'refused', reason: error.message }
+      throw error
     }
-    if (move.goalNotes !== '') {
-      mkdirSync(this.config.paths.agentDir(agentId), { recursive: true })
-      writeFileSync(this.goalNotesPath(agentId), move.goalNotes)
-    }
+    const agentId = installed.agent.id
     if (move.memory) this.memory.takeSharedNotes(move.memory.projectKey, move.memory.notes)
     this.store.recordMoveTaken(move.moveId, peer.machineId, agentId, now)
     this.store.reparentAgents(`${move.agent.name}@${peer.name}`, move.agent.name)
@@ -2590,7 +2878,7 @@ export class OuroCore {
     this.repinEverywhere({ kind: 'remote_agent', address: `${move.agent.name}@${peer.name}` }, { kind: 'agent', agentId })
     const agent = this.requireAgentRow(agentId)
     this.takeWaiting(agent, move.waiting, here)
-    const carried = conversation ? 'Your conversation came with you' : 'Your conversation could not come with you, so this is a new one, with your recent messages below'
+    const carried = installed.conversationCame ? 'Your conversation came with you' : 'Your conversation could not come with you, so this is a new one, with your recent messages below'
     this.postDirect({
       from: SYSTEM_ADDRESS, fromAgentId: null, toAgent: agent, purpose: 'system_notice', wake: 'wake', clientKey: null, answersAskId: null, relayedBy: null, attachments: [],
       text: `You were moved from ${peer.name} to ${this.config.machineName}. ${carried}; your files did not. Your folder is now ${folder} on ${this.config.machineName}: if your work is in git, fetch it here. Your address is ${agent.name}@${this.config.machineName}, and messages to ${agent.name}@${peer.name} are forwarded to you. Continue where you left off; if something you need stayed behind, say so.`,
@@ -2630,7 +2918,11 @@ export class OuroCore {
     const parsed = parseAddress(address)
     if (parsed.kind === 'agent') {
       if (parsed.machine !== null && parsed.machine !== this.config.machineName) {
-        if (!this.store.peerByName(parsed.machine)) throw new CommandRefused('not_found', `no computer called ${parsed.machine}. See: ouro computers`)
+        const peer = this.store.peerByName(parsed.machine)
+        if (!peer) throw new CommandRefused('not_found', `no computer called ${parsed.machine}. See: ouro computers`)
+        // A group's members all live in its home server's network: one elsewhere could never post to it.
+        const signing = this.peers.signingFor(peer)
+        if (signing.kind === 'never' || (signing.kind === 'keyed' && signing.visiting)) throw new CommandRefused('forbidden', `${parsed.machine} is outside ${this.config.machineName}'s network, so it can't be in a group here`)
         return `${parsed.agentName}@${parsed.machine}`
       }
       return this.recipientAgent(parsed.agentName).name
@@ -2787,7 +3079,7 @@ export class OuroCore {
   private groupUpdateFromPeer(peer: PeerRow, update: PeerGroupUpdate): PeerMessageResult {
     const existing = this.store.chatEntity(update.group.chatId)
     if (existing && existing.homeMachine !== peer.name) return { outcome: 'undeliverable', reason: `that group's home here is ${existing.homeMachine}, not ${peer.name}` }
-    const here = (address: string) => addressFromPeer(address, peer.name, this.config.machineName)
+    const here = (address: string) => this.addressFromPeerHere(peer, address)
     const { group } = update
     this.store.saveGroupCopy({ id: group.chatId, title: group.title, createdBy: here(group.createdBy), createdAt: group.createdAt, homeMachine: peer.name, members: group.members.map((member) => ({ address: here(member.address), joinedAt: member.joinedAt })) })
     if (update.post === null) return { outcome: 'accepted' }
@@ -2815,7 +3107,7 @@ export class OuroCore {
     const chat = this.store.chatEntity(post.chatId)
     if (!chat || chat.kind !== 'group' || chat.homeMachine !== this.config.machineName) return { outcome: 'undeliverable', reason: `no such group on ${this.config.machineName}` }
     if (this.store.messageById(post.messageId)) return { outcome: 'accepted' }
-    const from = post.from.kind === 'owner' ? OWNER_ADDRESS : `${post.from.name}@${peer.name}`
+    const from = post.from.kind === 'owner' ? this.ownerAddressOf(peer) : `${post.from.name}@${peer.name}`
     if (!chat.members.some((member) => member.address === from)) return { outcome: 'undeliverable', reason: `${from} is not a member of ${chatHandle(chat)}` }
     this.postToGroupAtHome(chat, { messageId: post.messageId, from, text: post.text, attachments: [], clientKey: null })
     return { outcome: 'accepted' }
@@ -3499,6 +3791,12 @@ export interface PreparedChecks {
   goalCheck: GoalCheckOutcome
   /** join_computer: the machine that took this one in, as it answered. */
   joinedHost: PeerIdentity | null
+  /** pull_agent: the copy, and the server it came from. */
+  pulledCopy: { peer: PeerRow; copy: PeerMove } | null
+  /** push_memory: how many notes went. */
+  memoryPushed: number | null
+  /** join_network: the key and inviting server, as it answered. */
+  joinedNetwork: PeerNetworkJoinResult | null
   /** control_remote_agent and create_remote_agent: the agent as its computer answered, after the action or made. */
   remoteAgentAnswer: { computerId: string; card: PeerAgentCard } | null
   /** move_agent: the other computer said it would take the agent. */
@@ -3514,6 +3812,9 @@ export interface PreparedChecks {
 const NOTHING_PREPARED: PreparedChecks = {
   goalCheck: { kind: 'not_needed' },
   joinedHost: null,
+  joinedNetwork: null,
+  pulledCopy: null,
+  memoryPushed: null,
   remoteAgentAnswer: null,
   moveTargetReady: false,
   planUsageRead: { kind: 'not_needed' },
