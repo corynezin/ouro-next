@@ -17,6 +17,17 @@ export type BaseUpdateRecord =
 
 export const NO_BASE_UPDATE: BaseUpdateRecord = { state: 'idle' }
 
+/**
+ * A failed or conflicting update to a base the source has since taken some other way (merged by hand, or a later base
+ * that carries it): it says nothing true any more, and its merge beside the source is left over. Null: the record stands.
+ * An update under way, or a conflict an agent is resolving, is never overtaken: each is followed to its end.
+ */
+export function overtakenBase(record: BaseUpdateRecord, integrated: number | null): number | null {
+  if (integrated === null) return null
+  if (record.state !== 'failed' && !(record.state === 'conflict' && record.resolver === null)) return null
+  return record.n <= integrated ? record.n : null
+}
+
 export function baseUpdateOf(record: BaseUpdateRecord): BaseUpdate {
   switch (record.state) {
     case 'idle': return { state: 'idle' }
