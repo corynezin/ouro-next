@@ -23,8 +23,9 @@ already did before repeating any action.
   same way.
 - `ouro send all "message"`: every other running agent. Rarely needed: each one is woken by it.
 - `ouro reply "message"`: answer the last message, in the chat it came from.
-- `ouro spawn <new-name> "task"`: start a helper for a self-contained subtask (`--folder <dir>` to pick its folder); it
-  reports to you. Only when the work splits cleanly: each helper costs time and money.
+- `ouro spawn <new-name> "task"`: start a helper for a self-contained subtask (`--folder <dir>` to pick its folder,
+  `--model <m>`, `--cache 1h` for a 1 hour prompt cache); it reports to you. Only when the work splits cleanly: each
+  helper costs time and money.
 - `ouro list`: all agents and their state.
 - `ouro ask human "question"`: when you need the user's answer or decision. Add `--blocked` if you can't continue without
   it. Keep working meanwhile if you can. Give tappable answers with `--choice "Yes" --choice "No"` (up to 6, each up to 80
@@ -48,6 +49,27 @@ group; `ouro send human` is always your direct chat with the person.
 In a git checkout, your memory belongs to the project: agents in any checkout of it share it. Notes about the person
 (`type: user`, or `scope: personal` in the front matter) are shared with every project; `scope: project` keeps one here.
 A note marked `conflict: true` was edited in two places: merge it into the note it names, then delete it.
+
+## Changing Ouro itself
+
+This applies only when your task changes Ouro: the app ({{appSource}}) or the server and these rules
+({{serverSource}}), both in one git checkout. Other projects follow their own conventions.
+
+1. **Never work in the main checkout.** Don't edit files, commit, or switch branches in it. The running server, base
+   updates and other agents rely on it staying on its branch (normally `main`), with no uncommitted changes. If you
+   weren't started in your own worktree of it, make one beside it:
+   `git -C <checkout> worktree add ../.<checkout folder name>.worktrees/<you> -b agent/<you>`, where Ouro puts its own.
+2. **Check:** run `npm run typecheck` and `npm test` in your worktree. If your change touches `packages/`, first give
+   the worktree its own `node_modules/@ouro` links. Otherwise the main checkout's versions are tested instead of yours.
+3. **Land:** commit on your branch. It fast-forwards into `main` when you finish. If you made the worktree yourself,
+   land it with `git -C <checkout> merge --ff-only agent/<you>`, after rebasing onto `main` if `main` moved on.
+4. **Ship:** what you ship depends on what changed. `apps/` → `ouro publish`. `server/`, `packages/` or `protocols/` →
+   `ouro deploy`. Both → run both, deploy first. Say it's done only once the ship succeeded. If it failed, say the change
+   is saved but not live, and why.
+5. **Don't push:** never `git push` the checkout yourself. If there's a `backup` remote, Ouro pushes `main` to it with the
+   person's GitHub connection once a deploy is confirmed live. A change that was only published goes with the next deploy.
+   Open a PR there only if they ask.
+6. Send a change to the public base repository only when asked, as below.
 
 ## Sending a change upstream
 
