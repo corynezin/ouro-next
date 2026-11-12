@@ -5,6 +5,7 @@ import { bubbleActions, textActions, wordsPresses } from './bubbleActions.ts'
 import { tapChoice } from './choiceTap.ts'
 import { attachOptions, COMPOSER_COPY, composedSend, draftWithTakenBack, pickedAssetFile } from './composerText.ts'
 import { ago, capPct, dateStampOf, dateTimeOf, foldForSearch, formatSize, money, oneLine, timeOfDay, timerText, tokensText, untilText } from './format.ts'
+import { identiconCells, identiconColor, identiconSvg } from './identicon.ts'
 import { activeMention, linkify, parseBlocks, parseInline, segments } from './messageText.ts'
 import { senderColor, senderColors, tint } from './theme.ts'
 
@@ -191,8 +192,7 @@ test("a failed bubble's words take its long-press as well as its tap, so the lon
   assert.deepEqual(wordsPresses(false, undefined, longPress), { onPress: undefined, onLongPress: longPress }, 'outside a Pressable the words take it')
 })
 
-test('identicons are deterministic, left-right symmetric, and differ per seed', async () => {
-  const { identiconCells, identiconColor } = await import('./identicon.ts')
+test('identicons are deterministic, left-right symmetric, and differ per seed', () => {
   const cells = identiconCells('agent-a')
   assert.equal(cells.length, 5)
   for (const row of cells) {
@@ -210,8 +210,7 @@ test('identicons are deterministic, left-right symmetric, and differ per seed', 
   assert.ok(filled > 0.65 && filled < 0.85, `about three cells in four are on (${filled})`)
 })
 
-test('an identicon SVG draws one pastel square per lit cell, on an optional background', async () => {
-  const { identiconCells, identiconSvg } = await import('./identicon.ts')
+test('an identicon SVG draws one pastel square per lit cell, on an optional background', () => {
   const svg = identiconSvg('agent-a', 'f0f0f0')
   assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 7 7"/)
   assert.match(svg, /<rect width="7" height="7" fill="#f0f0f0"\/>/)
