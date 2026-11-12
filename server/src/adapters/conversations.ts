@@ -4,6 +4,7 @@
 // Codex starts a new conversation there, seeded from what's stored.
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
+import { PROVIDER_SESSION_ID_PATTERN } from '@ouro/contract'
 import type { ModelRuntime } from '../domain/models.ts'
 
 export interface ConversationStores {
@@ -20,6 +21,11 @@ export interface ConversationFile {
 
 /** Claude Code's folder name for a working folder: every character but letters and digits becomes "-". */
 const claudeProjectFolderOf = (folder: string): string => resolve(folder).replace(/[^a-zA-Z0-9]/g, '-')
+
+/** Where Claude Code keeps the transcript of conversation `sessionId`, which ran in `ranIn`; null for a session id that
+ * could name a file elsewhere (one with a path separator or `..`, as a moved agent could bring). */
+export const claudeTranscriptPathOf = (claudeConfigDir: string, sessionId: string, ranIn: string): string | null =>
+  PROVIDER_SESSION_ID_PATTERN.test(sessionId) ? join(claudeConfigDir, 'projects', claudeProjectFolderOf(ranIn), `${sessionId}.jsonl`) : null
 
 function filesUnder(root: string, dir: string): ConversationFile[] {
   if (!existsSync(dir)) return []
@@ -39,11 +45,10 @@ export function conversationFilesOf(runtime: ModelRuntime, sessionId: string, ra
       return [{ path, content: readFileSync(join(stores.agentStateDir, path)) }]
     }
     case 'claude_code': {
-      const project = join(stores.claudeConfigDir, 'projects', claudeProjectFolderOf(ranIn))
-      const transcript = join(project, `${sessionId}.jsonl`)
-      if (!existsSync(transcript)) return null
+      const transcript = claudeTranscriptPathOf(stores.claudeConfigDir, sessionId, ranIn)
+      if (transcript === null || !existsSync(transcript)) return null
       // Beside the transcript, a folder of the same name holds what its subagents and tools kept.
-      return [{ path: relative(stores.claudeConfigDir, transcript), content: readFileSync(transcript) }, ...filesUnder(stores.claudeConfigDir, join(project, sessionId))]
+      return [{ path: relative(stores.claudeConfigDir, transcript), content: readFileSync(transcript) }, ...filesUnder(stores.claudeConfigDir, join(dirname(transcript), sessionId))]
     }
     case 'codex':
       return null

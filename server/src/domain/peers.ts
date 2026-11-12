@@ -65,3 +65,11 @@ export function addressFromPeer(address: string, peerName: string, ownName: stri
   if (parsed.machine === null) return `${parsed.agentName}@${peerName}`
   return parsed.machine === ownName ? parsed.agentName : address
 }
+
+/**
+ * Where the person's other computers reach this one: the address it was given, or else its public URL, where its API
+ * already answers peers as it answers phones. Null: it gives no address, and only reaches out to the others.
+ */
+export function ownPeerAddress(configured: { peerAddress?: string | undefined; publicUrl?: string | undefined }): string | null {
+  return configured.peerAddress || configured.publicUrl || null
+}

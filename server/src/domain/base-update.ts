@@ -1,18 +1,17 @@
 // Taking a base: where an update stands, as stored, and what may start or continue one. Pure.
-import { MASTER_AGENT_NAME } from '@ouro/contract'
 import type { BaseOffer, BaseUpdate } from '@ouro/contract'
 
 /**
  * Where a base update stands. `merging`: fetching base `n` and merging it beside the live source, or carrying on after a
  * conflict. `conflict`: the base and the person's changes touch the same `files`; the merge waits beside the live source
- * until the person has an agent resolve it, `resolver` (null until then; absent in records from before the choice, which
- * went to the master agent at once), or drops it. `deploying`: the guardian is building, checking and switching to
- * `commit`, the merge, as `deploymentId`.
+ * until the person has an agent resolve it, `resolver`, an agent started for the owner (null until then, and when none
+ * could start), or drops it. Records from before the choice have no `resolver`, nor `notes`: they wait for the owner
+ * too. `deploying`: the guardian is building, checking and switching to `commit`, the merge, as `deploymentId`.
  */
 export type BaseUpdateRecord =
   | { state: 'idle' }
   | { state: 'merging'; n: number }
-  | { state: 'conflict'; n: number; files: string[]; notes?: string; resolver?: string | null }
+  | { state: 'conflict'; n: number; files: string[]; notes?: string; resolver: string | null }
   | { state: 'deploying'; n: number; deploymentId: string; commit: string }
   | { state: 'failed'; n: number; why: string }
 
@@ -28,9 +27,8 @@ export function baseUpdateOf(record: BaseUpdateRecord): BaseUpdate {
   }
 }
 
-/** The agent resolving a conflict, or null while the person hasn't chosen. Older records went to the master agent at once. */
-const resolverOf = (record: Extract<BaseUpdateRecord, { state: 'conflict' }>): string | null =>
-  record.resolver === undefined ? MASTER_AGENT_NAME : record.resolver
+/** The agent resolving a conflict, or null while the person hasn't chosen. A record from before the choice has none. */
+const resolverOf = (record: Extract<BaseUpdateRecord, { state: 'conflict' }>): string | null => record.resolver ?? null
 
 export type BaseUpdateRefusal =
   | { code: 'base_not_offered'; message: string }
@@ -42,7 +40,7 @@ export function takeRefusal(record: BaseUpdateRecord, offered: BaseOffer | null,
   if (record.state === 'merging' || record.state === 'deploying') return { code: 'base_update_in_progress', message: `base ${record.n} is being taken now` }
   if (record.state === 'conflict') {
     return { code: 'base_update_in_progress', message: resolverOf(record) === null
-      ? `base ${record.n} is waiting on its conflicts: have the master agent merge them (ouro base resolve) or drop it (ouro base drop)`
+      ? `base ${record.n} is waiting on its conflicts: have an agent merge them (ouro base resolve) or drop it (ouro base drop)`
       : `base ${record.n} is waiting on its conflicts: resolve them, then ouro base continue, or drop it (ouro base drop)` }
   }
   if (offered === null) return { code: 'base_not_offered', message: 'no newer base is offered to this machine' }
@@ -65,7 +63,7 @@ export function continueDecision(record: BaseUpdateRecord, unresolvedIn: (n: num
 
 export type ResolveDecision = { kind: 'goes_ahead'; n: number; files: string[]; notes: string } | { kind: 'refused'; refusal: BaseUpdateRefusal }
 
-/** Whether the master agent can be told to resolve a conflicted update: only while no agent has been. */
+/** Whether an agent can be started to resolve a conflicted update: only while none is on it. */
 export function resolveDecision(record: BaseUpdateRecord): ResolveDecision {
   const conflict = waitingConflict(record)
   if (conflict.kind === 'refused') return conflict
@@ -105,10 +103,10 @@ export function droppedBrief(n: number): string {
 export function conflictWaitingNotice(n: number, files: string[]): string {
   return `Ouro base ${n} conflicts with this computer's own changes in ${files.join(', ')}. Nothing live has changed. `
     + 'Choose in Settings under Updates (an app from before this choice has no buttons for it), or run: '
-    + 'ouro base resolve to have your master agent merge it, or ouro base drop to leave it for now.'
+    + 'ouro base resolve to have an agent merge it, or ouro base drop to leave it for now.'
 }
 
-/** What the master agent is told, once the person asks it to merge, when a base and their changes touch the same files. */
+/** The task of the agent started, once the person asks for one, when a base and their changes touch the same files. */
 export function conflictBrief(n: number, notes: string, files: string[], besideDir: string): string {
   return `Ouro base ${n} conflicts with this computer's own changes in: ${files.join(', ')}. Nothing live has changed. What the base changes: ${notes}\n`
     + `Resolve it in ${besideDir}, a worktree with the merge in progress. Rule: keep what the person's change was for, and take the base's change. `

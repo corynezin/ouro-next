@@ -2,14 +2,16 @@
 import type { MessagePurpose } from '@ouro/contract'
 import { OWNER_ADDRESS } from '@ouro/contract'
 
-export function renderForModel(message: { from: string; text: string; purpose: MessagePurpose; attachmentPaths: string[] }, delivery: { wake: 'wake' | 'fyi'; possiblySeen: boolean }, chat: { groupHandle: string | null }): string {
-  const header = message.purpose === 'task' && message.from === OWNER_ADDRESS
+/** `relayedBy`: the agent that carried the person's words (`ouro relay`), named so the recipient knows who passed them on. */
+export function renderForModel(message: { from: string; relayedBy: string | null; text: string; purpose: MessagePurpose; attachmentPaths: string[] }, delivery: { wake: 'wake' | 'fyi'; possiblySeen: boolean }, chat: { groupHandle: string | null }): string {
+  const from = message.relayedBy === null ? message.from : `${message.from} via ${message.relayedBy}`
+  const header = message.purpose === 'task' && message.from === OWNER_ADDRESS && message.relayedBy === null
     ? ''
     : chat.groupHandle !== null
-      ? `[${chat.groupHandle} from ${message.from}] `
+      ? `[${chat.groupHandle} from ${from}] `
       : message.purpose === 'system_notice'
         ? '[system] '
-        : `[${message.from}] `
+        : `[${from}] `
   const fyi = delivery.wake === 'fyi' ? '[fyi] ' : ''
   const possiblySeen = delivery.possiblySeen
     ? '[possibly already seen: this message was in a turn that did not finish, so check what you already did before repeating any action]\n'

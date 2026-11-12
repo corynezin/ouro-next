@@ -12,11 +12,11 @@ test('only the offered base is taken, and only when no update is under way or wa
   assert.equal(takeRefusal({ state: 'idle' }, null, 3)?.code, 'base_not_offered')
   assert.equal(takeRefusal({ state: 'merging', n: 3 }, offer, 3)?.code, 'base_update_in_progress')
   assert.equal(takeRefusal({ state: 'deploying', n: 3, deploymentId: 'd', commit: 'c' }, offer, 3)?.code, 'base_update_in_progress')
-  assert.equal(takeRefusal({ state: 'conflict', n: 3, files: ['a'] }, offer, 3)?.code, 'base_update_in_progress')
+  assert.equal(takeRefusal({ state: 'conflict', n: 3, files: ['a'], resolver: 'base-3' }, offer, 3)?.code, 'base_update_in_progress')
 })
 
 test('an update continues only from a conflict whose merge is resolved and committed', () => {
-  const conflict: BaseUpdateRecord = { state: 'conflict', n: 3, files: ['a'] }
+  const conflict: BaseUpdateRecord = { state: 'conflict', n: 3, files: ['a'], resolver: 'base-3' }
   assert.deepEqual(continueDecision(conflict, () => null), { kind: 'continues', n: 3 })
   assert.deepEqual(continueDecision(conflict, () => 'a still conflicts'), { kind: 'refused', refusal: { code: 'base_conflict_unresolved', message: 'a still conflicts' } })
   assert.equal(continueDecision({ state: 'idle' }, () => null).kind, 'refused')
@@ -26,27 +26,30 @@ test('merging and deploying both show as updating', () => {
   assert.deepEqual(baseUpdateOf({ state: 'merging', n: 4 }), { state: 'updating', n: 4 })
   assert.deepEqual(baseUpdateOf({ state: 'deploying', n: 4, deploymentId: 'd', commit: 'c' }), { state: 'updating', n: 4 })
   assert.deepEqual(baseUpdateOf({ state: 'conflict', n: 4, files: ['x'], notes: 'n', resolver: null }), { state: 'conflict', n: 4, files: ['x'], resolver: null })
-  assert.deepEqual(baseUpdateOf({ state: 'conflict', n: 4, files: ['x'] }), { state: 'conflict', n: 4, files: ['x'], resolver: 'master' }, 'an older record went to the master agent at once')
+  assert.deepEqual(baseUpdateOf({ state: 'conflict', n: 4, files: ['x'], notes: 'n', resolver: 'base-4' }), { state: 'conflict', n: 4, files: ['x'], resolver: 'base-4' })
+  const fromBefore = { state: 'conflict', n: 4, files: ['x'] } as unknown as BaseUpdateRecord
+  assert.deepEqual(baseUpdateOf(fromBefore), { state: 'conflict', n: 4, files: ['x'], resolver: null }, 'a record from before resolvers names none: it waits for the owner')
 })
 
-test('a conflict waits for the person: the master agent is told to merge it, or it is dropped; it is merged only once', () => {
+test('a conflict waits for the person: an agent is started to merge it, or it is dropped; it is merged only once', () => {
   const waiting: BaseUpdateRecord = { state: 'conflict', n: 3, files: ['a'], notes: 'faster', resolver: null }
   assert.deepEqual(resolveDecision(waiting), { kind: 'goes_ahead', n: 3, files: ['a'], notes: 'faster' })
   assert.deepEqual(dropDecision(waiting), { kind: 'goes_ahead', n: 3, stopping: null })
   assert.match(takeRefusal(waiting, offer, 3)!.message, /ouro base resolve/)
-  const resolving: BaseUpdateRecord = { ...waiting, resolver: 'master' }
+  const resolving: BaseUpdateRecord = { ...waiting, resolver: 'base-3' }
   assert.equal(resolveDecision(resolving).kind, 'refused')
-  assert.equal(resolveDecision({ state: 'conflict', n: 3, files: ['a'] }).kind, 'refused', 'an older record has its agent')
   assert.equal(resolveDecision({ state: 'idle' }).kind, 'refused')
   assert.equal(dropDecision({ state: 'idle' }).kind, 'refused')
 })
 
 test('a conflict can be dropped while an agent is resolving it, and that agent is the one told to stop', () => {
-  const resolving: BaseUpdateRecord = { state: 'conflict', n: 3, files: ['a'], notes: 'faster', resolver: 'master' }
-  assert.deepEqual(dropDecision(resolving), { kind: 'goes_ahead', n: 3, stopping: 'master' })
+  const resolving: BaseUpdateRecord = { state: 'conflict', n: 3, files: ['a'], notes: 'faster', resolver: 'base-3' }
+  assert.deepEqual(dropDecision(resolving), { kind: 'goes_ahead', n: 3, stopping: 'base-3' })
   assert.match(takeRefusal(resolving, offer, 3)!.message, /ouro base drop/, 'the refusal names the way out')
 })
 
-test('a conflict recorded before the choice existed can be dropped, and the master agent it went to is told to stop', () => {
-  assert.deepEqual(dropDecision({ state: 'conflict', n: 3, files: ['a'] }), { kind: 'goes_ahead', n: 3, stopping: 'master' })
+test('a conflict recorded before the choice existed waits for the owner: it can be resolved or dropped', () => {
+  const fromBefore = { state: 'conflict', n: 3, files: ['a'] } as unknown as BaseUpdateRecord
+  assert.deepEqual(resolveDecision(fromBefore), { kind: 'goes_ahead', n: 3, files: ['a'], notes: '' })
+  assert.deepEqual(dropDecision(fromBefore), { kind: 'goes_ahead', n: 3, stopping: null })
 })

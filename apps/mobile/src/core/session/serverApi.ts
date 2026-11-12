@@ -1,11 +1,11 @@
 // One server's HTTP API, typed from `contract`. Never throws: every outcome is a value, and every answer is validated.
 import {
-  AttachmentRef, AwsActionResult, AwsIntegrationState, ChatgptLoginStart, ClaudeLoginStart, CommandRequest, commands, ErrorResponse, HistoryPage,
+  AttachmentRef, AwsActionResult, AwsIntegrationState, ChatgptLoginStart, ClaudeLoginStart, CommandRequest, commands, ContextBlockText, ContextDetail, ContextList, ErrorResponse, HistoryPage,
   IntegrationActionResult, LogPage, SearchPage, Snapshot, SummaryPage, SyncFrame,
 } from '@ouro/contract'
-import type { ApiError, AwsCredentialsBody, CommandInput, CommandName, CommandOutput } from '@ouro/contract'
+import type { ApiError, AwsCredentialsBody, CommandInput, CommandName, CommandOutput, ContextBlockPlace } from '@ouro/contract'
 import type { z } from 'zod'
-import { TailscaleStatus } from '@ouro/contract'
+import { OPT_IN_ENTITIES, TailscaleStatus } from '@ouro/contract'
 import type { Clock, HttpRequest, HttpResponse, HttpStream, IdSource, Network } from '../platform/ports.ts'
 
 export interface ServerEndpoint { url: string; token: string }
@@ -120,6 +120,17 @@ export class ServerApi {
     return this.read(`/v2/agents/${encodeURIComponent(agentId)}/log${query}`, LogPage)
   }
 
+  /** The model requests of the agent's conversation, newest first, a page from before request `beforeN`; and everything sent with one of them. */
+  contextList(agentId: string, beforeN: number | null) {
+    return this.read(`/v2/agents/${encodeURIComponent(agentId)}/context${beforeN === null ? '' : `?before=${beforeN}`}`, ContextList)
+  }
+  contextDetail(agentId: string, n: number) { return this.read(`/v2/agents/${encodeURIComponent(agentId)}/context/${n}`, ContextDetail) }
+
+  /** One block of a request, uncut: system block `item`, block `block` of message `item`, or block `block` of the reply. */
+  contextText(agentId: string, n: number, where: ContextBlockPlace) {
+    return this.read(`/v2/agents/${encodeURIComponent(agentId)}/context/${n}/text?part=${where.part}&i=${where.item}&k=${where.block}`, ContextBlockText)
+  }
+
   /** Newest first, from before summary number `beforeNumber` when given. */
   summaries(agentId: string, page: { beforeNumber: number | null; limit: number }) {
     const before = page.beforeNumber === null ? '' : `&before=${page.beforeNumber}`
@@ -212,7 +223,7 @@ export class ServerApi {
   openChanges(epoch: string, afterCursor: number, signal: AbortSignal): Promise<HttpStream> {
     const request: HttpRequest = {
       method: 'GET',
-      url: this.url(`/v2/changes?epoch=${encodeURIComponent(epoch)}&after=${afterCursor}`),
+      url: this.url(`/v2/changes?epoch=${encodeURIComponent(epoch)}&after=${afterCursor}&entities=${OPT_IN_ENTITIES.join(',')}`),
       headers: { ...this.headers(false), accept: 'text/event-stream' },
       body: null,
       signal,

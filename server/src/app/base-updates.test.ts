@@ -29,9 +29,10 @@ function sourceWithMergeBeside(): string {
   return root
 }
 
-function updates(root: string, record: BaseUpdateRecord) {
+function updates(root: string, record: BaseUpdateRecord, started: string | null = 'base-3') {
   const saved: BaseUpdateRecord[] = []
   const told: Array<{ name: string; text: string }> = []
+  const handedOff: Array<{ name: string; task: string }> = []
   const baseUpdates = new BaseUpdates({
     sourceRoot: root,
     baseSource: null,
@@ -42,12 +43,12 @@ function updates(root: string, record: BaseUpdateRecord) {
     saveRecord: (next) => { saved.push(next) },
     offerChanged: () => {},
     publishApp: null,
-    tellMasterAgent: (text) => { told.push({ name: 'master', text }) },
+    handOff: (work) => { handedOff.push(work); return started },
     tellAgent: (name, text) => { told.push({ name, text }) },
     tellOwner: () => {},
     log: () => {},
   })
-  return { baseUpdates, saved, told }
+  return { baseUpdates, saved, told, handedOff }
 }
 
 test('dropping a conflict saves only the record in the command; the merge beside goes once the command has committed', async () => {
@@ -63,10 +64,28 @@ test('dropping a conflict saves only the record in the command; the merge beside
 
 test('dropping a conflict an agent is resolving tells that agent to stop', () => {
   const root = sourceWithMergeBeside()
-  const { baseUpdates, saved, told } = updates(root, { state: 'conflict', n: 3, files: ['a.txt'], notes: '', resolver: 'master' })
+  const { baseUpdates, saved, told } = updates(root, { state: 'conflict', n: 3, files: ['a.txt'], notes: '', resolver: 'base-3' })
   baseUpdates.drop()
   assert.deepEqual(saved, [{ state: 'idle' }])
   assert.equal(told.length, 1)
-  assert.equal(told[0]!.name, 'master')
+  assert.equal(told[0]!.name, 'base-3')
   assert.match(told[0]!.text, /base 3 was dropped.*Stop/)
+})
+
+test('resolving a waiting conflict starts a base-<n> agent with the brief, and the record names it', () => {
+  const root = sourceWithMergeBeside()
+  const { baseUpdates, saved, handedOff } = updates(root, { state: 'conflict', n: 3, files: ['a.txt'], notes: 'faster', resolver: null }, 'base-3-2')
+  baseUpdates.resolve()
+  assert.equal(handedOff.length, 1)
+  assert.equal(handedOff[0]!.name, 'base-3')
+  assert.match(handedOff[0]!.task, /^Ouro base 3 conflicts/)
+  assert.deepEqual(saved, [{ state: 'conflict', n: 3, files: ['a.txt'], notes: 'faster', resolver: 'base-3-2' }], 'the name the agent was given')
+  assert.throws(() => baseUpdates.resolve(), /resolving base 3 already/, 'one agent at a time')
+})
+
+test('when no agent can start, the conflict keeps waiting for the owner, who was told', () => {
+  const root = sourceWithMergeBeside()
+  const { baseUpdates, saved } = updates(root, { state: 'conflict', n: 3, files: ['a.txt'], notes: '', resolver: null }, null)
+  baseUpdates.resolve()
+  assert.deepEqual(saved, [{ state: 'conflict', n: 3, files: ['a.txt'], notes: '', resolver: null }])
 })

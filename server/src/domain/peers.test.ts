@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { PEER_MIN_PROTOCOL, PEER_PROTOCOL } from '@ouro/contract'
-import { addressFromPeer, computerStatusOf, peerRetryDelayMs, protocolProblem, signedPayload, withinClockSkew } from './peers.ts'
+import { addressFromPeer, ownPeerAddress, computerStatusOf, peerRetryDelayMs, protocolProblem, signedPayload, withinClockSkew } from './peers.ts'
 
 test('the signature covers every field, and no field can smuggle a line', () => {
   const fields = { method: 'post', path: '/peer/v1/hello?x=1', bodySha256: 'abc', machineId: 'm1', time: '1000', nonce: 'n' }
@@ -39,4 +39,11 @@ test("addresses cross between machines: an agent gains or loses its machine, a t
   assert.equal(addressFromPeer('bob@beta', 'alpha', 'beta'), 'bob')
   assert.equal(addressFromPeer('carol@gamma', 'alpha', 'beta'), 'carol@gamma')
   assert.equal(addressFromPeer('human', 'alpha', 'beta'), 'human')
+})
+
+test("a server's peer address is the one it was given, else its public URL, else none", () => {
+  assert.equal(ownPeerAddress({ peerAddress: 'http://100.64.0.9:8080', publicUrl: 'https://a.example' }), 'http://100.64.0.9:8080')
+  assert.equal(ownPeerAddress({ publicUrl: 'https://a.example' }), 'https://a.example')
+  assert.equal(ownPeerAddress({ peerAddress: '', publicUrl: 'https://a.example' }), 'https://a.example', 'an empty setting is no setting')
+  assert.equal(ownPeerAddress({}), null)
 })

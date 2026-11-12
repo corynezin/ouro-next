@@ -381,6 +381,12 @@ export class AppClient {
     return SummaryPage.parse(await response.json())
   }
 
+  /** A plain read of any route: its status and JSON body. */
+  async get(path: string): Promise<{ status: number; body: unknown }> {
+    const response = await this.request(path)
+    return { status: response.status, body: await response.json() }
+  }
+
   async search(query: string, limit?: number): Promise<SearchPage> {
     const params = new URLSearchParams({ q: query, ...(limit === undefined ? {} : { limit: String(limit) }) })
     const response = await this.request(`/v2/search?${params}`)

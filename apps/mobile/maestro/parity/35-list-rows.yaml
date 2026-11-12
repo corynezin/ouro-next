@@ -1,7 +1,7 @@
 # Agents list rows in their states. Setup (runner): "pauser" has a paused goal, "completer" a completed one, "cycler"
 # a goal every 10 minutes between cycles, "liner" replied three lines, "quietone" is held at a barrier with your
 # message last. Colours, dots and sizes are checked by eye. Not yet run on the simulator: selectors may need adjusting.
-# Rows: AG-08 (dot), AG-14 (the master's idle line), AG-28, AG-31, AG-33, AG-38 and AG-41 (between goal cycles), AG-42,
+# Rows: AG-08 (dot), AG-14 (the pinned section), AG-28, AG-31, AG-33, AG-38 and AG-41 (between goal cycles), AG-42,
 # AG-50 (pull to refresh).
 appId: dev.claudeinbox.ouronext
 ---
@@ -13,7 +13,7 @@ appId: dev.claudeinbox.ouronext
     end: "50%,80%"
 - takeScreenshot: parity-list-refreshing
 - extendedWaitUntil:
-    visible: "Master agent"
+    visible: "PINNED"
     timeout: 10000
 # AG-41: a goal waiting for its next cycle, 10 minutes out.
 - scrollUntilVisible:
@@ -41,6 +41,6 @@ appId: dev.claudeinbox.ouronext
     centerElement: true
 - takeScreenshot: parity-list-goal-markers
 - scrollUntilVisible:
-    element: "Master agent"
+    element: "PINNED"
     direction: UP
-- assertVisible: "Master agent"
+- assertVisible: "PINNED"

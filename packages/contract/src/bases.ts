@@ -1,19 +1,20 @@
 // Bases: numbered releases of Ouro itself, offered to each machine and merged into the person's own copy of the source.
 import { z } from 'zod'
 
-/** The newest base this machine hasn't merged yet. */
-export const BaseOffer = z.object({ n: z.number().int().positive(), notes: z.string() })
+/** The newest base this machine hasn't merged yet. `version`: its Ouro version (`0.6.0`); null or absent for a base from before versions, or from an older server. */
+export const BaseOffer = z.object({ n: z.number().int().positive(), notes: z.string(), version: z.string().nullable().optional() })
 export type BaseOffer = z.infer<typeof BaseOffer>
 
 /**
  * Taking a base. `conflict`: the base and the person's changes touch the same files, and nothing live has changed. The merge
- * waits beside the live source until the owner has the master agent resolve it, named `resolver` (null until then; absent
- * from an older server, which told it at once), or drops it. `failed`: the base didn't go in; `why` says what, if anything,
+ * waits beside the live source until the owner has an agent, started for them, resolve it, named `resolver` (null until
+ * then, and while none could start), or drops it. `failed`: the base didn't go in; `why` says what, if anything,
  * changed.
  */
 export const BaseUpdate = z.discriminatedUnion('state', [
   z.object({ state: z.literal('idle') }),
   z.object({ state: z.literal('updating'), n: z.number().int().positive() }),
+  /** A server from before `resolver` sends none: it handed the conflict to an agent at once. */
   z.object({ state: z.literal('conflict'), n: z.number().int().positive(), files: z.array(z.string()), resolver: z.string().nullable().optional() }),
   z.object({ state: z.literal('failed'), n: z.number().int().positive(), why: z.string() }),
 ])

@@ -7,11 +7,11 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, linkSync } from 'no
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative } from 'node:path'
 import {
-  AGENT_NAME_PATTERN, Change, turnFailureText, chatHandle, commands, SEARCH_MAX_LIMIT, WATCH_LEASE_MS, DEFAULT_GOAL_INTERVAL_SECONDS, MASTER_AGENT_NAME, MAX_ASK_SNOOZE_MS, OWNER_ADDRESS, parseAddress, PEER_ASK_SNOOZE_PROTOCOL, PEER_OWNER_ASKS_PROTOCOL, PEER_OWNER_MESSAGES_PROTOCOL, personAddress, RESERVED_AGENT_NAMES,
+  AGENT_NAME_PATTERN, Change, turnFailureText, chatHandle, commands, SEARCH_MAX_LIMIT, WATCH_LEASE_MS, DEFAULT_GOAL_INTERVAL_SECONDS, MAX_ASK_SNOOZE_MS, OPT_IN_ENTITIES, OWNER_ADDRESS, parseAddress, PEER_ASK_SNOOZE_PROTOCOL, PEER_OWNER_ASKS_PROTOCOL, PEER_OWNER_MESSAGES_PROTOCOL, personAddress, RESERVED_AGENT_NAMES, updateMarkOf,
 } from '@ouro/contract'
 import type {
-  AgentEntity, AskEntity, AskSnooze, AttachmentRef, ChatEntity, CommandName, GoalEntity, CommandOutput, DeliveryWake, EntityKind, LogPage, LogRecord, MessageEntity, MessagePurpose, PairResponse, PlanUsage, PlanWindow,
-  IntegrationProvider, NotificationSettings, PushTokenRegistration, SearchPage, ServerEntity, ServerIdentity, Snapshot, SummaryPage, Viewer,
+  AgentEntity, AskEntity, AskSnooze, AttachmentRef, ChatEntity, CommandName, GoalEntity, CommandOutput, DeliveryWake, EntityKind, ContextBlockPlace, ContextBlockText, ContextDetail, ContextList, ContextUnavailable, LogPage, LogRecord, MessageEntity, MessagePurpose, PairResponse, PinEntity, PinTarget, PlanUsage, PlanWindow,
+  IntegrationProvider, NotificationSettings, PushTokenRegistration, SearchPage, ServerEntity, ServerIdentity, Snapshot, StandingInstructions, SummaryPage, Viewer,
 } from '@ouro/contract'
 import { journalSize, readJournalBackward, readJournalForward } from '../adapters/journal-file.ts'
 import type { DataPaths } from '../adapters/paths.ts'
@@ -20,7 +20,10 @@ import { RunnerSupervisor } from '../adapters/runner-supervisor.ts'
 import type { SendPush } from '../adapters/apns.ts'
 import { checkoutIdentityOf, mainCheckoutOf, mergeThreeWay } from '../adapters/checkouts.ts'
 import type { IntegrationTools } from '../adapters/integrations.ts'
-import { conversationFilesOf, installConversation } from '../adapters/conversations.ts'
+import { claudeTranscriptPathOf, conversationFilesOf, installConversation } from '../adapters/conversations.ts'
+import { transcriptAt } from '../adapters/transcript-requests.ts'
+import { contextBlockText, contextDetail, contextRows } from '../domain/context.ts'
+import type { TranscriptState } from '../domain/context.ts'
 import type { ConversationStores } from '../adapters/conversations.ts'
 import { loadOrCreateMachineKey } from '../adapters/peer-transport.ts'
 import { pushTokenHash } from './notifier.ts'
@@ -46,6 +49,8 @@ import { claudePlanForPeers, goalPlanHold, mergePlanReading, planUsageOf, sameLo
 import type { PlanAccount, PlanReading, PlanWindowReading } from '../domain/usage.ts'
 import type { LaunchModel, ModelProvider, ModelRuntime } from '../domain/models.ts'
 import { replyReminder } from '../domain/reply.ts'
+import { relayDecision } from '../domain/relay.ts'
+import { starterDecision } from '../domain/starter.ts'
 import { excerptAround, searchWords } from '../domain/search.ts'
 import { unmergedBranchReport } from '../domain/worktree.ts'
 import { autoArchiveDue } from '../domain/archive.ts'
@@ -94,6 +99,8 @@ export interface CoreConfig {
   clock: Clock
   policy: AgentPolicy
   releaseId: string
+  /** The Ouro version this server runs (`0.5.0`), from its package.json; null before versions. */
+  version: string | null
   machineName: string
   /** Where the person's other computers reach this one's API; null: they can't. */
   peerAddress: string | null
@@ -105,7 +112,7 @@ export interface CoreConfig {
   runnerEntry: string
   /** Null: runners are this process's own children. */
   runnerHostSocket: string | null
-  /** The rules agents follow: `default.md`, and `master.md` for the master agent. */
+  /** The rules agents follow: `default.md`; `starter.md` is the standing instructions of the agent made at first pairing. */
   protocolsDir: string
   /** The person's own copy of the source, which agents change and deploy or publish from. Null when there is none. */
   personSource: { root: string; appDir: string; serverDir: string } | null
@@ -178,8 +185,19 @@ const HISTORY_PAGE_LIMIT_MAX = 200
 const SEED_RECENT_MESSAGES = 20
 
 const minutesOf = (ms: number) => Math.floor(ms / 60_000)
-const MASTER_TASK = "The person's front door: route each request to an agent and bring back the result."
+/** The agent Ouro makes, pins and greets the person with when they first pair. An ordinary agent after that. */
+const STARTER_AGENT_NAME = 'concierge'
+const STARTER_TASK = "Be the person's front door: route each request to an agent and bring back the result."
+const STARTER_WELCOME = "Hi! I'm your front door to Ouro. Tell me what you want (change this app, build something, look into something) and I'll start an agent for it and bring back the result.\n\nI'm pinned at the top of your list. Swipe to unpin me, or pin any other agent or group to keep it up here."
+/** Set once the starter agent is made, or found already there: so it is made once, and never again after an archive. */
+const STARTER_META_KEY = 'starter_created'
+/** Before pins, the starter agent was the special "master": a machine that has one keeps it, pinned. Still a reserved
+ * name, so an agent called this was made by Ouro. */
+const LEGACY_STARTER_NAME = 'master'
+const STARTER_INSTRUCTIONS: StandingInstructions = { kind: 'protocol', name: 'starter' }
 const SUMMARY_PAGE_LIMIT_MAX = 100
+/** A page of the Context list: a screenful or two; a long-lived agent has thousands of requests. */
+const CONTEXT_PAGE_LIMIT_MAX = 100
 const STAND_IN_MODEL = 'stand-in'
 const NO_NAME_SUGGESTION: NameSuggestion = { name: null, costUsd: 0 }
 const GOAL_CHECK_TIMEOUT_MS = 10 * 60_000
@@ -236,7 +254,7 @@ export class OuroCore {
    * helper, and parents aren't woken to hear it.
    */
   private reconcilingAtStart = false
-  private readonly protocols: { default: string; master: string }
+  private readonly protocols: { default: string; starter: string }
   readonly appUpdates: AppUpdates
   private readonly summaries: AgentSummaries
   private readonly notifier: Notifier
@@ -264,7 +282,7 @@ export class OuroCore {
     this.store = new Store(config.paths.database)
     this.protocols = {
       default: readFileSync(join(config.protocolsDir, 'default.md'), 'utf8'),
-      master: readFileSync(join(config.protocolsDir, 'master.md'), 'utf8'),
+      starter: readFileSync(join(config.protocolsDir, 'starter.md'), 'utf8'),
     }
     this.appUpdates = new AppUpdates(this.store, join(config.paths.dataDir, 'updates'), () => config.clock.now())
     this.runners = new RunnerSupervisor(config.paths, config.runnerEntry, {
@@ -321,12 +339,9 @@ export class OuroCore {
       saveRecord: (record) => this.store.saveBaseUpdateRecord(record),
       offerChanged: () => this.store.markChanged('server', 'server'),
       publishApp: config.personSource === null ? null : () => this.publishApp(config.personSource!.appDir),
-      tellMasterAgent: (text) => this.alert(MASTER_AGENT_NAME, text),
+      handOff: (work) => this.handOffBaseWork(work),
       tellAgent: (name, text) => this.alert(name, text),
-      tellOwner: (text) => {
-        const owner = this.store.ownerPerson()
-        if (owner) this.alert(owner.address, text)
-      },
+      tellOwner: (text) => this.alert(OWNER_ADDRESS, text),
       log: config.log,
     })
     this.tailscale = new TailscaleConnection({ setup: config.tailscale, hostname: tailscaleHostnameOf(config.machineName), now: () => config.clock.now(), log: config.log })
@@ -390,9 +405,9 @@ export class OuroCore {
       if (!this.store.ownerPerson()) {
         this.store.insertPerson({ id: randomUUID(), name: this.config.machineName, address: OWNER_ADDRESS, isOwner: true, joinedAt: this.config.clock.now() })
       }
-      // An owner who paired before masters existed gets one too.
+      // An owner who paired before the starter agent existed gets one too; one who had a master keeps it, pinned.
       const owner = this.store.ownerPerson()!
-      if (this.store.listDevices().some((device) => device.personId === owner.id)) this.ensureMasterAgent(owner, this.config.clock.now())
+      if (this.store.listDevices().some((device) => device.personId === owner.id)) this.ensureStarterAgent(owner, this.config.clock.now())
       if (this.store.getMeta('announced_release') !== this.config.releaseId) {
         this.store.setMeta('announced_release', this.config.releaseId)
         this.store.markChanged('server', 'server')
@@ -650,6 +665,9 @@ export class OuroCore {
     }
     // A goal's display depends on the agent's state.
     if (this.store.goalOf(agentId)) this.store.markChanged('goal', agentId)
+    if (to.state === 'archived' && from.state !== 'archived') this.unpinEverywhere({ kind: 'agent', agentId })
+    // A pin follows an agent that moved to another of the person's computers.
+    if (to.state === 'moved' && from.state !== 'moved') this.repinEverywhere({ kind: 'agent', agentId }, { kind: 'remote_agent', address: to.to })
   }
 
   /** A turn running long is reported to whoever the agent reports to, once per turn. The turn carries on. */
@@ -993,7 +1011,7 @@ export class OuroCore {
     if (!message) throw new Error(`delivery ${delivery.id} has no message`)
     const chat = this.store.chatEntity(message.chatId)
     const modelContent = renderForModel(
-      { from: message.from, text: message.text, purpose: message.purpose, attachmentPaths: message.attachments.map((attachment) => this.namedAttachmentPath(attachment)) },
+      { from: message.from, relayedBy: message.relayedBy, text: message.text, purpose: message.purpose, attachmentPaths: message.attachments.map((attachment) => this.namedAttachmentPath(attachment)) },
       { wake: delivery.wake, possiblySeen: delivery.state.possiblySeen },
       { groupHandle: chat?.kind === 'group' ? chatHandle(chat) : null },
     )
@@ -1048,17 +1066,25 @@ export class OuroCore {
     }
   }
 
+  private standingInstructionsText(instructions: StandingInstructions): string {
+    switch (instructions.kind) {
+      case 'protocol': return this.protocols[instructions.name]
+    }
+  }
+
   /** An agent that has run before but has no session to resume starts a new one, seeded from what's stored. */
   private systemPromptFor(row: AgentRow, resumeConversation: boolean, launch: LaunchModel): string {
     const notOnThisMachine = "(not on this machine: say so if it's needed)"
-    const base = renderSystemPrompt(row.name === MASTER_AGENT_NAME ? this.protocols.master : this.protocols.default, {
+    const facts = {
       name: row.name,
       parent: row.parent,
       creator: row.createdBy,
       folder: row.folder,
       appSource: this.config.personSource?.appDir ?? notOnThisMachine,
       serverSource: this.config.personSource?.serverDir ?? notOnThisMachine,
-    })
+    }
+    const rules = renderSystemPrompt(this.protocols.default, facts)
+    const base = row.instructions === null ? rules : `${rules}\n\n${renderSystemPrompt(this.standingInstructionsText(row.instructions), facts)}`
     const fallback = launch.fallbackFrom === null
       ? ''
       : `\n\nYou were set to run on ${launch.fallbackFrom.label}, but ${launch.fallbackFrom.provider === 'openrouter' ? 'OpenRouter' : launch.fallbackFrom.provider} isn't set up on this machine, so you are running on ${launch.model.label} instead. Say so if it matters to your work.`
@@ -1268,6 +1294,8 @@ export class OuroCore {
         if (state.state !== 'in_turn' && state.state !== 'interrupting') return
         if (record.failure === 'logged_out') this.recordSignedOut(this.accountOf(row))
         const retryAt = this.turnRetryAt(row, record)
+        // How much of the context the failed turn changed is unknown.
+        this.store.savePromptCache(agentId, null)
         this.applyAgentEvent(agentId, { type: 'turn_failed', generation, turnId: state.turnId, failure: record.failure, detail: record.detail, retryAt })
         return
       }
@@ -1316,9 +1344,10 @@ export class OuroCore {
     const account = this.accountOf(row)
     if (account !== null && record.costUsd > 0) this.store.addPlanTurnCost(row.id, account, record.at, record.costUsd)
     this.refreshUsageAfterTurn(row)
-    // Records from a runner of an earlier release carry no context.
+    // Records from a runner of an earlier release, and some providers, carry no context: it is then unknown, and a record
+    // from before this turn (say, compacted) no longer describes it.
     const context = record.context ?? null
-    if (context !== null) this.store.savePromptCache(row.id, promptCacheAfterTurn(context, record.at))
+    this.store.savePromptCache(row.id, context === null ? null : promptCacheAfterTurn(context, record.at))
 
     if (state.state === 'interrupting') {
       this.applyAgentEvent(row.id, { type: 'turn_finished', generation: record.generation, turnId: state.turnId, continuation: { kind: 'no_unacknowledged_deliveries' } })
@@ -1359,10 +1388,10 @@ export class OuroCore {
   }
 
   /** Asked by `ouro publish` on this machine, after it has exported the app. */
-  registerAppUpdate(input: RegisterUpdateInput): { updateNumber: number; runtimeVersion: string } {
+  registerAppUpdate(input: RegisterUpdateInput): { updateNumber: number; runtimeVersion: string; mark: string } {
     const row = this.appUpdates.register(input)
     this.notifier.updatePublished(row.updateNumber)
-    return { updateNumber: row.updateNumber, runtimeVersion: row.runtimeVersion }
+    return { updateNumber: row.updateNumber, runtimeVersion: row.runtimeVersion, mark: updateMarkOf(row.updateNumber, this.appUpdates.machineId()) }
   }
 
   /** Publishes the app in the person's source as `ouro publish` does, registering it here directly. */
@@ -1375,7 +1404,7 @@ export class OuroCore {
     return {
       id: 'server',
       machineName: this.config.machineName,
-      release: { id: this.config.releaseId, base: this.baseUpdates.status() },
+      release: { id: this.config.releaseId, base: this.baseUpdates.status(), version: this.config.version },
       sourceBackup: this.sourceBackup.status(),
       defaultModel: this.config.defaultModel,
       models: this.modelOptions(),
@@ -1455,6 +1484,7 @@ export class OuroCore {
       readStates: this.store.listChatIds()
         .filter((chatId) => this.store.chatMembers(chatId).some((member) => member.address === viewer.address))
         .map((chatId) => this.store.readStateEntity(viewer.personId, chatId, viewer.address)),
+      pins: this.store.listPins(viewer.personId),
       asks: this.store.listAskEntities(),
       goals: this.store.listGoals().map((goal) => this.goalEntity(goal)),
       summaries: this.store.listSummaryEntities(),
@@ -1482,8 +1512,9 @@ export class OuroCore {
   }
 
   /** The changes after `cursor` this viewer may see, with the entities' current values. */
-  changesAfter(cursor: number, viewer: Viewer, limit: number): Change[] {
-    return this.store.changesAfter(cursor, viewer.personId, limit).flatMap((row) => {
+  changesAfter(cursor: number, viewer: Viewer, limit: number, optedIn: readonly string[] = []): Change[] {
+    const leftOut = OPT_IN_ENTITIES.filter((kind) => !optedIn.includes(kind))
+    return this.store.changesAfter(cursor, viewer.personId, limit, leftOut).flatMap((row) => {
       if (row.deleted) return [Change.parse({ cursor: row.cursor, entity: row.entity, id: row.entityId, op: 'delete' })]
       const value = this.entityValue(row.entity, row.entityId, viewer)
       if (value === null) return [Change.parse({ cursor: row.cursor, entity: row.entity, id: row.entityId, op: 'delete' })]
@@ -1506,6 +1537,10 @@ export class OuroCore {
       case 'read_state': {
         const chatId = id.slice(viewer.personId.length + 1)
         return this.store.readStateEntity(viewer.personId, chatId, viewer.address)
+      }
+      case 'pin': {
+        const found = this.store.pinById(id)
+        return found && found.personId === viewer.personId ? found.pin : null
       }
       case 'person': {
         const row = this.store.personById(id)
@@ -1552,6 +1587,47 @@ export class OuroCore {
     const end = request.before ?? journalSize(path)
     const { records, start } = readJournalBackward(path, end, LOG_PAGE_BYTES)
     return { records: toLogRecords(records), startCursor: start, endCursor: end, hasEarlier: start > 0 }
+  }
+
+  /**
+   * The agent's current Claude Code conversation, read from its transcript, or why there is none. Only the owner reads
+   * it: it holds the system prompt, memory and every tool result whole, often file contents and secrets, so neither an
+   * invited person nor any agent (this one included) may.
+   */
+  private async contextTranscriptOf(caller: Caller, agentId: string): Promise<{ kind: 'transcript'; state: TranscriptState } | { kind: 'unavailable'; reason: ContextUnavailable }> {
+    if (caller.kind !== 'person' || !caller.person.isOwner) throw new CommandRefused('forbidden', "only the owner reads an agent's context")
+    const row = this.requireAgentRow(agentId)
+    const runtime = runtimeOf(launchModelFor(row.model, { openrouter: this.openrouterConfigured() }).model.provider)
+    if (runtime !== 'claude_code') return { kind: 'unavailable', reason: 'not_claude_code' }
+    if (row.providerSessionId === null) return { kind: 'unavailable', reason: 'no_conversation' }
+    const path = claudeTranscriptPathOf(this.claudeConfigDir, row.providerSessionId, row.folder)
+    const state = path === null ? null : await transcriptAt(path)
+    return state === null ? { kind: 'unavailable', reason: 'transcript_missing' } : { kind: 'transcript', state }
+  }
+
+  /** The model requests of the agent's current conversation, newest first, with their exact input and output tokens. */
+  async agentContextList(caller: Caller, agentId: string, page: { before: number | null; limit: number }): Promise<ContextList> {
+    const found = await this.contextTranscriptOf(caller, agentId)
+    switch (found.kind) {
+      case 'unavailable': return { requests: [], hasOlder: false, unavailable: found.reason }
+      case 'transcript': return { ...contextRows(found.state, page.before, Math.min(Math.max(page.limit, 1), CONTEXT_PAGE_LIMIT_MAX)), unavailable: null }
+    }
+  }
+
+  /** Everything sent with one model request, and the reply. */
+  async agentContext(caller: Caller, agentId: string, n: number): Promise<ContextDetail> {
+    const found = await this.contextTranscriptOf(caller, agentId)
+    const detail = found.kind === 'transcript' ? contextDetail(found.state, n) : null
+    if (detail === null) throw new CommandRefused('not_found', 'no such request')
+    return detail
+  }
+
+  /** One block of a request, uncut: the phone shows long ones cut and fetches the rest on demand. */
+  async agentContextText(caller: Caller, agentId: string, n: number, where: ContextBlockPlace): Promise<ContextBlockText> {
+    const found = await this.contextTranscriptOf(caller, agentId)
+    const text = found.kind === 'transcript' ? contextBlockText(found.state, n, where) : null
+    if (text === null) throw new CommandRefused('not_found', 'no such block')
+    return { text }
   }
 
   agentSummaries(agentId: string, before: number | null, limit: number): SummaryPage {
@@ -1606,23 +1682,43 @@ export class OuroCore {
       const deviceToken = randomBytes(32).toString('hex')
       const deviceId = randomUUID()
       this.store.insertDevice({ id: deviceId, name: deviceName, personId: person.id, pairedAt: now, lastSeenAt: null, revokedAt: null }, hashSecret(deviceToken))
-      if (person.isOwner) this.ensureMasterAgent(person, now)
+      if (person.isOwner) this.ensureStarterAgent(person, now)
       return { deviceToken, deviceId, personId: person.id, machineId: this.store.getMeta('machine_id')!, machineName: this.config.machineName }
     })
   }
 
   /**
-   * The owner's front door, made when they first sign in. It waits, stopped, for their first message, so it costs
-   * nothing until then. Its protocol (master.md) tells it what it is.
+   * The agent the owner meets first: made once, when they first pair, pinned for them, with a welcome in its chat. It
+   * waits, stopped, for their first message, so it costs nothing until then. Its standing instructions (starter.md) make
+   * it a front door; nothing else about it is special, so they can unpin, archive or move it like any other.
    */
-  private ensureMasterAgent(owner: PersonRow, now: number): void {
-    // An archived master stays archived: that was the person's choice.
-    if (this.store.activeAgentByName(MASTER_AGENT_NAME) || this.store.newestArchivedAgentByName(MASTER_AGENT_NAME)) return
+  private ensureStarterAgent(owner: PersonRow, now: number): void {
+    const decision = starterDecision({
+      settledBefore: this.store.getMeta(STARTER_META_KEY) !== null,
+      activeLegacyId: this.store.activeAgentByName(LEGACY_STARTER_NAME)?.id ?? null,
+      archivedLegacy: this.store.newestArchivedAgentByName(LEGACY_STARTER_NAME) !== null,
+    })
+    if (decision.kind === 'none') return
+    this.store.setMeta(STARTER_META_KEY, String(now))
+    switch (decision.kind) {
+      case 'keep_archived': return
+      case 'adopt_legacy':
+        // Its rules were master.md, chosen by its name; starter.md is its standing instructions now.
+        this.store.setAgentRole(decision.agentId, STARTER_TASK, STARTER_INSTRUCTIONS)
+        this.pinFor(owner.id, { kind: 'agent', agentId: decision.agentId }, now)
+        return
+      case 'make': return this.makeStarterAgent(owner, now)
+    }
+  }
+
+  private makeStarterAgent(owner: PersonRow, now: number): void {
+    const name = this.store.activeAgentByName(STARTER_AGENT_NAME) ? this.chooseAgentName(null, STARTER_TASK, STARTER_AGENT_NAME) : STARTER_AGENT_NAME
+    const agentId = shortId()
     this.store.insertAgent({
-      id: shortId(),
-      name: MASTER_AGENT_NAME,
-      task: MASTER_TASK,
-      folder: join(this.config.defaultFolder, MASTER_AGENT_NAME),
+      id: agentId,
+      name,
+      task: STARTER_TASK,
+      folder: join(this.config.defaultFolder, name),
       model: this.config.defaultModel,
       parent: owner.address,
       createdBy: owner.address,
@@ -1631,7 +1727,41 @@ export class OuroCore {
       credentialHash: hashSecret(randomUUID()),
       worktree: null,
       promptCacheLifetime: '5m',
+      instructions: STARTER_INSTRUCTIONS,
     })
+    this.pinFor(owner.id, { kind: 'agent', agentId }, now)
+    this.postToPerson({ fromAgent: this.requireAgentRow(agentId), to: owner, text: STARTER_WELCOME, attachments: [], purpose: 'message', clientKey: null, posesAskId: null })
+  }
+
+  /**
+   * Work a base update needs done (resolving a conflict, publishing the app) goes to an agent of its own, started for the
+   * owner in their source; its name is returned. If none can start (no free slot, budget spent, or anything else), the
+   * owner is told instead and null is returned: the update itself has already been decided, so this never throws. Inside
+   * a transaction, so whatever the update records goes in with the hand-off or not at all.
+   */
+  private handOffBaseWork(work: { name: string; task: string }): string | null {
+    const root = this.config.personSource?.root ?? this.config.defaultFolder
+    try {
+      const agentId = this.undoable(() => this.startAgent({ task: work.task, name: null, model: null, folder: root, promptCacheLifetime: '5m', attachmentIds: [] }, `base-work:${randomUUID()}`,
+        { parent: OWNER_ADDRESS, createdBy: OWNER_ADDRESS, parentAgentId: null, folder: root }, { name: work.name, costUsd: 0 }))
+      return this.requireAgentRow(agentId).name
+    } catch (error) {
+      const why = (error as Error).message
+      if (!(error instanceof CommandRefused)) this.config.log('base_work_not_handed_off', { name: work.name, why })
+      this.alert(OWNER_ADDRESS, `${work.task}\n\n(Ouro couldn't start an agent for this: ${why}.)`)
+      return null
+    }
+  }
+
+  /** Inside a transaction: `body`'s writes and effects, or, if it throws, none of them, and the error. */
+  private undoable<T>(body: () => T): T {
+    const effects = this.pendingEffects.length
+    try {
+      return this.store.savepoint(body)
+    } catch (error) {
+      this.pendingEffects.length = effects
+      throw error
+    }
   }
 
   private personForInvitee(name: string, now: number): PersonRow {
@@ -1796,6 +1926,8 @@ export class OuroCore {
       case 'set_agent_model': return this.commandSetModel(input as never)
       case 'merge_agent_branch': return this.commandMergeBranch(input as never)
       case 'mark_chat_read': return this.commandMarkRead(caller, input as never)
+      case 'pin': return this.commandPin(caller, input as never)
+      case 'unpin': return this.commandUnpin(caller, input as never)
       case 'watch_agent': return this.commandWatchAgent(caller, input as never)
       case 'register_push_token': return this.commandRegisterPushToken(caller, input as never)
       case 'clear_push_token': return this.commandClearPushToken(caller)
@@ -1828,7 +1960,10 @@ export class OuroCore {
       })
       case 'control_remote_agent': return this.requireComputerManager(caller, () => {
         if (prepared.remoteAgentAnswer === null) throw new CommandRefused('invalid_request', 'controlling an agent elsewhere needs its computer to answer first')
-        return { remoteAgent: this.peers.noteAnswered(prepared.remoteAgentAnswer.computerId, prepared.remoteAgentAnswer.card) }
+        const remoteAgent = this.peers.noteAnswered(prepared.remoteAgentAnswer.computerId, prepared.remoteAgentAnswer.card)
+        // As an archived agent here loses its pins, so does one archived there from here.
+        if ((input as { action: RemoteAgentAction }).action.kind === 'archive') this.unpinEverywhere({ kind: 'remote_agent', address: remoteAgent.address })
+        return { remoteAgent }
       })
       case 'create_remote_agent': return this.requireComputerManager(caller, () => {
         if (prepared.remoteAgentAnswer === null) throw new CommandRefused('invalid_request', 'starting an agent elsewhere needs its computer to answer first')
@@ -1878,7 +2013,8 @@ export class OuroCore {
       return this.commit(() => {
         const earlier = this.store.idempotentResult(callerKey, request.idempotencyKey)
         if (earlier) return JSON.parse(earlier.resultJson) as PeerCreateAgentResult
-        const agentId = this.startAgent(request, `${callerKey}:${request.idempotencyKey}`, { parent, createdBy: OWNER_ADDRESS, parentAgentId: null, folder: request.folder ?? this.config.defaultFolder }, nameSuggestion)
+        // Files don't travel between computers yet, so a request from one names none.
+        const agentId = this.startAgent({ ...request, attachmentIds: [] }, `${callerKey}:${request.idempotencyKey}`, { parent, createdBy: OWNER_ADDRESS, parentAgentId: null, folder: request.folder ?? this.config.defaultFolder }, nameSuggestion)
         if (request.from.kind === 'owner') this.store.addOwnerChatPeer(agentId, peer.machineId, this.config.clock.now())
         const result: PeerCreateAgentResult = { outcome: 'created', agent: this.agentCard(this.requireAgentRow(agentId), 'full') }
         this.store.saveIdempotentResult(callerKey, request.idempotencyKey, 'create_agent', hashSecret(JSON.stringify(request)), JSON.stringify(result), this.config.clock.now())
@@ -1895,6 +2031,8 @@ export class OuroCore {
   private startAgent(input: NewAgentRequest, clientKey: string, origin: NewAgentOrigin, nameSuggestion: NameSuggestion = NO_NAME_SUGGESTION): string {
     const now = this.config.clock.now()
     const name = this.chooseAgentName(input.name, input.task, nameSuggestion.name)
+    // Resolved first, so a missing file refuses the command before anything is made.
+    const attachments = this.resolveAttachments(input.attachmentIds)
     const { parent } = origin
     const agentId = shortId()
     const preLaunchLifecycle: AgentLifecycle = { state: { state: 'stopped', since: now, stopped: { reason: 'idle' } }, instanceGeneration: 0, consecutiveCrashes: 0, consecutiveCreditFailures: 0, ownershipEpoch: 0, consecutiveStalls: 0 }
@@ -1921,7 +2059,7 @@ export class OuroCore {
     if (admission.kind === 'refused' && admission.hold === 'budget') throw new CommandRefused('budget_spent', `the budget of $${this.budgetUsd()} is spent: raise it to start agents`)
     this.placeInOwnWorktree(created)
 
-    this.postDirect({ from: parent, fromAgentId: origin.parentAgentId, toAgent: created, text: input.task, attachments: [], purpose: 'task', wake: 'wake', clientKey, answersAskId: null, relayedBy: null })
+    this.postDirect({ from: parent, fromAgentId: origin.parentAgentId, toAgent: created, text: input.task, attachments, purpose: 'task', wake: 'wake', clientKey, answersAskId: null, relayedBy: null })
     this.applyAgentEvent(agentId, { type: 'wake_requested', admission, reason: 'created' })
     return agentId
   }
@@ -1930,13 +2068,13 @@ export class OuroCore {
   private chooseAgentName(requested: string | null, task: string, suggested: string | null): string {
     if (requested !== null && requested.trim() !== '') {
       const name = requested.trim()
-      if (RESERVED_AGENT_NAMES.includes(name) || name === MASTER_AGENT_NAME) throw new CommandRefused('agent_name_reserved', `"${name}" is reserved`)
+      if (RESERVED_AGENT_NAMES.includes(name)) throw new CommandRefused('agent_name_reserved', `"${name}" is reserved`)
       if (!AGENT_NAME_PATTERN.test(name)) throw new CommandRefused('invalid_request', `"${name}" isn't a valid agent name: letters, digits, - and _ only`)
       if (this.store.activeAgentByName(name)) throw new CommandRefused('agent_name_taken', `an agent named "${name}" already exists`)
       return name
     }
     const base = suggested ?? agentNameFromTask(task)
-    if (!this.store.activeAgentByName(base) && !RESERVED_AGENT_NAMES.includes(base) && base !== MASTER_AGENT_NAME) return base
+    if (!this.store.activeAgentByName(base) && !RESERVED_AGENT_NAMES.includes(base)) return base
     for (let suffix = 2; ; suffix++) {
       const candidate = `${base}-${suffix}`
       if (!this.store.activeAgentByName(candidate)) return candidate
@@ -2222,7 +2360,6 @@ export class OuroCore {
   private commandMoveAgent(caller: Caller, input: { agentId: string; computerId: string }, prepared: PreparedChecks): CommandOutput<'move_agent'> {
     if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner moves agents between computers')
     const agent = this.requireAgentRow(input.agentId)
-    if (agent.name === MASTER_AGENT_NAME) throw new CommandRefused('forbidden', "the master agent stays on this computer: it is this computer's front door")
     const peer = this.peers.requirePeer(input.computerId)
     if (!prepared.moveTargetReady) throw new CommandRefused('invalid_request', `moving an agent needs ${peer.name} to answer first`)
     const decision = this.applyAgentEvent(agent.id, { type: 'move_requested', toMachine: peer.name })
@@ -2284,6 +2421,7 @@ export class OuroCore {
         folder: inDefault === '' || (!inDefault.startsWith('..') && !isAbsolute(inDefault)) ? { kind: 'in_default_folder', relativePath: inDefault } : { kind: 'absolute', path: agent.folder },
         ownershipEpoch,
         promptCacheLifetime: agent.promptCacheLifetime,
+        instructions: agent.instructions,
       },
       goal: goal && goal.progress.status !== 'complete' ? {
         text: goal.text,
@@ -2367,7 +2505,7 @@ export class OuroCore {
   }
 
   private whyNotTake(name: string): string | null {
-    if (name === MASTER_AGENT_NAME || RESERVED_AGENT_NAMES.includes(name)) return `"${name}" is reserved on ${this.config.machineName}`
+    if (RESERVED_AGENT_NAMES.includes(name)) return `"${name}" is reserved on ${this.config.machineName}`
     if (this.store.activeAgentByName(name)) return `an agent named ${name} already lives on ${this.config.machineName}`
     return null
   }
@@ -2414,6 +2552,7 @@ export class OuroCore {
       // Files go by git, not by worktree: here it works in the folder it is given.
       worktree: null,
       promptCacheLifetime: move.agent.promptCacheLifetime,
+      instructions: move.agent.instructions,
     })
     if (conversation) this.store.updateAgentFields(agentId, { providerSessionId: conversation.providerSessionId })
     if (move.goal) {
@@ -2433,6 +2572,8 @@ export class OuroCore {
     if (move.memory) this.memory.takeSharedNotes(move.memory.projectKey, move.memory.notes)
     this.store.recordMoveTaken(move.moveId, peer.machineId, agentId, now)
     this.store.reparentAgents(`${move.agent.name}@${peer.name}`, move.agent.name)
+    // A pin of it as an agent on that computer follows it here.
+    this.repinEverywhere({ kind: 'remote_agent', address: `${move.agent.name}@${peer.name}` }, { kind: 'agent', agentId })
     const agent = this.requireAgentRow(agentId)
     this.takeWaiting(agent, move.waiting, here)
     const carried = conversation ? 'Your conversation came with you' : 'Your conversation could not come with you, so this is a new one, with your recent messages below'
@@ -2673,11 +2814,16 @@ export class OuroCore {
     throw new CommandRefused('not_found', `no agent named ${name}`)
   }
 
-  /** The person's own words, carried by their master agent: from the person, marked as relayed, closing asks as theirs would. */
+  /**
+   * A person's own words, carried by an agent they started (see relayDecision): from the person, marked as relayed, and
+   * shown to the recipient as relayed. It closes only the ask it names: a relay isn't the person talking to that agent.
+   */
   private commandRelay(caller: Caller, input: { to: string; text: string; answersAskId: string | null }, clientKey: string): CommandOutput<'relay_message'> {
-    if (caller.kind !== 'agent' || caller.agent.name !== MASTER_AGENT_NAME) throw new CommandRefused('forbidden', "only the master agent relays a person's words")
-    const person = this.store.personByAddress(caller.agent.createdBy)
-    if (!person) throw new CommandRefused('not_found', `no person at ${caller.agent.createdBy}`)
+    if (caller.kind !== 'agent') throw new CommandRefused('forbidden', "only an agent relays a person's words")
+    const decision = relayDecision(caller.agent)
+    if (decision.kind === 'refused') throw new CommandRefused('forbidden', decision.why)
+    const person = this.store.personByAddress(decision.person)
+    if (!person) throw new CommandRefused('not_found', `no person at ${decision.person}`)
     const parsed = parseAddress(input.to)
     if (parsed.kind !== 'agent' || parsed.machine !== null) throw new CommandRefused('invalid_request', "a relay goes to an agent on this machine")
     if (input.answersAskId !== null && !this.store.openAskById(input.answersAskId)) throw new CommandRefused('ask_closed', 'that question is already closed')
@@ -2687,7 +2833,7 @@ export class OuroCore {
     })
     this.requestWake(toAgent.id, 'new_message')
     this.settleAgent(toAgent.id)
-    this.closeAsksAnsweredBy(toAgent.name, input.answersAskId)
+    if (input.answersAskId !== null) this.closeAsk(input.answersAskId, this.config.clock.now())
     return { message: this.store.messageEntity(this.store.messageById(message.id)!) }
   }
 
@@ -3018,7 +3164,8 @@ export class OuroCore {
 
   private commandFinish(caller: Caller, input: { summary: string }, clientKey: string, prepared: PreparedChecks): CommandOutput<'finish_agent'> {
     if (caller.kind !== 'agent') throw new CommandRefused('forbidden', 'only an agent can finish itself')
-    if (caller.agent.name === MASTER_AGENT_NAME) throw new CommandRefused('forbidden', 'the master agent never finishes: it stays the front door. End your turn instead.')
+    // Standing instructions (the front door's) are a role with no end; a finished one would be auto-archived, pin and all.
+    if (caller.agent.instructions !== null) throw new CommandRefused('forbidden', 'you have a standing role and never finish: end your turn instead')
     const goal = this.store.goalOf(caller.agent.id)
     if (goal && goal.progress.status === 'active') this.completeGoalWithNotice(goal, input.summary, prepared.goalCheck)
     const decision = this.applyAgentEvent(caller.agent.id, { type: 'finish_requested', summary: input.summary })
@@ -3168,6 +3315,76 @@ export class OuroCore {
     return {}
   }
 
+  // Pins
+
+  /** Whose pins a caller changes: a person's own, or an agent's creator's. */
+  private pinOwnerOf(caller: Caller): PersonRow {
+    if (caller.kind === 'person') return caller.person
+    const person = this.store.personByAddress(caller.agent.createdBy)
+    if (!person) throw new CommandRefused('not_found', `no person at ${caller.agent.createdBy}`)
+    return person
+  }
+
+  private commandPin(caller: Caller, input: { target: PinTarget }): CommandOutput<'pin'> {
+    const person = this.pinOwnerOf(caller)
+    this.requirePinnable(input.target)
+    return { pin: this.pinFor(person.id, input.target, this.config.clock.now()) }
+  }
+
+  /** Only what the lists show can be pinned: a pin of anything else would stay hidden for good. */
+  private requirePinnable(target: PinTarget): void {
+    switch (target.kind) {
+      case 'agent': {
+        const agent = this.requireAgentRow(target.agentId)
+        const state = agent.lifecycle.state.state
+        if (state === 'archived') throw new CommandRefused('agent_archived', `${agent.name} is archived`)
+        if (state === 'moved') throw new CommandRefused('invalid_request', `${agent.name} moved to another computer: pin it there as name@computer`)
+        return
+      }
+      case 'remote_agent': {
+        if (!this.peers.remoteAgents().some((remote) => remote.address === target.address)) throw new CommandRefused('not_found', `no agent ${target.address} on the other computers`)
+        return
+      }
+      case 'chat': {
+        const chat = this.store.chatEntity(target.chatId)
+        if (!chat) throw new CommandRefused('not_found', 'no such chat')
+        if (chat.kind !== 'group') throw new CommandRefused('invalid_request', 'pin the agent, not its direct chat')
+        return
+      }
+      default: {
+        const unknown: never = target
+        throw new CommandRefused('invalid_request', `nothing pinnable: ${JSON.stringify(unknown)}`)
+      }
+    }
+  }
+
+  private commandUnpin(caller: Caller, input: { target: PinTarget }): CommandOutput<'unpin'> {
+    const person = this.pinOwnerOf(caller)
+    const pin = this.store.pinOf(person.id, input.target)
+    if (pin) this.store.deletePin(person.id, pin.id)
+    return {}
+  }
+
+  /** The person's pin of this target, made after their other pins if they had none. */
+  private pinFor(personId: string, target: PinTarget, now: number): PinEntity {
+    const existing = this.store.pinOf(personId, target)
+    if (existing) return existing
+    const pin: PinEntity = { id: shortId(), target, pinnedAt: now }
+    this.store.insertPin(personId, pin)
+    return pin
+  }
+
+  private unpinEverywhere(target: PinTarget): void {
+    for (const { personId, pin } of this.store.pinsOf(target)) this.store.deletePin(personId, pin.id)
+  }
+
+  private repinEverywhere(from: PinTarget, to: PinTarget): void {
+    for (const { personId, pin } of this.store.pinsOf(from)) {
+      if (this.store.pinOf(personId, to)) this.store.deletePin(personId, pin.id)
+      else this.store.retargetPin(personId, pin.id, to)
+    }
+  }
+
   private commandMarkRead(caller: Caller, input: { chatId: string; readThroughSeq: number }): CommandOutput<'mark_chat_read'> {
     if (caller.kind !== 'person') throw new CommandRefused('forbidden', 'only a person has read marks')
     if (!this.store.chatExists(input.chatId)) throw new CommandRefused('not_found', 'no such chat')
@@ -3252,7 +3469,7 @@ type ParticipantKey = `agent:${string}` | `person:${string}` | `remote:${string}
 
 interface DirectPost { from: string; fromAgentId: string | null; toAgent: AgentRow; text: string; attachments: AttachmentRef[]; purpose: MessagePurpose; wake: DeliveryWake; clientKey: string | null; answersAskId: string | null; relayedBy: string | null }
 
-interface NewAgentRequest { task: string; name: string | null; model: string | null; folder: string | null; promptCacheLifetime: PromptCacheLifetime }
+interface NewAgentRequest { task: string; name: string | null; model: string | null; folder: string | null; promptCacheLifetime: PromptCacheLifetime; attachmentIds: string[] }
 
 /** Who starts a new agent, and where it works. `parentAgentId`: the parent's id when it is an agent of this machine. */
 interface NewAgentOrigin { parent: string; createdBy: string; parentAgentId: string | null; folder: string }

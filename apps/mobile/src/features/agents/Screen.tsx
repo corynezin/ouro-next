@@ -1,13 +1,17 @@
-// The agents list, the root screen: Asks, one list by latest activity, Idle folding, search, swipe actions. Renders agents/model.ts.
-import { memo, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+// The agents list, the root screen: Pinned, Asks, one list by latest activity, Idle folding, search, swipe actions. Renders
+// agents/model.ts.
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native'
+import type { ColorValue } from 'react-native'
 import * as Haptics from 'expo-haptics'
-import type { AgentEntity, CommandInput, CommandName } from '@ouro/contract'
+import { useFocusEffect } from '@react-navigation/native'
+import type { CommandInput, CommandName, PinTarget } from '@ouro/contract'
 import { STOP_ATTEMPTS } from '../../core/session/serverApi.ts'
 import { AskChoices } from '../../design/AskChoices.tsx'
 import { Avatar } from '../../design/Avatar.tsx'
 import { C } from '../../design/colors.ts'
 import { barButton, confirm } from '../../design/menus.tsx'
+import { useSteady } from '../../design/steady.ts'
 import { SwipeRow } from '../../design/SwipeRow.tsx'
 import type { SwipeAction } from '../../design/SwipeRow.tsx'
 import { Symbol } from '../../design/Symbol.tsx'
@@ -18,13 +22,13 @@ import { runningCode } from '../../native/updates.ts'
 import { useCore, useNow, useOtherServersUnread, useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
 import type { ScreenProps } from '../../navigation/routes.ts'
 import { ChoiceTapGuard, directSend } from '../chat/model.ts'
-import { StateDot } from '../shared/StateDot.tsx'
-import { listOrder, nextUnread, quickSnooze } from '../shared/agentFacts.ts'
+import { listOrder, nextUnread, pinToggleOf, quickSnooze } from '../shared/agentFacts.ts'
 import type { Asker } from '../shared/agentFacts.ts'
 import type { NewSend } from '../../core/session/outbox.ts'
 import { openSnoozeSheet, snoozeAsk } from '../shared/snoozeSheet.ts'
 import { agentsListModel, otherServersUnreadTotal, swipeActionsOf } from './model.ts'
-import type { AgentRowModel, AskRowModel, ListedRow, MasterCardModel, NoteRow } from './model.ts'
+import type { AgentRowModel, AskRowModel, ListedRow, NoteRow, PinnedRow } from './model.ts'
+import type { ChatRowModel } from '../chats/model.ts'
 import { remoteActionsOf, REMOTE_COPY, remoteSend } from '../remoteAgent/model.ts'
 import type { RemoteActionModel, RemoteAgentRowModel } from '../remoteAgent/model.ts'
 
@@ -32,9 +36,10 @@ const LIST_TICK_MS = 30_000
 
 type Row =
   | ListedRow
+  | { kind: 'pinned'; pin: PinnedRow }
   | { kind: 'ask'; row: AskRowModel }
   | { kind: 'note'; note: NoteRow | { kind: 'empty'; text: string } }
-interface Sec { key: string; header: { kind: 'idle'; count: number } | { kind: 'asks'; text: string; tone: 'orange' | 'secondary' } | null; data: Row[] }
+interface Sec { key: string; header: { kind: 'idle'; count: number } | { kind: 'asks'; text: string; tone: 'orange' | 'secondary' } | { kind: 'pinned' } | null; data: Row[] }
 
 const noteColor = { offline: 'orange', unpaired: 'red', failure: 'red', empty: 'secondary' } as const
 
@@ -67,6 +72,7 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
       out.push({ key: 'search', header: null, data: [...model.search.rows, ...empty] })
       return out
     }
+    if (model.pinned.length) out.push({ key: 'pinned', header: { kind: 'pinned' }, data: model.pinned.map((pin) => ({ kind: 'pinned', pin })) })
     if (model.asks) out.push({ key: 'asks', header: { kind: 'asks', text: model.asks.headerText, tone: model.asks.headerTone }, data: model.asks.rows.map((row) => ({ kind: 'ask', row })) })
     if (model.awake.length) out.push({ key: 'awake', header: null, data: model.awake })
     if (model.idle.length) out.push({ key: 'idle', header: { kind: 'idle', count: model.idle.length }, data: idleOpen ? model.idle : [] })
@@ -84,12 +90,19 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
     void Haptics.notificationAsync(failure ? Haptics.NotificationFeedbackType.Error : Haptics.NotificationFeedbackType.Success)
   }
 
+  /** `command`: pinToggleOf's, or the model's, decision. */
+  const pinSwipe = (command: 'pin' | 'unpin', target: PinTarget): SwipeAction => (command === 'unpin'
+    ? { title: 'Unpin', color: C.gray, onPress: () => { void act('unpin', { target }) } }
+    : { title: 'Pin', color: C.indigo, onPress: () => { void act('pin', { target }) } })
+
   const swipes = (agentId: string): SwipeAction[] => {
     const agent = store.agents.get(agentId)
     if (!agent) return []
     return swipeActionsOf(store, agent).flatMap((action): SwipeAction[] => {
       const target = { agentId: agent.id }
       switch (action.kind) {
+        case 'pin':
+        case 'unpin': return [pinSwipe(action.kind, { kind: 'agent', agentId: agent.id })]
         case 'interrupt': return [{ title: 'Interrupt', color: C.orange, onPress: () => { void act('interrupt_agent', target) } }]
         case 'stop': return [{ title: 'Stop', color: C.red, onPress: () => { void act('stop_agent', target, STOP_ATTEMPTS) } }]
         case 'archive': return [{ title: 'Archive', color: C.gray, onPress: () => confirm(`Archive ${agent.name}?`,
@@ -105,14 +118,16 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
     const computer = remote && store.computers.get(remote.computerId)
     if (!remote || !computer) return []
     const control = (action: RemoteActionModel) => { void act('control_remote_agent', { remoteAgentId, action }) }
-    return remoteActionsOf(remote, computer).map((action): SwipeAction => {
+    const pinTarget: PinTarget = { kind: 'remote_agent', address: remote.address }
+    return [pinSwipe(pinToggleOf(store, pinTarget), pinTarget), ...remoteActionsOf(remote, computer).map((action): SwipeAction => {
       switch (action.kind) {
         case 'interrupt': return { title: 'Interrupt', color: C.orange, onPress: () => control(action) }
         case 'stop': return { title: 'Stop', color: C.red, onPress: () => control(action) }
         case 'archive': return { title: 'Archive', color: C.gray, onPress: () => confirm(REMOTE_COPY.archiveTitle(remote.name), REMOTE_COPY.archiveMessage, 'Archive', () => control(action)) }
       }
-    })
+    })]
   }
+  const openGroup = (chatId: string) => navigation.navigate('ChatRoom', { chatId })
 
   const openAsker = (asker: Asker) => (asker.kind === 'local' ? open(asker.agentId) : openRemote(asker.remoteAgentId))
   /** False for a tap that sends nothing (the guard ignores it, or its asker is gone), so it doesn't buzz either. */
@@ -149,6 +164,13 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
   }
 
   const otherServers = useOtherServersUnread()
+  // The open server's name, read again on each return here: it may have been renamed on the Servers screen.
+  const [serverLabel, setServerLabel] = useState<string | null>(null)
+  useFocusEffect(useCallback(() => {
+    let live = true
+    core.servers.list().then((list) => { if (live) setServerLabel(list.find((server) => server.id === session.serverId)?.label ?? null) }, () => {})
+    return () => { live = false }
+  }, [core, session]))
   const elsewhere = otherServersUnreadTotal(otherServers.counts, session.serverId)
   // Read once when the list opens; after that, on each return to the foreground (at most once a minute).
   useEffect(() => { void otherServers.checkIfDue() }, [otherServers, session])
@@ -173,7 +195,7 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
   return (
     <SectionList<Row, Sec>
       sections={sections}
-      keyExtractor={(row, index) => row.kind === 'local' ? row.row.agentId : row.kind === 'remote' ? `remote:${row.row.remoteAgentId}` : row.kind === 'ask' ? `ask:${row.row.askId}` : `note${index}`}
+      keyExtractor={(row, index) => row.kind === 'local' ? row.row.agentId : row.kind === 'remote' ? `remote:${row.row.remoteAgentId}` : row.kind === 'pinned' ? `pin:${row.pin.pinId}` : row.kind === 'ask' ? `ask:${row.row.askId}` : `note${index}`}
       contentInsetAdjustmentBehavior="automatic"
       keyboardDismissMode="on-drag"
       stickySectionHeadersEnabled={false}
@@ -184,6 +206,11 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
           <Text style={s.screenTitle} accessibilityRole="header">Ouro</Text>
           <View style={s.top}>
             <Symbol name="circle.fill" size={7} color={model.dotColor} />
+            {serverLabel !== null && (
+              <Pressable onPress={() => navigation.navigate('Servers')} style={{ flexShrink: 1 }} accessibilityLabel={`Server ${serverLabel}`} accessibilityRole="button">
+                <Text style={s.topText} numberOfLines={1}>{serverLabel}</Text>
+              </Pressable>
+            )}
             {elsewhere > 0 && (
               <Pressable onPress={() => navigation.navigate('Servers')} style={s.elsewhere} accessibilityLabel={`${elsewhere} unread on other servers`}>
                 <View style={s.miniBadge}><Text style={s.miniBadgeText}>{elsewhere}</Text></View>
@@ -192,11 +219,10 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
             )}
             {model.usageLine !== null && <Text style={s.topText}>{model.usageLine}</Text>}
           </View>
-          {model.master && !query.trim() && <MasterCard card={model.master} agent={store.agents.get(model.master.agentId)} onOpen={open} />}
         </View>
       }
       renderSectionHeader={({ section }) => <SectionHeader header={section.header} idleOpen={idleOpen} toggleIdle={() => setIdleOpen(!idleOpen)} />}
-      renderItem={({ item }) => {
+      renderItem={({ item, index, section }) => {
         if (item.kind === 'note') {
           return (
             <View style={s.note}>
@@ -213,16 +239,28 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
           const sheet = () => openSnoozeSheet(session, row, setNotice, [{ title: 'Open conversation', onPress: () => openAsker(row.asker) }])
           return <SwipeRow actions={swipe}><AskRow row={row} onOpen={openAsker} onLongPress={sheet} onChoose={answerAsk} /></SwipeRow>
         }
+        if (item.kind === 'pinned') {
+          const { pin } = item
+          // Pinned rows sit together on a rounded card, set apart from the list below.
+          const card = [s.pinCard, index === 0 && s.pinFirst, index === section.data.length - 1 && s.pinLast]
+          const bg = C.secondaryBackground
+          if (pin.kind === 'local') return <View style={card}><SwipeRow actions={swipes(pin.row.agentId)} background={bg}><AgentRow {...pin.row} background={bg} onOpen={open} /></SwipeRow></View>
+          if (pin.kind === 'remote') return <View style={card}><SwipeRow actions={remoteSwipes(pin.row.remoteAgentId)} background={bg}><RemoteAgentRow {...pin.row} background={bg} onOpen={openRemote} /></SwipeRow></View>
+          return <View style={card}><SwipeRow actions={[pinSwipe(pinToggleOf(store, { kind: 'chat', chatId: pin.row.chatId }), { kind: 'chat', chatId: pin.row.chatId })]} background={bg}><GroupRow {...pin.row} background={bg} onOpen={openGroup} /></SwipeRow></View>
+        }
         if (item.kind === 'remote') return <SwipeRow actions={remoteSwipes(item.row.remoteAgentId)}><RemoteAgentRow {...item.row} onOpen={openRemote} /></SwipeRow>
         return <SwipeRow actions={swipes(item.row.agentId)}><AgentRow {...item.row} onOpen={open} /></SwipeRow>
       }}
       ItemSeparatorComponent={Separator}
+      renderSectionFooter={({ section }) => (section.key === 'pinned' ? <View style={{ height: 14 }} /> : null)}
       ListFooterComponent={<View style={{ padding: 16 }}><Text style={s.foot}>{otaLabel}</Text><Text style={s.foot}>{runningCodeText(runningCode())}</Text></View>}
     />
   )
 }
 
-const Separator = () => <View style={s.sep} />
+const Separator = ({ section }: { section?: Sec }) => (section?.key === 'pinned'
+  ? <View style={s.pinSepWrap}><View style={s.pinSep} /></View>
+  : <View style={s.sep} />)
 
 function SectionHeader({ header, idleOpen, toggleIdle }: { header: Sec['header']; idleOpen: boolean; toggleIdle: () => void }) {
   if (!header) return null
@@ -234,32 +272,24 @@ function SectionHeader({ header, idleOpen, toggleIdle }: { header: Sec['header']
       </Pressable>
     )
   }
+  if (header.kind === 'pinned') {
+    return (
+      <View style={[s.header, { paddingHorizontal: 28 }]} accessibilityRole="header">
+        <Symbol name="pin.fill" size={11} color="indigo" />
+        <Text style={[s.headerText, { color: C.indigo, letterSpacing: 0.5 }]}>PINNED</Text>
+      </View>
+    )
+  }
   return <View style={s.header}><Text style={[s.headerText, { color: C[header.tone] }]}>{header.text}</Text></View>
 }
 
-function MasterCard({ card, agent, onOpen }: { card: MasterCardModel; agent: AgentEntity | undefined; onOpen: (agentId: string) => void }) {
-  return (
-    <Pressable onPress={() => onOpen(card.agentId)} style={({ pressed }) => [s.card, pressed && { opacity: 0.85 }]} accessibilityLabel="Master agent">
-      <View style={s.icon}><Symbol name="sparkles" size={20} color="white" /></View>
-      <View style={{ flex: 1, gap: 2 }}>
-        <View style={s.line}>
-          <Text style={s.cardTitle}>Master</Text>
-          {agent && <StateDot kind={card.dot} />}
-          <View style={{ flex: 1 }} />
-          <Text style={s.small}>{card.timeText}</Text>
-        </View>
-        <Text style={s.cardSub} numberOfLines={1}>{card.statusText}</Text>
-        {card.previewText !== null && <Text style={[s.cardSub, { color: C.label }]} numberOfLines={2}>{card.previewText}</Text>}
-      </View>
-      {card.unread > 0 && <View style={s.badge}><Text style={s.badgeText}>{card.unread}</Text></View>}
-    </Pressable>
-  )
-}
+const statusKey = (status: { text: string; tone: string }) => `${status.tone}|${status.text}`
 
 // Every prop is a primitive or a stable function, so this draws again only when something it shows changed.
-const AgentRow = memo(function AgentRow(row: AgentRowModel & { onOpen: (agentId: string) => void }) {
+const AgentRow = memo(function AgentRow(row: AgentRowModel & { background?: ColorValue; onOpen: (agentId: string) => void }) {
+  const status = useSteady({ text: row.statusText, tone: row.statusTone }, statusKey)
   return (
-    <Pressable onPress={() => row.onOpen(row.agentId)} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.background }]}>
+    <Pressable onPress={() => row.onOpen(row.agentId)} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : row.background ?? C.background }]}>
       <View style={s.rowInner}>
         <Avatar seed={row.name} kind="agent" model={row.model} size={52} />
         <View style={{ flex: 1, gap: 3 }}>
@@ -271,7 +301,7 @@ const AgentRow = memo(function AgentRow(row: AgentRowModel & { onOpen: (agentId:
             {row.costText !== null && <Text style={s.small}>{`${row.costText} · `}</Text>}
             <Text style={s.small}>{row.timeText}</Text>
           </View>
-          <Text style={[s.sub, { color: row.statusTone === 'busy' ? C.blue : C.secondary }]} numberOfLines={1}>{row.statusText}</Text>
+          <Text style={[s.sub, { color: status.tone === 'busy' ? C.blue : C.secondary }]} numberOfLines={1}>{status.text}</Text>
           {row.summaryLine !== null && <Text style={[s.sub, { color: C.label }]}>{row.summaryLine}</Text>}
           {row.previewText !== null && <Text style={s.sub} numberOfLines={row.previewLines}>{row.previewText}</Text>}
         </View>
@@ -288,10 +318,11 @@ const AgentRow = memo(function AgentRow(row: AgentRowModel & { onOpen: (agentId:
 })
 
 // The reference's remote row: the bare name with its computer small beside it, and no goal, cost or asks to show.
-const RemoteAgentRow = memo(function RemoteAgentRow(row: RemoteAgentRowModel & { onOpen: (remoteAgentId: string) => void }) {
+const RemoteAgentRow = memo(function RemoteAgentRow(row: RemoteAgentRowModel & { background?: ColorValue; onOpen: (remoteAgentId: string) => void }) {
+  const status = useSteady({ text: row.statusText, tone: row.statusTone }, statusKey)
   return (
-    <Pressable onPress={() => row.onOpen(row.remoteAgentId)} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.background }]}>
-      <View style={[s.rowInner, row.statusTone === 'offline' && { opacity: 0.5 }]}>
+    <Pressable onPress={() => row.onOpen(row.remoteAgentId)} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : row.background ?? C.background }]}>
+      <View style={[s.rowInner, status.tone === 'offline' && { opacity: 0.5 }]}>
         <Avatar seed={row.name} kind="agent" model={row.model ?? undefined} size={52} />
         <View style={{ flex: 1, gap: 3 }}>
           <View style={s.line}>
@@ -299,9 +330,30 @@ const RemoteAgentRow = memo(function RemoteAgentRow(row: RemoteAgentRowModel & {
             <View style={{ flex: 1 }} />
             {row.timeText !== null && <Text style={s.small}>{row.timeText}</Text>}
           </View>
-          <Text style={[s.sub, { color: row.statusTone === 'busy' ? C.blue : row.statusTone === 'offline' ? C.orange : C.secondary }]} numberOfLines={1}>{row.statusText}</Text>
+          <Text style={[s.sub, { color: status.tone === 'busy' ? C.blue : status.tone === 'offline' ? C.orange : C.secondary }]} numberOfLines={1}>{status.text}</Text>
           {row.summaryLine !== null && <Text style={[s.sub, { color: C.label }]}>{row.summaryLine}</Text>}
           {row.previewText !== null && <Text style={s.sub} numberOfLines={row.previewLines}>{row.previewText}</Text>}
+        </View>
+        {row.unread > 0 && <View style={s.badge}><Text style={s.badgeText}>{row.unread}</Text></View>}
+      </View>
+    </Pressable>
+  )
+})
+
+// A pinned group: its name, member count and last message, opening the room.
+const GroupRow = memo(function GroupRow(row: ChatRowModel & { background?: ColorValue; onOpen: (chatId: string) => void }) {
+  return (
+    <Pressable onPress={() => row.onOpen(row.chatId)} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : row.background ?? C.background }]}>
+      <View style={s.rowInner}>
+        <View style={s.groupIcon}><Symbol name="person.2.fill" size={22} color="secondary" /></View>
+        <View style={{ flex: 1, gap: 3 }}>
+          <View style={s.line}>
+            <Text style={s.name} numberOfLines={1}>{row.title}</Text>
+            <View style={{ flex: 1 }} />
+            <Text style={s.small}>{row.timeText}</Text>
+          </View>
+          <Text style={[s.sub, { color: C.secondary }]} numberOfLines={1}>{row.membersText}</Text>
+          {row.previewText !== null && <Text style={s.sub} numberOfLines={2}>{row.previewText}</Text>}
         </View>
         {row.unread > 0 && <View style={s.badge}><Text style={s.badgeText}>{row.unread}</Text></View>}
       </View>
@@ -349,8 +401,10 @@ const s = StyleSheet.create({
   miniBadge: { backgroundColor: C.red, borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   miniBadgeText: { color: 'white', fontWeight: '700', fontSize: 10 },
   foot: { color: C.secondary, fontSize: 11, textAlign: 'center', marginVertical: 2 },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 12, marginTop: 4, marginBottom: 8, padding: 12, borderRadius: 16, backgroundColor: C.secondaryBackground },
-  icon: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.indigo, alignItems: 'center', justifyContent: 'center' },
-  cardTitle: { fontSize: 18, fontWeight: '700', color: C.label },
-  cardSub: { fontSize: 14, color: C.secondary },
+  pinCard: { marginHorizontal: 12, backgroundColor: C.secondaryBackground, overflow: 'hidden' },
+  pinFirst: { borderTopLeftRadius: 14, borderTopRightRadius: 14 },
+  pinLast: { borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
+  pinSepWrap: { marginHorizontal: 12, backgroundColor: C.secondaryBackground },
+  pinSep: { height: StyleSheet.hairlineWidth, backgroundColor: C.separator, marginLeft: 78 },
+  groupIcon: { width: 52, height: 52, borderRadius: 26, backgroundColor: C.secondaryBackground, alignItems: 'center', justifyContent: 'center' },
 })

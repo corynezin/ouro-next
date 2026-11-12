@@ -22,6 +22,7 @@ export function snapshotOf(partial: Partial<Snapshot> = {}): Snapshot {
     agents: [],
     chats: [],
     readStates: [],
+    pins: [],
     asks: [],
     goals: [],
     summaries: [],

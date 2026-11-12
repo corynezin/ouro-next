@@ -17,7 +17,8 @@ import { chatItems, FAILED_SEND_ACTIONS, JUMP_PAGE_SIZE, outboxBubble } from '..
 import type { ChatItem } from '../chat/model.ts'
 import { Marked, useJumpToMessage } from '../chat/useJumpToMessage.tsx'
 import { HistoryFooter, useHistory } from '../chat/History.tsx'
-import { mentionOptions } from '../chats/model.ts'
+import { mentionOptions, pinTargetOfChat } from '../chats/model.ts'
+import { pinToggleOf } from '../shared/agentFacts.ts'
 import { groupSend, homeDeliveryNote, ROOM_COPY, roomFooter, roomHeader, senderLabel } from './model.ts'
 
 export function ChatRoomScreen({ navigation, route }: ScreenProps<'ChatRoom'>) {
@@ -47,6 +48,13 @@ export function ChatRoomScreen({ navigation, route }: ScreenProps<'ChatRoom'>) {
     loadOlder: () => session.loadOlder(chatId, JUMP_PAGE_SIZE),
   })
 
+  const pinTarget = chat ? pinTargetOfChat(store, chat) : null
+  const pinCommand = pinTarget === null ? null : pinToggleOf(store, pinTarget)
+  const pinned = pinCommand === 'unpin'
+  const togglePin = () => {
+    if (!pinTarget || !pinCommand) return
+    void session.commandError(pinCommand, { target: pinTarget }, 1).then((failure) => { if (failure) setNote(failure) })
+  }
   useLayoutEffect(() => {
     navigation.setOptions({
       title: header.title,
@@ -56,9 +64,12 @@ export function ChatRoomScreen({ navigation, route }: ScreenProps<'ChatRoom'>) {
           {header.subtitle ? <Text style={{ fontSize: 11, color: C.secondary }} numberOfLines={1}>{header.subtitle}</Text> : null}
         </View>
       ),
-      unstable_headerRightItems: () => [barButton('info.circle', 'Details', () => navigation.navigate('ChatInfo', { chatId }))],
+      unstable_headerRightItems: () => [
+        ...(pinTarget ? [barButton(pinned ? 'pin.slash' : 'pin', pinned ? 'Unpin' : 'Pin to top', togglePin)] : []),
+        barButton('info.circle', 'Details', () => navigation.navigate('ChatInfo', { chatId })),
+      ],
     })
-  }, [navigation, header.title, header.subtitle, titleWidth, chatId])
+  }, [navigation, header.title, header.subtitle, titleWidth, chatId, pinned, pinTarget?.kind])
 
   const send = (text: string) => {
     if (!chat || !text) return

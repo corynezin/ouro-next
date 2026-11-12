@@ -1,14 +1,13 @@
 // Taking bases (J-34, server side): an offered base is merged beside the person's live source and goes live through the
-// guardian's release path, then into their branch; a conflict goes to the master agent and nothing live changes until it
-// is resolved; a base that doesn't build changes nothing. A local bare repository stands in for the public base repository.
+// guardian's release path, then into their branch; a conflict goes to an agent started for it (or, when none can start, to
+// the owner) and nothing live changes until it is resolved; a base that doesn't build changes nothing. A local bare repository stands in for the public base repository.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { after, before, test } from 'node:test'
-import { MASTER_AGENT_NAME } from '@ouro/contract'
-import type { BaseStatus, LogRecord, MessageEntity } from '@ouro/contract'
+import type { AgentEntity, BaseStatus, MessageEntity } from '@ouro/contract'
 import { BaseRepo } from '../server/src/adapters/base-repo-fixture.ts'
 import { GuardianRun } from './guardian-harness.ts'
 import { standInScript, waitFor } from './harness.ts'
@@ -25,6 +24,7 @@ const FOLDER_LINE = 'Work in {{folder}} unless the task says otherwise.'
 const PERSON_LINE = 'Work in {{folder}} unless the task says otherwise. Keep notes short.'
 const BASE_2_LINE = 'Work in {{folder}} unless your task says otherwise.'
 const RESOLVED_LINE = 'Work in {{folder}} unless your task says otherwise. Keep notes short.'
+const BASE_4_LINE = 'Work in {{folder}} unless the task you were given says otherwise.'
 
 /** A stand-in for `expo export`, configured the way a person's is. */
 const FAKE_EXPORT = `mkdir -p {out}/b && echo bundle > {out}/b/ios.js && printf '{"version":0,"fileMetadata":{"ios":{"bundle":"b/ios.js","assets":[]}}}' > {out}/metadata.json`
@@ -47,7 +47,7 @@ async function makeBaseTrees(): Promise<void> {
   await execFileAsync('tar', ['-xf', archive, '-C', treeOf(0)])
 
   cpSync(treeOf(0), treeOf(1), { recursive: true })
-  writeFileSync(join(treeOf(1), 'server/protocols/master.md'), `${readFileSync(join(treeOf(1), 'server/protocols/master.md'), 'utf8')}\nBase 1 was here.\n`)
+  writeFileSync(join(treeOf(1), 'server/protocols/starter.md'), `${readFileSync(join(treeOf(1), 'server/protocols/starter.md'), 'utf8')}\nBase 1 was here.\n`)
   mkdirSync(join(treeOf(1), 'apps/mobile'), { recursive: true })
   writeFileSync(join(treeOf(1), 'apps/mobile/base-1.txt'), 'the app, as of base 1\n')
   writeFileSync(join(treeOf(1), 'apps/mobile/app.json'), JSON.stringify({ expo: { name: 'Ouro Next', version: '0.1.0', runtimeVersion: { policy: 'appVersion' } } }))
@@ -57,6 +57,10 @@ async function makeBaseTrees(): Promise<void> {
 
   cpSync(treeOf(2), treeOf(3), { recursive: true })
   editTree(3, 'server/src/app/render.ts', 'const STOP_WORDS', 'const typeError: number = "not a number"\nconst STOP_WORDS')
+
+  // Base 4 drops base 3's broken change and rewords the line the person changed again.
+  cpSync(treeOf(2), treeOf(4), { recursive: true })
+  editTree(4, DEFAULT_PROTOCOL, BASE_2_LINE, BASE_4_LINE)
 }
 
 /** Releasing base `n` in the repository, which servers then offer. */
@@ -73,7 +77,7 @@ before(async () => {
   run.editSource(DEFAULT_PROTOCOL, FOLDER_LINE, PERSON_LINE)
   await run.commitAll('my own wording')
   await makeBaseTrees()
-  await offer(1, 'the master protocol gains a line, and the app a file')
+  await offer(1, 'the starter protocol gains a line, and the app a file')
 
   run.extraOurodEnv = { OURO_BASE_REPO: baseRepo.url, OURO_APP_EXPORT_COMMAND: FAKE_EXPORT }
   await run.start()
@@ -98,19 +102,13 @@ async function base(): Promise<Extract<BaseStatus, { kind: 'taker' }> | null> {
 const head = async () => (await run.git('rev-parse', 'main')).trim()
 const sourceText = (path: string) => readFileSync(join(run.source, path), 'utf8')
 
-/** The person's chat with the master agent; it opens with the person's first message. */
-async function conversationWithMaster(): Promise<MessageEntity[]> {
-  const snapshot = await phone.snapshot()
-  const opened = snapshot.chats.some((chat) => chat.kind === 'direct'
-    && chat.members.some((member) => member.address === snapshot.viewer.address)
-    && chat.members.some((member) => member.address === MASTER_AGENT_NAME))
-  return opened ? await phone.conversation(MASTER_AGENT_NAME) : []
+/** The agent a base update started for its work, once there is one. */
+async function startedFor(name: string): Promise<AgentEntity | undefined> {
+  return (await phone.snapshot()).agents.find((agent) => agent.name === name)
 }
 
-async function masterNotices(): Promise<string[]> {
-  const records = (JSON.parse(await run.cli('log', MASTER_AGENT_NAME)) as { records: LogRecord[] }).records
-  return records.flatMap((record) => (record.kind === 'incoming' && record.from === 'system' ? [record.text] : []))
-}
+/** The person's chat with an agent. */
+const conversationWith = async (name: string): Promise<MessageEntity[]> => await phone.conversation(name)
 
 test('an offered base is merged beside the live source, goes live through the guardian, and then into the person\'s branch', async () => {
   const offered = await waitFor('base 1 to be offered', async () => (await base())?.offered?.n === 1 && await base())
@@ -130,17 +128,17 @@ test('an offered base is merged beside the live source, goes live through the gu
   const status = await run.status()
   assert.notEqual(status.active, releaseBefore)
   assert.ok(status.active!.endsWith((await head()).slice(0, 8)), 'main is the commit that went live')
-  assert.match(sourceText('server/protocols/master.md'), /Base 1 was here\./)
+  assert.match(sourceText('server/protocols/starter.md'), /Base 1 was here\./)
   assert.match(sourceText(DEFAULT_PROTOCOL), /Keep notes short\./, 'the person\'s own change is kept')
   assert.ok(!existsSync(besideDirOf(1)), 'the merge beside is cleaned up')
   assert.equal((await run.git('branch', '--list', 'ouro-update/*')).trim(), '')
   const latestUpdate = await waitFor('the app to be published', async () => ((await (await fetch(`${run.url}/v2/identity`)).json()) as { latestUpdate: { updateNumber: number } | null }).latestUpdate)
   assert.equal(latestUpdate.updateNumber, 1, 'base 1 changes the app, so the phone has it without anyone running ouro publish')
-  assert.ok(!(await masterNotices()).some((text) => text.includes('Ouro base 1 is live')), 'nothing is left for the master agent to do')
+  assert.equal(await startedFor('base-1-publish'), undefined, 'no agent is started to publish it')
   assert.equal(done.offered?.n, 2, 'the next base is offered once this one is in')
 })
 
-test('a base that conflicts with the person\'s changes waits for them; the master agent resolves it once asked and carries on', async () => {
+test('a base that conflicts with the person\'s changes waits for them; once asked, an agent started for it resolves it and carries on', async () => {
   await waitFor('base 2 to be offered', async () => (await base())?.offered?.n === 2)
   const releaseBefore = (await run.status()).active
   const headBefore = await head()
@@ -153,30 +151,31 @@ test('a base that conflicts with the person\'s changes waits for them; the maste
   assert.deepEqual(conflicted, { state: 'conflict', n: 2, files: [DEFAULT_PROTOCOL], resolver: null })
   assert.equal((await run.status()).active, releaseBefore, 'nothing live changed')
   assert.equal(await head(), headBefore)
-  assert.ok(!(await masterNotices()).some((text) => text.startsWith('Ouro base 2 conflicts')), 'nothing goes to the master agent until the person chooses')
+  assert.equal(await startedFor('base-2'), undefined, 'no agent is started until the person chooses')
   const resolving = await phone.command('resolve_base_update', {})
-  assert.deepEqual(resolving.server.release.base.kind === 'taker' && resolving.server.release.base.update, { state: 'conflict', n: 2, files: [DEFAULT_PROTOCOL], resolver: MASTER_AGENT_NAME })
-  const brief = await waitFor('the master agent\'s brief', async () => (await masterNotices()).find((text) => text.startsWith('Ouro base 2 conflicts')))
+  assert.deepEqual(resolving.server.release.base.kind === 'taker' && resolving.server.release.base.update, { state: 'conflict', n: 2, files: [DEFAULT_PROTOCOL], resolver: 'base-2' })
+  const brief = (await waitFor('an agent started with the brief', async () => await startedFor('base-2'))).task
+  assert.ok(brief.startsWith('Ouro base 2 conflicts'))
   assert.ok(brief.includes(DEFAULT_PROTOCOL) && brief.includes(besideDirOf(2)) && brief.includes('ouro base continue'))
 
-  // What the master agent's model would do: keep the person's wording and take the base's.
+  // What the base agent's model would do: keep the person's wording and take the base's.
   const resolved = join(run.dir, 'resolved.md')
   writeFileSync(resolved, readFileSync(join(treeOf(2), DEFAULT_PROTOCOL), 'utf8').replace(BASE_2_LINE, RESOLVED_LINE))
   await offer(3, 'a change that does not build')
   const beside = besideDirOf(2)
-  const seenBefore = (await conversationWithMaster()).length
+  const seenBefore = (await conversationWith('base-2')).length
   await phone.command('send_message', {
-    to: MASTER_AGENT_NAME,
+    to: 'base-2',
     text: standInScript({
       do: 'run',
-      command: `cp ${resolved} ${join(beside, DEFAULT_PROTOCOL)} && git -C ${beside} add -A && git -C ${beside} -c user.name=master -c user.email=master@invalid commit -q --no-edit && ouro base continue > continued.txt 2>&1; ouro reply "$(cat continued.txt)"`,
+      command: `cp ${resolved} ${join(beside, DEFAULT_PROTOCOL)} && git -C ${beside} add -A && git -C ${beside} -c user.name=base-2 -c user.email=base-2@invalid commit -q --no-edit && ouro base continue > continued.txt 2>&1; ouro reply "$(cat continued.txt)"`,
     }),
     attachmentIds: [],
     wake: 'wake',
     answersAskId: null,
   })
-  const reply = await waitFor('the master agent to carry on', async () => (await conversationWithMaster()).slice(seenBefore)
-    .find((message) => message.from === MASTER_AGENT_NAME && !message.text.startsWith('stand-in received')), 60_000)
+  const reply = await waitFor('the base agent to carry on', async () => (await conversationWith('base-2')).slice(seenBefore)
+    .find((message) => message.from === 'base-2' && !message.text.startsWith('stand-in received')), 60_000)
   assert.match(reply.text, /updating to base 2/)
 
   await waitFor('base 2 to be integrated', async () => {
@@ -205,4 +204,31 @@ test('a base that fails to build changes nothing: the live release and the perso
   assert.equal((await run.status()).active, releaseBefore)
   assert.equal(await head(), headBefore)
   assert.doesNotMatch(sourceText('server/src/app/render.ts'), /typeError/)
+})
+
+test('a conflict no agent can start for goes to the owner, and is recorded with no resolver', async () => {
+  // The server looks for bases when it starts (and then only every half hour): a restart finds base 4.
+  await offer(4, 'the default protocol is reworded again')
+  const before = await run.status()
+  process.kill(before.ourodPid!, 'SIGKILL')
+  await waitFor('a new server', async () => { const status = await run.status(); return status.ourodPid !== null && status.ourodPid !== before.ourodPid }, 20_000)
+  await waitFor('base 4 to be offered', async () => (await base())?.offered?.n === 4, 30_000)
+  // A running agent holds the only slot.
+  await phone.command('create_agent', { task: standInScript({ do: 'run', command: 'sleep 600' }), name: 'sleeper', model: null, folder: null })
+  await waitFor('the sleeper to run', async () => (await startedFor('sleeper'))?.state.state === 'in_turn')
+  await phone.command('set_limits', { agentLimit: 1, budgetUsd: null })
+
+  await phone.command('take_base_update', { n: 4 })
+  const conflicted = await waitFor('base 4 to conflict', async () => {
+    const status = await base()
+    return status?.update.state === 'conflict' && status.update
+  }, 60_000)
+  assert.deepEqual(conflicted, { state: 'conflict', n: 4, files: [DEFAULT_PROTOCOL], resolver: null })
+  assert.equal(await startedFor('base-4'), undefined, 'no agent was started')
+  const snapshot = await phone.snapshot()
+  const systemChat = snapshot.chats.find((chat) => chat.members.some((member) => member.address === 'system') && chat.members.some((member) => member.address === snapshot.viewer.address))
+  assert.ok(systemChat, 'the owner was told, from the system')
+  const notice = (await phone.history(systemChat.id)).messages.find((message) => message.text.startsWith('Ouro base 4 conflicts'))
+  assert.ok(notice, 'with the brief')
+  assert.match(notice.text, /couldn't start an agent for this: the limit of 1 running agents is reached/)
 })

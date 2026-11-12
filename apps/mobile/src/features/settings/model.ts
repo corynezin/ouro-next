@@ -1,6 +1,5 @@
 // Settings as data. Pure: Screen.tsx only draws this.
 import { ago } from '../../design/format.ts'
-import { MASTER_AGENT_NAME } from '@ouro/contract'
 import type {
   AwsIntegrationState, ChatgptIntegrationState, ClaudeIntegrationState, DeviceEntity, GithubIntegrationState, NotificationSettings, NotificationSettingsEntity, OpenrouterIntegrationState, PersonEntity,
   ServerEntity, TailscaleState,
@@ -103,8 +102,8 @@ export function peopleRows(people: Iterable<PersonEntity>, devices: Iterable<Dev
 export const BASE_UPDATE_STARTED = 'Updating. Your agents restart when it finishes.'
 
 /**
- * The "Ouro" section: which base this server's source has merged and how taking the next one is going. Null where the
- * server takes no bases (it publishes them, or has no copy of the source). Only the owner may take one.
+ * The "Ouro" section: which version this server runs and how taking the next base is going. A base is named by its
+ * version (`0.6.0`) when it has one, else by its number, from before versions. Null where the server takes no bases (it publishes them, or has no copy of the source). Only the owner may take one.
  */
 export interface BaseSection {
   versionText: string
@@ -114,41 +113,46 @@ export interface BaseSection {
   footer: string | null
   /** The base the button takes, offered when newer and nothing is under way. */
   take: { n: number; label: string } | null
-  /** After a conflict no agent is resolving yet, the owner's choice: have the master agent merge it, or drop the update. */
+  /** After a conflict no agent is resolving yet, the owner's choice: have an agent merge it, or drop the update. */
   conflict: { resolveLabel: string; dropLabel: string; dropTitle: string; dropMessage: string; dropConfirmLabel: string } | null
 }
 
-export function baseSection(base: ServerEntity['release']['base'], isOwner: boolean): BaseSection | null {
+export function baseSection(release: Pick<ServerEntity['release'], 'base' | 'version'>, isOwner: boolean): BaseSection | null {
+  const { base } = release
   if (base.kind === 'not_taking') return null
   const { offered, update } = base
   const newer = offered !== null && offered.n > base.integrated ? offered : null
   const takeable = newer !== null && isOwner && (update.state === 'idle' || update.state === 'failed')
+  // Only the offered base's version is known; any other is named by its number.
+  const version = (n: number) => (offered?.n === n ? offered.version ?? null : null)
+  const named = (n: number) => { const v = version(n); return v ? `Ouro ${v}` : `Base ${n}` }
+  const target = (n: number) => version(n) ?? `base ${n}`
   return {
-    versionText: `Base ${base.integrated}`,
-    updatingText: update.state === 'updating' ? `Updating to base ${update.n}…` : null,
+    versionText: release.version ?? `Base ${base.integrated}`,
+    updatingText: update.state === 'updating' ? `Updating to ${target(update.n)}…` : null,
     note: update.state === 'conflict'
-      ? { text: conflictText(update.n, update.files, update.resolver === undefined ? MASTER_AGENT_NAME : update.resolver), color: 'orange' }
+      ? { text: conflictText(named(update.n), update.files, update.resolver), color: 'orange' }
       : update.state === 'failed'
-        ? { text: `Base ${update.n} didn't go in: ${update.why}. Nothing live changed unless it says so.`, color: 'red' }
+        ? { text: `${named(update.n)} didn't go in: ${update.why}. Nothing live changed unless it says so.`, color: 'red' }
         : null,
     footer: newer?.notes ?? null,
-    take: takeable ? { n: newer.n, label: `Update to base ${newer.n}` } : null,
+    take: takeable ? { n: newer.n, label: `Update to ${target(newer.n)}` } : null,
     conflict: update.state === 'conflict' && update.resolver === null && isOwner ? {
-      resolveLabel: 'Have your master agent merge it',
+      resolveLabel: 'Have an agent merge it',
       dropLabel: 'Not now',
-      dropTitle: `Skip base ${update.n} for now?`,
+      dropTitle: `Skip ${target(update.n)} for now?`,
       dropMessage: 'The merge is thrown away and nothing changes. You can update again later.',
       dropConfirmLabel: 'Skip',
     } : null,
   }
 }
 
-/** A conflict waits for the owner's choice (`resolver` null) or for the agent working it out. An older server sends no
- * `resolver`: it went to the master agent at once. */
-function conflictText(n: number, files: string[], resolver: string | null): string {
-  const touches = `Base ${n} touches files you changed (${files.join(', ')}).`
-  if (resolver === null) return `${touches} Nothing has changed yet. Your master agent can merge it, keeping what your changes were for.`
-  const who = resolver === MASTER_AGENT_NAME ? 'Your master agent' : `An agent, ${resolver},`
+/** A conflict waits for the owner's choice (`resolver` null) or for the agent started to work it out. An older server sends
+ * no `resolver`: it handed the conflict to an agent at once. `named` is the base as the person knows it. */
+function conflictText(named: string, files: string[], resolver: string | null | undefined): string {
+  const touches = `${named} touches files you changed (${files.join(', ')}).`
+  if (resolver === null) return `${touches} Nothing has changed yet. An agent can merge it, keeping what your changes were for.`
+  const who = resolver === undefined ? 'An agent' : `An agent, ${resolver},`
   return `${touches} ${who} is working it out; nothing has changed yet.`
 }
 

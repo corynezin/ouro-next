@@ -55,7 +55,7 @@ appId: dev.claudeinbox.ouronext
     visible: "Message header"
     timeout: 10000
 # CHAT-02: Next unread replaces this chat, so Back goes to the list, not to header. Unread chats are left by earlier
-# flows (the master's and helper's open asks at least), so the button is enabled.
+# flows (the starter's and helper's open asks at least), so the button is enabled.
 - tapOn: "Next unread, \\d+"
 - extendedWaitUntil:
     visible: "Message .*"

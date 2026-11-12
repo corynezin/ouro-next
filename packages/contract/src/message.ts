@@ -100,7 +100,7 @@ export const MessageEntity = z.object({
   posesAskId: z.string().nullable(),
   /** The ask this message answers, when it answers only that one. */
   answersAskId: z.string().nullable(),
-  /** The agent that carried these words of the person's on their behalf (the master agent's relay). Null when sent directly. */
+  /** The agent that carried these words of the person's on their behalf (`ouro relay`). Null when sent directly. */
   relayedBy: Address.nullable(),
   deliveries: z.array(Delivery),
   /** Recipients on other machines, as far as this machine knows. */
