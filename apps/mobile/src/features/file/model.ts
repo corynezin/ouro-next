@@ -32,14 +32,30 @@ blockquote { margin-left: 0; padding-left: 12px; border-left: 4px solid rgba(127
 img { max-width: 100%; } a { color: #0a84ff; }
 `
 
+const escapingRenderer = new Renderer()
+escapingRenderer.html = ({ text }) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+/**
+ * What the page may load: its own styles and images written into the file itself, nothing from the network. Agents write
+ * these files, often from text they read elsewhere; an image address is fetched the moment the file opens, and could
+ * carry anything in it to whoever serves it. Also a second lock behind the web view's JavaScript being off.
+ */
+export const MARKDOWN_CONTENT_POLICY = "default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+
 /** A Markdown file as a standalone HTML page (GFM: tables, task lists, fenced code). Raw HTML in it is shown as text. */
 export function markdownToHtml(source: string): string {
   const body = marked.parse(source, { gfm: true, async: false, renderer: escapingRenderer })
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${MARKDOWN_CSS}</style></head><body>${body}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${MARKDOWN_CONTENT_POLICY}"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${MARKDOWN_CSS}</style></head><body>${body}</body></html>`
 }
 
-const escapingRenderer = new Renderer()
-escapingRenderer.html = ({ text }) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+/** A Markdown file larger than this opens unformatted: formatting reads all of it and runs on the app's one thread. */
+export const MARKDOWN_FORMAT_MAX_BYTES = 1024 * 1024
+
+/** The page for a Markdown file's bytes, read as UTF-8. Null for one too large to format: it opens as any other file does. */
+export function markdownPage(bytes: ArrayBuffer): string | null {
+  if (bytes.byteLength > MARKDOWN_FORMAT_MAX_BYTES) return null
+  return markdownToHtml(new TextDecoder('utf-8').decode(bytes))
+}
 
 /** What a tap on a link in a rendered Markdown file does: in-page anchors stay, web and mail links open outside, the rest do nothing. */
 export function markdownLinkAction(url: string): 'load' | 'open' | 'block' {

@@ -10,7 +10,7 @@ import { C } from '../../design/colors.ts'
 import { HeaderIcon } from '../../design/form.tsx'
 import { useSession } from '../../navigation/coreContext.tsx'
 import type { ScreenProps } from '../../navigation/routes.ts'
-import { FILE_COPY, isMarkdownFile, markdownLinkAction, markdownToHtml, sharedFileName } from './model.ts'
+import { FILE_COPY, isMarkdownFile, markdownLinkAction, markdownPage, sharedFileName } from './model.ts'
 
 async function share(url: string, headers: Record<string, string>, fileName: string) {
   try {
@@ -38,18 +38,20 @@ export function FileScreen({ route, navigation }: ScreenProps<'File'>) {
     })
   }, [navigation, fileName, uri, headers])
 
-  const markdown = !isImage && isMarkdownFile(fileName)
+  // `tooLarge`: read, and too large to format, so it opens in the plain web view below like any other file.
   const [html, setHtml] = useState<string | null>(null)
+  const [tooLarge, setTooLarge] = useState(false)
+  const markdown = !isImage && isMarkdownFile(fileName) && !tooLarge
   useEffect(() => {
     if (!markdown) return
     let current = true
     fetch(uri, { headers })
       .then(async (response) => {
         if (!response.ok) throw new Error(FILE_COPY.httpError(response.status))
-        return markdownToHtml(new TextDecoder('utf-8').decode(await response.arrayBuffer()))
+        return markdownPage(await response.arrayBuffer())
       })
       .then(
-        (page) => { if (current) setHtml(page) },
+        (page) => { if (!current) return; if (page === null) setTooLarge(true); else setHtml(page) },
         (e: Error) => { if (current) { setLoading(false); setError(e.message) } },
       )
     return () => { current = false }
