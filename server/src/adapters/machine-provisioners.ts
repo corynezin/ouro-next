@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { runSpriteJob, spriteLauncher } from '@ouro/contract/sprites'
+import type { MadeServerInvite } from '@ouro/contract'
 import type { SpritesApi } from '@ouro/contract/sprites'
 import type { Ec2Api } from './ec2.ts'
 
@@ -46,6 +47,8 @@ export interface MachineProvisioner {
   address(order: MachineOrder): Promise<string>
   startPairing(order: MachineOrder): Promise<PairingCode>
   hasPairedPhone(order: MachineOrder): Promise<boolean>
+  /** Its server takes the invite, as its owner. */
+  join(order: MachineOrder, invite: MadeServerInvite): Promise<void>
   /** The machine is gone; one already gone, or never made, is as good. Found even when `data` holds nothing. */
   destroy(order: MachineOrder): Promise<void>
 }
@@ -91,7 +94,8 @@ export async function currentCommitOf(sourceRoot: string): Promise<string> {
 
 /**
  * Asks the new server over its local socket, as its owner, and prints the answer as JSON: `pair` starts a pairing for the
- * owner's phone; `paired` says whether the owner has a paired phone.
+ * owner's phone; `paired` says whether the owner has a paired phone; `join-network` (as its home, of the kind given) and
+ * `join-computer` take an invite from the server that made it.
  */
 const queryProgram = (socketPath: string) => `import { request } from 'node:http'
 const socketPath = ${JSON.stringify(socketPath)}
@@ -104,17 +108,28 @@ const ask = (method, path, body) => new Promise((resolve, reject) => {
   outgoing.on('error', reject)
   outgoing.end(body ? JSON.stringify(body) : undefined)
 })
-const [query, key] = process.argv.slice(2)
+const [query, key, address, code, kind] = process.argv.slice(2)
 if (query === 'pair') {
   const started = await ask('POST', '/v2/commands/start_pairing', { idempotencyKey: key, input: { inviteePersonName: null } })
   process.stdout.write(JSON.stringify({ code: started.code, expiresAt: started.expiresAt }))
 } else if (query === 'paired') {
   const snapshot = await ask('GET', '/v2/snapshot')
   process.stdout.write(JSON.stringify({ paired: snapshot.devices.some((device) => device.personId === snapshot.viewer.personId) }))
+} else if (query === 'join-network') {
+  await ask('POST', '/v2/commands/join_network', { idempotencyKey: key, input: { address, code, role: 'home', kind } })
+  process.stdout.write(JSON.stringify({ joined: true }))
+} else if (query === 'join-computer') {
+  await ask('POST', '/v2/commands/join_computer', { idempotencyKey: key, input: { address, code } })
+  process.stdout.write(JSON.stringify({ joined: true }))
 } else {
   throw new Error('no query ' + query)
 }
 `
+
+/** The query program's arguments for taking an invite, quoted for the shell: a network's kind last. */
+const joinArguments = (order: MachineOrder, invite: MadeServerInvite): string =>
+  [`join-${invite.kind}`, `made-join-${order.id}-${Date.now()}`, invite.address, invite.code, ...(invite.kind === 'network' ? [invite.networkKind] : [])]
+    .map(shellQuoted).join(' ')
 
 /** Clones the bundle as the source, at the commit, with the base branch beside it, as the hub's upload does. */
 const cloneScript = (bundle: string, source: string, commit: string) => `set -euo pipefail
@@ -301,6 +316,10 @@ ${settingsText(ec2InstallerSettings(order, this.ipOf(order), this.config.setting
 
   async hasPairedPhone(order: MachineOrder): Promise<boolean> {
     return (JSON.parse(await this.ssh(order, `node ${EC2_WORK}/query.mjs paired`)) as { paired: boolean }).paired
+  }
+
+  async join(order: MachineOrder, invite: MadeServerInvite): Promise<void> {
+    await this.ssh(order, `node ${EC2_WORK}/query.mjs ${joinArguments(order, invite)}`)
   }
 
   /** The recorded instance, or, when none was recorded, every live instance tagged with the order's id. */
@@ -529,6 +548,10 @@ bash ${SPRITE_SOURCE}/${INSTALLERS.sprite} ${order.commit}
     return (await this.query<{ paired: boolean }>(order, 'paired', `node ${SPRITE_QUERY} paired`)).paired
   }
 
+  async join(order: MachineOrder, invite: MadeServerInvite): Promise<void> {
+    await this.query<{ joined: boolean }>(order, 'join', `node ${SPRITE_QUERY} ${joinArguments(order, invite)}`)
+  }
+
   async destroy(order: MachineOrder): Promise<void> {
     await this.config.api.deleteSprite(this.nameOf(order))
   }
@@ -538,7 +561,7 @@ bash ${SPRITE_SOURCE}/${INSTALLERS.sprite} ${order.commit}
     return order.data.sprite ?? spriteNameOf(this.config.api.namePrefix, order.id)
   }
 
-  private async query<T>(order: MachineOrder, job: 'pair' | 'paired', command: string): Promise<T> {
+  private async query<T>(order: MachineOrder, job: 'pair' | 'paired' | 'join', command: string): Promise<T> {
     const name = this.nameOf(order)
     const path = `${SPRITE_WORK}/jobs/${job}`
     await this.runJob(name, job, `set -euo pipefail\n${command} > "${path}.out.partial"\nmv "${path}.out.partial" "${path}.out"\n`, this.config.deadlines.query)

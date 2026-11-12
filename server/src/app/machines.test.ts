@@ -27,6 +27,10 @@ function fakeProvisioner(calls: string[], options: { failAt?: string; paired?: (
     startPairing: async () => { calls.push('pair'); return { code: `code-${calls.length}`, expiresAt: Date.now() + 10 * 60_000 } },
     hasPairedPhone: async () => options.paired?.() ?? false,
     destroy: async (order) => { calls.push(`destroy:${order.data.instanceId}`) },
+    join: async (order, invite) => {
+      calls.push(`join:${order.data.instanceId}:${invite.kind}:${invite.address}:${invite.code}`)
+      if (options.failAt === 'join') throw new Error('join_network answered 403: That invite is not valid\nmore')
+    },
   }
 }
 
@@ -142,4 +146,26 @@ test('the machines file keeps every record across a restart, oldest first, and p
   again.delete('m-1')
   assert.deepEqual(new MachinesFile(path).list().map((record) => record.id), ['m-2'])
   assert.equal(statSync(path).mode & 0o777, 0o600)
+})
+
+test('a ready server joins this one with a fresh invite, and is then named as a computer', async () => {
+  const calls: string[] = []
+  const machines = machinesWith(fakeProvisioner(calls))
+  const made = await machines.create('aws', 'PR Sprite 1')
+  let invites = 0
+  const invite = () => ({ kind: 'network' as const, networkKind: 'private' as const, address: 'https://here.example', code: `c${++invites}` })
+  await assert.rejects(machines.link(made.id, invite), (error: Error) => error instanceof CommandRefused && /still being made/.test(error.message))
+  assert.equal(invites, 0)
+  await machines.start(made.id)
+  assert.deepEqual(await machines.link(made.id, invite), { computerName: 'pr-sprite-1' })
+  assert.equal(calls.at(-1), 'join:i-1:network:https://here.example:c1')
+})
+
+test('a server that fails to join says why, in a line', async () => {
+  const calls: string[] = []
+  const machines = machinesWith(fakeProvisioner(calls, { failAt: 'join' }))
+  const made = await machines.create('aws', 'Work')
+  await machines.start(made.id)
+  await assert.rejects(machines.link(made.id, () => ({ kind: 'computer', address: 'https://here.example', code: 'c' })),
+    (error: Error) => error instanceof CommandRefused && error.message === "Work couldn't join this server: join_network answered 403: That invite is not valid")
 })

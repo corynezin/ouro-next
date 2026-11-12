@@ -337,3 +337,13 @@ test("step 2's hint: the pairing link for a server already run, the provider's o
   assert.equal(detailsHintOf('hosted', 'Run by Ouro.'), NEW_SERVER_COPY.hint)
   assert.equal(detailsHintOf('aws', 'An EC2 t3.medium. Takes 10–15 minutes.'), 'An EC2 t3.medium. Takes 10–15 minutes. You can leave and come back.')
 })
+
+test('a ready machine an agent made and linked is listed once, as its computer, which offers to add it to this phone', async () => {
+  const { machineRows, readyMachineAt } = await import('./model.ts')
+  const ready = { id: 'm1', label: 'PR Sprite 1', provider: 'sprite', createdAt: 1, status: { state: 'ready' as const, address: 'https://pr1.example', pairing: { code: 'c', expiresAt: 9 }, phonePaired: false } }
+  const linked = [computer('m-pr1', 'pr-sprite-1', 'https://pr1.example/')]
+  assert.deepEqual(machineRows([ready] as never, [], [], linked), [])
+  assert.equal(machineRows([ready] as never, [], []).length, 1, 'not linked: still listed as being set up')
+  assert.equal(readyMachineAt('https://pr1.example/', [ready] as never)?.id, 'm1')
+  assert.equal(readyMachineAt(null, [ready] as never), null)
+})

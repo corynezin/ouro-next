@@ -22,7 +22,7 @@ import type { ScreenProps } from '../../navigation/routes.ts'
 import { HostedServerSetupView, MachineSetupView } from '../onboarding/SetupScreen.tsx'
 import {
   checkingNote, hostedRows, inviteMessage, isNetworkSection, JOIN_KINDS, joinChoices, joinRoleOf, machineAsHosted, machineOfServer,
-  machineRows, NETWORKS_COPY, networkSections, NEW_SERVER_COPY, parseInvite, placementText, renamedLabel, SERVERS_COPY, serverRows,
+  machineRows, NETWORKS_COPY, networkSections, NEW_SERVER_COPY, parseInvite, placementText, readyMachineAt, renamedLabel, SERVERS_COPY, serverRows,
   unpairedComputerRows, withNetworkKeyNote,
 } from './model.ts'
 import type { HostedRow, MachineRow, NetworkSection, ServerRow, UnpairedComputerRow } from './model.ts'
@@ -252,7 +252,7 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
   const sections = networkSections(rows, unpairedComputers, places, pending)
   const note = checkingNote(rows, unread.checking)
   const unpairedHosted: HostedRow[] = account ? hostedRows(hosted.servers, servers) : []
-  const madeHere: MachineRow[] = machines ? machineRows(machines.machines, machines.providers, servers) : []
+  const madeHere: MachineRow[] = machines ? machineRows(machines.machines, machines.providers, servers, computers.values()) : []
 
   const retryPlacement = (serverId: string) => { void core.retryPlacement(serverId) }
   const rowMenu = (row: ServerRow, section: NetworkSection) => {
@@ -339,20 +339,24 @@ export function ServersScreen({ navigation }: ScreenProps<'Servers'>) {
               </Pressable>
             )
           })}
-          {section.unpaired.map((row) => (
-            <View key={row.computerId} style={s.row}>
-              <View style={{ flex: 1 }}>
-                <Text style={s.name} numberOfLines={1}>{row.name}</Text>
-                <Text style={s.status} numberOfLines={1}>{SERVERS_COPY.notOnPhone} · {row.stateText}{computers.get(row.computerId)?.visiting ? ` · ${NETWORKS_COPY.visiting}` : ''}</Text>
-                {row.incompatibility !== null && <Text style={s.warning}>{row.incompatibility}</Text>}
-              </View>
-              {isOwner && (
-                <Pressable onPress={() => unpairedMenu(row, section)} hitSlop={10} style={s.more}>
-                  <Symbol name="ellipsis.circle" size={20} color="blue" />
-                </Pressable>
-              )}
-            </View>
-          ))}
+          {section.unpaired.map((row) => {
+            const pairable = readyMachineAt(computers.get(row.computerId)?.address ?? null, machines?.machines ?? [])
+            return (
+              <Pressable key={row.computerId} style={({ pressed }) => [s.row, { backgroundColor: pressed && pairable ? C.pressed : C.background }]}
+                disabled={pairable === null} onPress={() => { if (pairable) setSettingUp({ kind: 'machine', id: pairable.id, label: row.name }) }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.name} numberOfLines={1}>{row.name}</Text>
+                  <Text style={s.status} numberOfLines={1}>{SERVERS_COPY.notOnPhone} · {row.stateText}{computers.get(row.computerId)?.visiting ? ` · ${NETWORKS_COPY.visiting}` : ''}{pairable ? ` · ${NETWORKS_COPY.addHere}` : ''}</Text>
+                  {row.incompatibility !== null && <Text style={s.warning}>{row.incompatibility}</Text>}
+                </View>
+                {isOwner && (
+                  <Pressable onPress={() => unpairedMenu(row, section)} hitSlop={10} style={s.more}>
+                    <Symbol name="ellipsis.circle" size={20} color="blue" />
+                  </Pressable>
+                )}
+              </Pressable>
+            )
+          })}
           {section.emptyNote !== null && <Text style={s.empty}>{section.emptyNote}</Text>}
         </View>
       ))}

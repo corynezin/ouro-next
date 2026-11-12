@@ -3,7 +3,7 @@
 // code is the only credential for the one request that isn't, joining.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { LogPage as LogPageSchema } from '@ouro/contract'
-import type { LogPage } from '@ouro/contract'
+import type { LogPage, MadeServerInvite } from '@ouro/contract'
 import { PeerMemoryPush, PeerPullRequest, PEER_API_PREFIX, PEER_NETWORK_HEADERS, PEER_NETWORKS_PROTOCOL, PeerNetworkJoinResult, PEER_ASK_SNOOZE_PROTOCOL, PEER_LOG_PROTOCOL, PeerLogRequest, PEER_MEMORY_PROTOCOL, PEER_MIN_PROTOCOL, PeerAskSnooze, PeerAskSnoozeResult, PEER_PROTOCOL, PeerMemory, PeerMemoryRequest, PEER_SIGNATURE_HEADERS, PeerAgentList, PeerControl, PeerControlResult, PeerCreateAgent, PeerCreateAgentResult, PeerGroupPost, PeerGroupUpdate, PeerHello, PeerJoinResult, PeerMessage, PeerMessageResult, PeerMove, PeerOwnerAsk, PeerOwnerMessage, PeerMoveCheck, PeerMoveCheckResult, PeerMoveResult } from '@ouro/contract'
 import type { NetworkInvite, NetworkKind, NetworkRole, PeerNetworkJoinRequest, ComputerEntity, ComputerInvite, ComputerStatus, ComputerTrust, PeerAgentCard, PeerClaudePlan, PeerIdentity, PeerJoinRequest, PeerSender, RemoteAgentAction, RemoteAgentEntity } from '@ouro/contract'
 import { networkSignatureValid, PeerRefused, PeerUnreachable, peerRequest, sha256Hex, signatureValid } from '../adapters/peer-transport.ts'
@@ -217,6 +217,18 @@ export class Peers {
     const network = this.config.store.networkById(signing.networkId)
     const key = network && this.config.networkKeys.get(network.id)
     return network && key ? { id: network.id, key, visiting: signing.visiting, recipient } : null
+  }
+
+  /** An invite for a server this one made: into the home network when this server has one, else to be one of its
+   * computers. Either replaces the open invite of its kind, as making one by hand does, so an invite the person made a
+   * moment ago for another computer stops working. */
+  inviteForMadeServer(): MadeServerInvite {
+    const home = this.config.store.homeNetwork()
+    if (home) {
+      const invite = this.createNetworkInvite(home.id)
+      return { kind: 'network', networkKind: home.kind, address: invite.address, code: invite.code }
+    }
+    return { kind: 'computer', address: this.requireAddress(), code: this.createInvite().code }
   }
 
   /** A one-use invite into a network this server holds a key for, for 30 minutes, replacing any open one into it. */

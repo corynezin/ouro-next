@@ -6,7 +6,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { AwsCredentialsBody, CHANGES_HEARTBEAT_MS, CreateMachineBody, SpritesTokenBody, ClaudeLoginFinishBody, CONTEXT_PAGE_DEFAULT_LIMIT, ContextBlockPlace, GithubTokenBody, IdempotencyKey, MAX_ATTACHMENT_BYTES, PairRequest, SEARCH_DEFAULT_LIMIT, SecretKeyBody, UPDATE_ASSETS_PATH, UPDATE_MANIFEST_PATH, UPDATE_PROTOCOL_VERSION } from '@ouro/contract'
 import { UPDATE_PLATFORM } from '../app/app-updates.ts'
 import { fileTypeOf } from '../domain/file-type.ts'
-import type { SyncFrame, Viewer } from '@ouro/contract'
+import type { MadeServerInvite, SyncFrame, Viewer } from '@ouro/contract'
 import type { Caller, OuroCore } from '../app/core.ts'
 import { CommandRefused } from '../app/failure.ts'
 import type { Integrations } from '../app/integrations.ts'
@@ -142,9 +142,12 @@ export function createApiHandler(core: OuroCore, trust: ListenerTrust, logging: 
     }
 
     if (path === '/v2/machines' || path.startsWith('/v2/machines/')) {
-      if (caller.kind !== 'person' || !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner makes servers')
+      // The owner, or one of this server's agents, which makes servers to work on. Destroying a machine stays with the owner.
+      const ownerOnly = method === 'DELETE'
+      const allowed = caller.kind === 'person' ? caller.person.isOwner : caller.kind === 'agent' && !ownerOnly
+      if (!allowed) throw new CommandRefused('forbidden', ownerOnly ? 'only the owner destroys servers' : 'only the owner and agents make servers')
       if (!core.machines) throw new CommandRefused('not_found', 'this server makes no servers')
-      return replyJson(response, 200, await machineAction(core.machines, method, path, request))
+      return replyJson(response, 200, await machineAction(core.machines, method, path, request, () => core.peers.inviteForMadeServer()))
     }
 
     if (path.startsWith('/v2/integrations/')) {
@@ -339,8 +342,10 @@ function bodyReader(request: IncomingMessage) {
 }
 
 /** New servers. The Sprites account they can be made on is in Integrations. */
-async function machineAction(machines: Machines, method: string, path: string, request: IncomingMessage): Promise<unknown> {
+async function machineAction(machines: Machines, method: string, path: string, request: IncomingMessage, invite: () => MadeServerInvite): Promise<unknown> {
   const body = bodyReader(request)
+  const link = /^\/v2\/machines\/([^/]+)\/link$/.exec(path)
+  if (link && method === 'POST') return await machines.link(decodeURIComponent(link[1]!), invite)
   const one = /^\/v2\/machines\/([^/]+)$/.exec(path)
   if (one && method === 'GET') return await machines.get(decodeURIComponent(one[1]!))
   if (one && method === 'DELETE') {
