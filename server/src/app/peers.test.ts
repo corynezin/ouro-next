@@ -93,6 +93,22 @@ test('a private network is never given as an extra key, and that refusal leaves 
   assert.equal(host.peers.acceptNetworkJoin(joinRequest(invite.code, 'visitor', joiner, 'private')).network.kind, 'private')
 })
 
+test('a server this one made is invited into its home network, as a home of the same kind, or else to be one of its computers', () => {
+  const alone = server('alone')
+  const computerInvite = alone.peers.inviteForMadeServer()
+  assert.equal(computerInvite.kind, 'computer')
+  const made = loadOrCreateMachineKey(join(dir, 'made.pem'))
+  alone.peers.acceptJoin({ code: computerInvite.code, joiner: identityOf('made', made) })
+  assert.equal(alone.store.peerById('id-made')?.trust, 'full')
+
+  const host = server('networked')
+  const own = host.holdNetwork('shared', 'home')
+  const invite = host.peers.inviteForMadeServer()
+  assert.deepEqual(invite.kind === 'network' && [invite.networkKind, invite.address], ['shared', 'http://127.0.0.1:1'])
+  host.peers.acceptNetworkJoin(joinRequest(invite.code, 'made', made, invite.kind === 'network' ? invite.networkKind : 'private'))
+  assert.equal(host.store.peerById('id-made')?.networkId, own.id)
+})
+
 /** A signed request from `from` to `to`, in `network`, as peer-transport sends it. */
 function signedRequest(from: { key: MachineKey; machineId: string }, to: { machineId: string }, route: string, body: unknown, now: number, network: { id: string; key: string; visiting: boolean } | null) {
   const path = `${PEER_API_PREFIX}${route}`

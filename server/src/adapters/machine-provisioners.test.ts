@@ -1,10 +1,14 @@
 // The provisioners against a fake EC2 API, a fake Sprites API and a fake SSH: no machine is made and no cloud is called.
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
+import { promisify } from 'node:util'
+import { commands as commandSchemas } from '@ouro/contract'
+import type { MadeServerInvite } from '@ouro/contract'
 import type { SpriteInfo, SpritesApi } from '@ouro/contract/sprites'
 import type { Ec2Api, Ec2Instance, RunInstanceRequest } from './ec2.ts'
 import {
@@ -120,6 +124,40 @@ test('an EC2 server: SSH opened only to this server, the instance recorded as so
   assert.deepEqual(await provisioner.startPairing(made), { code: 'code-1', expiresAt: 42 })
   assert.equal(await provisioner.hasPairedPhone(made), true)
   assert.ok(commands.some((command) => command.startsWith('node /home/ubuntu/ouro-made/query.mjs pair made-pairing-m-0a1b2c3d-')))
+})
+
+test("the query program takes a made server's invite as the commands it runs ask: a network's with the kind it expects", async () => {
+  const { ssh, files } = fakeSsh()
+  const provisioner = ec2With(new FakeEc2Api(), ssh)
+  await provisioner.setup(order({ instanceId: 'i-1', ip: '54.1.2.3' }))
+  const socketPath = join(dir, 'query.sock')
+  const program = join(dir, 'query.mjs')
+  writeFileSync(program, files.get('/home/ubuntu/ouro-made/query.mjs')!.replace(/^const socketPath = .*$/m, `const socketPath = ${JSON.stringify(socketPath)}`))
+  const asked: { path: string; ok: boolean }[] = []
+  const server = createServer((request, response) => {
+    let body = ''
+    request.on('data', (chunk: Buffer) => { body += chunk.toString() })
+    request.on('end', () => {
+      const name = (request.url ?? '').replace('/v2/commands/', '') as 'join_network' | 'join_computer'
+      asked.push({ path: request.url ?? '', ok: commandSchemas[name].input.safeParse((JSON.parse(body) as { input: unknown }).input).success })
+      response.end('{}')
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve))
+  try {
+    const run = async (invite: MadeServerInvite) => {
+      const recorded: string[] = []
+      const capture = ec2With(new FakeEc2Api(), async (_dir, _ip, sent) => { recorded.push(sent); return '{}' })
+      await capture.join(order({ instanceId: 'i-1', ip: '54.1.2.3' }), invite)
+      const argv = recorded[0]!.replace('node /home/ubuntu/ouro-made/query.mjs ', '')
+      return (await promisify(execFile)('bash', ['-c', `node ${program} ${argv}`])).stdout
+    }
+    assert.equal(await run({ kind: 'network', networkKind: 'private', address: 'https://maker.example', code: "it's" }), '{"joined":true}')
+    assert.equal(await run({ kind: 'computer', address: 'https://maker.example', code: 'c' }), '{"joined":true}')
+    assert.deepEqual(asked, [{ path: '/v2/commands/join_network', ok: true }, { path: '/v2/commands/join_computer', ok: true }])
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
 })
 
 test('an instance that stops while being made fails create, and was recorded first', async () => {

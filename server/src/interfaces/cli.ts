@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { request } from 'node:http'
-import { chatHandle, displayStateOf, PromptCacheLifetime } from '@ouro/contract'
+import { chatHandle, displayStateOf, MachineLinked, MachineList, NewMachine, PromptCacheLifetime } from '@ouro/contract'
+import type { NewMachine as NewMachineEntity } from '@ouro/contract'
 import { DEFAULT_EXPORT_COMMAND, NotPublished, publishCommittedApp } from '../app/app-publishing.ts'
 import type { PublishedApp } from '../app/app-publishing.ts'
 import type { RegisterUpdateInput } from '../app/app-updates.ts'
@@ -48,6 +49,9 @@ const HELP = `ouro: talk to your agents, and to the other agents if you are one
   ouro computers invite                                          a one-use command to run on another computer, for 30 minutes
   ouro computers join <address> <code>                           on the other computer: join the one that made the invite
   ouro computers trust <name> full|limited | remove <name>
+  ouro servers                                                   where servers can be made, and the ones made here
+  ouro servers new <provider> "<name>"                           make a new server (a Sprite or EC2); takes 10-15 minutes
+  ouro servers link <id|name>                                    a made server, once ready, joins this one, for agents to work there
   ouro networks                                                  the networks this server holds keys for, and the computers in each
   ouro networks invite [<network>]                               (a person only) a one-use command for another server, for 30 minutes
   ouro networks join <address> <code> --kind shared|private [--visit]
@@ -181,6 +185,42 @@ function parseArguments(args: string[], valueFlags: readonly string[], switchFla
     }
   }
   return parsed
+}
+
+const describeMachine = (machine: NewMachineEntity): string => {
+  const { status } = machine
+  const state = status.state === 'provisioning' ? `being made (${status.step})` : status.state === 'failed' ? `failed: ${status.why}` : `ready at ${status.address}`
+  return `${machine.id}  ${machine.label}  ${machine.provider}  ${state}${machine.paired ? ', paired with a phone' : ''}`
+}
+
+async function runServers(client: Client, rest: string[], print: (text: string) => void): Promise<void> {
+  const verb = rest[0] ?? 'list'
+  if (verb === 'list') {
+    const list = MachineList.parse(await client.call('GET', '/v2/machines'))
+    const providers = list.providers.map((provider) => `  ${provider.id}: ${provider.available ? provider.detail : `not available. ${provider.detail}`}`)
+    const machines = list.machines.map((machine) => `  ${describeMachine(machine)}`)
+    print(`can make:\n${providers.join('\n') || '  nothing'}\nmade here and not destroyed:\n${machines.join('\n') || '  none'}\n`)
+    return
+  }
+  if (verb === 'new') {
+    const [, provider, ...words] = rest
+    const label = words.join(' ').trim()
+    if (!provider || !label) throw new CliFailure('ouro servers new <provider> "<name>" (providers: ouro servers)')
+    const machine = NewMachine.parse(await client.call('POST', '/v2/machines', Buffer.from(JSON.stringify({ provider, label })), { 'content-type': 'application/json' }))
+    print(`making ${describeMachine(machine)}\nonce ouro servers shows it ready: ouro servers link ${machine.id}\n`)
+    return
+  }
+  if (verb === 'link') {
+    const wanted = rest[1]
+    if (!wanted) throw new CliFailure('which server? ouro servers link <id|name>')
+    const list = MachineList.parse(await client.call('GET', '/v2/machines'))
+    const machine = list.machines.find((candidate) => candidate.id === wanted) ?? list.machines.find((candidate) => candidate.label === wanted)
+    if (!machine) throw new CliFailure(`no server being made is called ${wanted}. See: ouro servers`)
+    const { computerName } = MachineLinked.parse(await client.call('POST', `/v2/machines/${encodeURIComponent(machine.id)}/link`))
+    print(`${machine.label} joined this server as ${computerName}: start agents there with ouro spawn <name>@${computerName} "task"\n`)
+    return
+  }
+  throw new CliFailure(`unknown servers command ${verb}. See: ouro help`)
 }
 
 /** `--cache 5m|1h`: how long a new agent's prompt cache lives, for models with a timed one. Absent: nothing is sent, and
@@ -651,6 +691,7 @@ export async function runCli(args: string[], environment: NodeJS.ProcessEnv, std
       return
     }
     case 'computers': return await runComputers(client, rest, print)
+    case 'servers': return await runServers(client, rest, print)
     case 'networks': return await runNetworks(client, rest, print)
     case 'pull': {
       const parsed = parseArguments(rest, ['--name'], [])

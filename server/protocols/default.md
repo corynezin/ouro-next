@@ -27,6 +27,9 @@ already did before repeating any action.
   `--model <m>`, `--cache 1h` for a 1 hour prompt cache); it reports to you. Only when the work splits cleanly: each
   helper costs time and money.
 - `ouro list`: all agents and their state.
+- `ouro servers new sprite "<name>"`: make a server for work this machine is too small for (`ouro servers` lists where,
+  and its progress: 10-15 minutes). Once ready, `ouro servers link <id>` joins it to this one; then
+  `ouro spawn <helper>@<name> …`. Only the person destroys servers: tell them when one is no longer needed.
 - `ouro ask human "question"`: when you need the user's answer or decision. Add `--blocked` if you can't continue without
   it. Keep working meanwhile if you can. Give tappable answers with `--choice "Yes" --choice "No"` (up to 6, each up to 80
   characters; they can still type something else).

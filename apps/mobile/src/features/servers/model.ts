@@ -360,6 +360,7 @@ export const NETWORKS_COPY = {
   joinFailed: (label: string, why: string) => `Could not add ${label}: ${why}`,
   failed: (why: string) => `Could not do it: ${why}`,
   visiting: 'visiting',
+  addHere: 'tap to add to this phone',
   join: 'Join a network with an invite',
   joinTitle: 'Join a network',
   joinMessage: 'Paste the invite you were sent.',
@@ -505,9 +506,21 @@ export type MachineRow =
 const providerName = (provider: string, providers: readonly MachineProvider[]) =>
   providers.find((candidate) => candidate.id === provider)?.name ?? provider
 
-export function machineRows(machines: readonly NewMachine[], providers: readonly MachineProvider[], saved: readonly SavedServer[]): MachineRow[] {
+/** A machine this server made at a linked computer's address, ready for this phone to pair with: one an agent made and
+ * linked, which this phone never set up. Its computer row offers to add it here. */
+export function readyMachineAt(address: string | null, machines: readonly NewMachine[]): NewMachine | null {
+  if (address === null) return null
+  return machines.find((machine) => machine.status.state === 'ready' && machine.status.pairing !== null && sameServerUrl(machine.status.address, address)) ?? null
+}
+
+/** `linked`: computers the open server is linked to; a ready machine at one's address is listed as that computer, once. */
+export function machineRows(machines: readonly NewMachine[], providers: readonly MachineProvider[], saved: readonly SavedServer[], linked: Iterable<ComputerEntity> = []): MachineRow[] {
+  const linkedAddresses = [...linked].flatMap((computer) => computer.address ? [computer.address] : [])
   return machines
-    .filter((machine) => !(machine.status.state === 'ready' && isSaved(machine.status.address, saved)))
+    .filter((machine) => {
+      const { status } = machine
+      return !(status.state === 'ready' && (isSaved(status.address, saved) || linkedAddresses.some((address) => sameServerUrl(address, status.address))))
+    })
     .map((machine): MachineRow => {
       const where = providerName(machine.provider, providers)
       return machine.paired

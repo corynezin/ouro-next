@@ -4,7 +4,8 @@
 // which the phone that asked for it links with the others; it stays here until its machine is destroyed.
 import { randomBytes } from 'node:crypto'
 import { ProvisioningStep } from '@ouro/contract'
-import type { MachineList, MachineProvider, NewMachine } from '@ouro/contract'
+import type { MachineLinked, MachineList, MachineProvider, MadeServerInvite, NewMachine } from '@ouro/contract'
+import { machineNameOf } from '../adapters/machine-provisioners.ts'
 import type { MachineOrder, MachineProvisioner } from '../adapters/machine-provisioners.ts'
 import type { MachineRecord, MachinesFile } from '../store/machines-file.ts'
 import { CommandRefused } from './failure.ts'
@@ -109,6 +110,24 @@ export class Machines {
     this.config.file.delete(id)
     this.lastListPairingCheck.delete(id)
     this.config.log('machine_removed', { machineId: id })
+  }
+
+  /** A ready one takes the invite, so it joins this server: then this server's agents can work there. Safe to ask again
+   * with a fresh invite; one it already took leaves it as it is. */
+  async link(id: string, invite: () => MadeServerInvite): Promise<MachineLinked> {
+    const record = this.recordOf(id)
+    if (record.progress.state !== 'ready') throw new CommandRefused('invalid_request', record.progress.state === 'failed' ? record.progress.why : 'this server is still being made; link it once it is ready')
+    const provisioner = this.providerOf(record)?.provisioner() ?? null
+    if (provisioner === null) throw new CommandRefused('invalid_request', `${this.providerOf(record)?.name ?? record.provider} isn't connected any more`)
+    try {
+      await provisioner.join(orderOf(record), invite())
+    } catch (error) {
+      if (error instanceof CommandRefused) throw error
+      this.config.log('machine_link_failed', { machineId: id, detail: (error as Error).message.slice(0, 1000) })
+      throw new CommandRefused('invalid_request', `${record.label} couldn't join this server: ${(error as Error).message.split('\n')[0]!.slice(0, 300)}`)
+    }
+    this.config.log('machine_linked', { machineId: id })
+    return { computerName: machineNameOf(record.label) }
   }
 
   /** Settles when it is ready or has failed. */

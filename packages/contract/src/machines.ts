@@ -2,13 +2,17 @@
 // made one step at a time, as the hub makes hosted ones, and ends ready for this phone to pair with, its state shaped as
 // a hosted server's so the phone follows it the same way. Paired, the phone links it with the others.
 //
-// Routes, owner only:
+// Routes, for the owner and this server's agents:
 //   GET    /v2/machines        MachineList: every server it made and hasn't destroyed
 //   POST   /v2/machines        CreateMachineBody -> NewMachine; it starts at once
 //   GET    /v2/machines/<id>   NewMachine: poll this while it is made; once ready it carries a pairing code
+//   POST   /v2/machines/<id>/link   a ready one joins this server: its home network, or as a fully trusted computer when
+//                                   this server has none -> MachineLinked. How an agent puts a server it made to work.
+// Owner only:
 //   DELETE /v2/machines/<id>   destroys the machine and forgets it -> {}
 //   GET    /v2/integrations/sprites, POST sprites/token (SpritesTokenBody), POST sprites/disconnect -> SpritesActionResult
 import { z } from 'zod'
+import { NetworkKind } from './computers.ts'
 import { HostedServerState } from './hub.ts'
 
 /**
@@ -36,6 +40,19 @@ export const NewMachine = z.object({
   paired: z.boolean(),
 })
 export type NewMachine = z.infer<typeof NewMachine>
+
+/** How a made server joins the one that made it: with an invite into its home network, taken as its own home, or, when
+ * that one has none, an invite to become one of its computers. `networkKind` is what the joiner tells join_network it
+ * expects, so it must be the home network's own. */
+export const MadeServerInvite = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('network'), networkKind: NetworkKind, address: z.string(), code: z.string() }),
+  z.object({ kind: z.literal('computer'), address: z.string(), code: z.string() }),
+])
+export type MadeServerInvite = z.infer<typeof MadeServerInvite>
+
+/** A made server joined this one: `computerName` is what this server's computers list calls it. */
+export const MachineLinked = z.object({ computerName: z.string() })
+export type MachineLinked = z.infer<typeof MachineLinked>
 
 export const MachineList = z.object({ providers: z.array(MachineProvider), machines: z.array(NewMachine) })
 export type MachineList = z.infer<typeof MachineList>
