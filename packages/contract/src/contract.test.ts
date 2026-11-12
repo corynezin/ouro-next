@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { randomUUID } from 'node:crypto'
 import {
-  AgentState, Change, CommandRequest, commands, displayStateOf, parseAddress, PeerMessage, pinTargetKey, receiptOf, SyncFrame,
+  AgentState, Change, CommandRequest, commands, displayStateOf, parseAddress, PeerMessage, pinTargetKey, PROVIDER_SESSION_ID_PATTERN, receiptOf, SyncFrame,
 } from './index.ts'
 import type { MessageEntity } from './index.ts'
 
@@ -79,4 +80,9 @@ test('a pin target is the same as another exactly when its key is', () => {
   assert.equal(pinTargetKey({ kind: 'agent', agentId: 'x' }), pinTargetKey({ kind: 'agent', agentId: 'x' }))
   assert.notEqual(pinTargetKey({ kind: 'agent', agentId: 'x' }), pinTargetKey({ kind: 'chat', chatId: 'x' }))
   assert.notEqual(pinTargetKey({ kind: 'remote_agent', address: 'x@a' }), pinTargetKey({ kind: 'remote_agent', address: 'x@b' }))
+})
+
+test("a moved conversation's session id is a plain name: one that could leave its folder is refused", () => {
+  assert.ok(PROVIDER_SESSION_ID_PATTERN.test(randomUUID()))
+  for (const id of ['../x', 'a/b', 'a\\b', '', '..']) assert.equal(PROVIDER_SESSION_ID_PATTERN.test(id), false, id)
 })

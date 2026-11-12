@@ -99,7 +99,7 @@ export function messageFiles(message: MessageEntity, attachmentUrl: (attachmentI
 /** The header's "next unread" button: how many there are, and its words when there are none. */
 export const nextUnreadLabel = (count: number) => (count ? `Next unread, ${count}` : 'No other unread')
 
-export type ChatMenuAction = 'pin' | 'log' | 'goal' | 'summaries' | 'details' | 'interrupt' | 'stop'
+export type ChatMenuAction = 'pin' | 'log' | 'context' | 'goal' | 'summaries' | 'details' | 'interrupt' | 'stop'
 export interface ChatMenuItem { action: ChatMenuAction; title: string; symbol: string; disabled?: boolean; destructive?: boolean }
 
 /** The More menu: Pin or Unpin first; Interrupt and Stop only while it runs, Interrupt only while it's busy; Goal or Set a
@@ -108,6 +108,7 @@ export function chatMoreMenu(agent: { hasGoal: boolean; running: boolean; busy: 
   const items: ChatMenuItem[] = [
     agent.pinned ? { action: 'pin', title: 'Unpin', symbol: 'pin.slash' } : { action: 'pin', title: 'Pin to top', symbol: 'pin' },
     { action: 'log', title: 'Log', symbol: 'text.alignleft' },
+    { action: 'context', title: 'Context', symbol: 'text.magnifyingglass' },
     { action: 'goal', title: agent.hasGoal ? 'Goal' : 'Set a goal', symbol: 'target' },
     { action: 'summaries', title: 'Summaries', symbol: 'text.badge.star' },
     { action: 'details', title: 'Details', symbol: 'info.circle' },

@@ -978,8 +978,8 @@ test("the chat's header: next unread and its words, and the More menu by what th
   assert.equal(nextUnreadLabel(2), 'Next unread, 2')
   assert.equal(nextUnreadLabel(0), 'No other unread')
   const titles = (agent: { hasGoal: boolean; running: boolean; busy: boolean; pinned?: boolean }) => chatMoreMenu({ pinned: false, ...agent }).map((item) => `${item.title}${item.disabled ? ' (off)' : ''}${item.destructive ? ' (red)' : ''}`)
-  assert.deepEqual(titles({ hasGoal: false, running: false, busy: false }), ['Pin to top', 'Log', 'Set a goal', 'Summaries', 'Details'])
-  assert.deepEqual(titles({ hasGoal: true, running: true, busy: false, pinned: true }), ['Unpin', 'Log', 'Goal', 'Summaries', 'Details', 'Interrupt (off)', 'Stop (red)'])
+  assert.deepEqual(titles({ hasGoal: false, running: false, busy: false }), ['Pin to top', 'Log', 'Context', 'Set a goal', 'Summaries', 'Details'])
+  assert.deepEqual(titles({ hasGoal: true, running: true, busy: false, pinned: true }), ['Unpin', 'Log', 'Context', 'Goal', 'Summaries', 'Details', 'Interrupt (off)', 'Stop (red)'])
   assert.deepEqual(titles({ hasGoal: true, running: true, busy: true }).slice(-2), ['Interrupt', 'Stop (red)'])
   assert.deepEqual([STOP_COPY.confirmTitle('fixer'), STOP_COPY.confirmMessage, STOP_COPY.confirmAction, STOP_COPY.done('fixer')],
     ['Stop fixer?', 'It keeps its session; a message restarts it.', 'Stop', 'stopped fixer'])

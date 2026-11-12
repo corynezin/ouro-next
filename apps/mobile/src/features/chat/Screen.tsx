@@ -130,6 +130,7 @@ function Conversation({ agent, session, navigation, at }: {
     switch (action) {
       case 'pin': return void act(pinCommand, { target: pinTarget }, 1, pinned ? `unpinned ${agent.name}` : `pinned ${agent.name}`)
       case 'log': return navigation.navigate('Log', { agentRef: agent.id })
+      case 'context': return navigation.navigate('Context', { agentRef: agent.id })
       case 'goal': return navigation.navigate('Goal', { agentRef: agent.id })
       case 'summaries': return navigation.navigate('Summaries', { agentRef: agent.id })
       case 'details': return navigation.navigate('Agent', { agentRef: agent.id })
