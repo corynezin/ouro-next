@@ -18,9 +18,12 @@ export class TailscaleStepFailed extends Error {}
 
 export interface TailscaleHost {
   observe(): Promise<TailscaleObservation>
-  /** Saves a restore point, then installs the tools and starts the daemon as a service. */
+  /** Installs the tools and starts the daemon as a service (a Sprite saves a restore point first). */
   install(): Promise<void>
-  /** Starts `tailscale up` and leaves it running: it finishes the login once the person approves the link. */
+  /**
+   * Starts `tailscale up` and leaves it running: it finishes the login once the person approves the link. Connect calls
+   * this without install() when Tailscale is installed but `stopped`.
+   */
   startLogin(hostname: string): Promise<void>
   /** Logs out, stops the daemon and removes everything installed. */
   remove(): Promise<void>
@@ -88,32 +91,49 @@ async function startLoginThrough(cli: string, hostname: string): Promise<void> {
   spawn('sudo', [cli, 'up', `--hostname=${hostname}`, '--accept-dns=false'], { detached: true, stdio: 'ignore' }).unref()
 }
 
-/** The package's CLI, and the files its repository adds to apt. */
+/** The package's CLI, and the files its repository adds to apt: Tailscale's signing key, and a source list bound to it. */
 const SYSTEMD_CLI = '/usr/bin/tailscale'
-const APT_FILES = '/etc/apt/sources.list.d/tailscale.list /usr/share/keyrings/tailscale-archive-keyring.gpg'
+const APT_KEYRING = '/usr/share/keyrings/tailscale-archive-keyring.gpg'
+const APT_LIST = '/etc/apt/sources.list.d/tailscale.list'
+/** A freshly booted machine's own updates often hold apt's lock for a few minutes; wait for it rather than fail. */
+const APT_LOCK_WAIT_S = 240
+
+/**
+ * Installs the `tailscale` package from Tailscale's apt repository, as the installer adds Node's, gh's and Caddy's: apt
+ * checks every package against the repository's key, so nothing unsigned runs as root. Ubuntu and Debian only.
+ */
+const APT_INSTALL = `set -o pipefail; . /etc/os-release
+case "$ID" in ubuntu|debian) ;; *) echo "Tailscale installs here only on Ubuntu or Debian, not $ID" >&2; exit 1 ;; esac
+[ -n "\${VERSION_CODENAME:-}" ] || { echo "this $ID has no release codename for Tailscale's repository" >&2; exit 1; }
+curl -fsSL "https://pkgs.tailscale.com/stable/$ID/$VERSION_CODENAME.noarmor.gpg" | sudo tee ${APT_KEYRING} >/dev/null
+echo "deb [signed-by=${APT_KEYRING}] https://pkgs.tailscale.com/stable/$ID $VERSION_CODENAME main" | sudo tee ${APT_LIST} >/dev/null
+sudo apt-get -o DPkg::Lock::Timeout=${APT_LOCK_WAIT_S} update -qq
+sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=${APT_LOCK_WAIT_S} install -y -qq tailscale >/dev/null`
 
 /** On a Linux machine with systemd and passwordless sudo, such as an EC2 server: Tailscale's own package and service. */
 export function systemdTailscale(): TailscaleHost {
+  const startDaemon = () => run('sudo', ['systemctl', 'enable', '--now', SERVICE], 60_000)
   return {
     observe: () => observeThrough(SYSTEMD_CLI),
 
     async install() {
-      if (!existsSync(SYSTEMD_CLI)) {
-        await bash(`d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
-curl -fsSL https://tailscale.com/install.sh -o "$d/install.sh"
-sudo sh "$d/install.sh"`, 300_000)
-      }
-      await run('sudo', ['systemctl', 'enable', '--now', SERVICE], 60_000)
+      if (!existsSync(SYSTEMD_CLI)) await bash(APT_INSTALL, 600_000)
+      await startDaemon()
     },
 
-    startLogin: (hostname) => startLoginThrough(SYSTEMD_CLI, hostname),
+    async startLogin(hostname) {
+      // Installed but stopped (a remove that failed half-way, or a daemon that didn't start after the install): connect
+      // skips install() then, so the daemon is started here. Starting one that runs changes nothing.
+      await startDaemon()
+      await startLoginThrough(SYSTEMD_CLI, hostname)
+    },
 
     async remove() {
       await run('sudo', [SYSTEMD_CLI, 'logout'], 20_000).catch(() => {}) // already logged out, or never installed
       await bash(`sudo systemctl disable --now ${SERVICE} 2>/dev/null || true
-if dpkg -s tailscale >/dev/null 2>&1; then sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y tailscale; fi
-sudo rm -f ${APT_FILES}
-sudo rm -rf /var/lib/tailscale`, 120_000)
+if dpkg -s tailscale >/dev/null 2>&1; then sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=${APT_LOCK_WAIT_S} purge -y tailscale; fi
+sudo rm -f ${APT_LIST} ${APT_KEYRING}
+sudo rm -rf /var/lib/tailscale`, (APT_LOCK_WAIT_S + 120) * 1000)
     },
   }
 }

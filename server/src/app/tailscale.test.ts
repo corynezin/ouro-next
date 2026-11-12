@@ -96,3 +96,23 @@ test('a server that reaches computers without Tailscale can still connect it, an
   await connection.running
   assert.deepEqual(await connection.status(), { tailscale: { state: 'logging_in', loginUrl: 'https://login.invalid/y' }, lastFailure: null, neededForComputers: false })
 })
+
+test('connecting a Tailscale that is installed but stopped skips the install and leaves starting it to the login', async () => {
+  // A remove that failed half-way leaves the CLI with its daemon stopped; the host's startLogin brings the daemon back.
+  let observation: TailscaleObservation = { kind: 'stopped' }
+  let installs = 0
+  const loginsAs: string[] = []
+  const host: TailscaleHost = {
+    observe: async () => observation,
+    install: async () => { installs++ },
+    startLogin: async (hostname) => { loginsAs.push(hostname); observation = { kind: 'needs_login', loginUrl: 'https://login.invalid/z' } },
+    remove: async () => { observation = { kind: 'not_installed' } },
+  }
+  const connection = new TailscaleConnection({ setup: { kind: 'set_up_here', host, neededForComputers: false }, hostname: 'ouro-z', now: Date.now, log })
+  assert.deepEqual((await connection.status()).tailscale, { state: 'not_connected' })
+  await connection.connect()
+  await connection.running
+  assert.equal(installs, 0)
+  assert.deepEqual(loginsAs, ['ouro-z'])
+  assert.deepEqual(await connection.status(), { tailscale: { state: 'logging_in', loginUrl: 'https://login.invalid/z' }, lastFailure: null, neededForComputers: false })
+})
