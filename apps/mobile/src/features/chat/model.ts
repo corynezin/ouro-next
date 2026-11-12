@@ -209,14 +209,15 @@ export function summaryBar(summary: SummaryEntity | undefined, agent: AgentEntit
 
 /** While the connection is lost the agent's state is stale, so the bar says so instead, as the agents list does. */
 export type StatusBarModel =
-  | { kind: 'agent'; dot: StateDotKind; busy: boolean; text: string }
+  /** `label` is `text` without its timer: what the screen holds steady (`useSteady`). */
+  | { kind: 'agent'; dot: StateDotKind; busy: boolean; label: string; text: string }
   | { kind: 'connection_lost'; text: string }
 export function statusBar(store: StoreView, agent: AgentEntity, connection: ConnectionStatus, now: number): StatusBarModel {
   const lost = connectionNoteOf(connection, now)
   if (lost) return { kind: 'connection_lost', text: lost.text }
   const activity = activityOf(agent)
   const line = statusLine(agent, store.goals.get(agent.id), store.viewer?.address, now)
-  return { kind: 'agent', dot: stateDotOf(agent), busy: activity !== null, text: activity ? `${line}  ${timerText(now - activity.since)}` : line }
+  return { kind: 'agent', dot: stateDotOf(agent), busy: activity !== null, label: line, text: activity ? `${line}  ${timerText(now - activity.since)}` : line }
 }
 
 export interface PanelAskModel { askId: string; symbol: AskSymbol; text: string; choices: readonly string[]; snoozed: boolean; answering: boolean }

@@ -15,6 +15,7 @@ import { C } from '../../design/colors.ts'
 import { Composer } from '../../design/Composer.tsx'
 import type { ComposerFile } from '../../design/composerFiles.ts'
 import { actionSheet, barButton, barMenu, confirm } from '../../design/menus.tsx'
+import { useSteady } from '../../design/steady.ts'
 import { Symbol } from '../../design/Symbol.tsx'
 import { useCore, useNow, useSession, useSessionVersion } from '../../navigation/coreContext.tsx'
 import { useBannerHeight } from '../../navigation/UpdateBanner.tsx'
@@ -30,7 +31,7 @@ import {
   JUMP_PAGE_SIZE, routedAgents, statusBar, summaryBar,
   chatMoreMenu, FAILED_SEND_ACTIONS, nextUnreadLabel, STOP_COPY,
 } from './model.ts'
-import type { ChatItem, ChatMenuAction, MessageAt } from './model.ts'
+import type { ChatItem, ChatMenuAction, MessageAt, StatusBarModel } from './model.ts'
 import { Marked, useJumpToMessage } from './useJumpToMessage.tsx'
 
 export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
@@ -285,7 +286,7 @@ function Bars({ agent, session, note, asks, answeringAskId, setAnsweringAskId, o
   const { store } = session
   const goal = goalBar(store.goals.get(agent.id))
   const summary = summaryBar(store.summaries.get(agent.id), agent, now)
-  const status = statusBar(store, agent, session.connection, now)
+  const status = useSteady(statusBar(store, agent, session.connection, now), statusBarKey)
   const panel = asksPanel(asks, answeringAskId, now)
   return (
     <View>
@@ -312,6 +313,9 @@ function Bars({ agent, session, note, asks, answeringAskId, setAnsweringAskId, o
     </View>
   )
 }
+
+/** The bar holds by everything but the running timer, which stays live. */
+const statusBarKey = (status: StatusBarModel) => (status.kind === 'agent' ? `${status.dot}|${status.busy}|${status.label}` : `lost|${status.text}`)
 
 const s = StyleSheet.create({
   missing: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.background },

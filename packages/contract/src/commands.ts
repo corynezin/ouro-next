@@ -35,6 +35,8 @@ export const commands = {
     folder: z.string().nullable(),
     /** For models with a timed prompt cache. A 1 hour cache costs more to write and keeps an idle agent warm. */
     promptCacheLifetime: PromptCacheLifetime.default('5m'),
+    /** Uploaded files that come with the task, in its first message. */
+    attachmentIds: z.array(z.string()).default([]),
   }), z.object({ agent: AgentEntity })),
 
   send_message: defineCommand(['person', 'agent'], z.object({

@@ -1,13 +1,15 @@
 // The agents list, the root screen: Asks, one list by latest activity, Idle folding, search, swipe actions. Renders agents/model.ts.
-import { memo, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native'
 import * as Haptics from 'expo-haptics'
+import { useFocusEffect } from '@react-navigation/native'
 import type { AgentEntity, CommandInput, CommandName } from '@ouro/contract'
 import { STOP_ATTEMPTS } from '../../core/session/serverApi.ts'
 import { AskChoices } from '../../design/AskChoices.tsx'
 import { Avatar } from '../../design/Avatar.tsx'
 import { C } from '../../design/colors.ts'
 import { barButton, confirm } from '../../design/menus.tsx'
+import { useSteady } from '../../design/steady.ts'
 import { SwipeRow } from '../../design/SwipeRow.tsx'
 import type { SwipeAction } from '../../design/SwipeRow.tsx'
 import { Symbol } from '../../design/Symbol.tsx'
@@ -149,6 +151,13 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
   }
 
   const otherServers = useOtherServersUnread()
+  // The open server's name, read again on each return here: it may have been renamed on the Servers screen.
+  const [serverLabel, setServerLabel] = useState<string | null>(null)
+  useFocusEffect(useCallback(() => {
+    let live = true
+    core.servers.list().then((list) => { if (live) setServerLabel(list.find((server) => server.id === session.serverId)?.label ?? null) }, () => {})
+    return () => { live = false }
+  }, [core, session]))
   const elsewhere = otherServersUnreadTotal(otherServers.counts, session.serverId)
   // Read once when the list opens; after that, on each return to the foreground (at most once a minute).
   useEffect(() => { void otherServers.checkIfDue() }, [otherServers, session])
@@ -184,6 +193,11 @@ export function AgentsScreen({ navigation }: ScreenProps<'Agents'>) {
           <Text style={s.screenTitle} accessibilityRole="header">Ouro</Text>
           <View style={s.top}>
             <Symbol name="circle.fill" size={7} color={model.dotColor} />
+            {serverLabel !== null && (
+              <Pressable onPress={() => navigation.navigate('Servers')} style={{ flexShrink: 1 }} accessibilityLabel={`Server ${serverLabel}`} accessibilityRole="button">
+                <Text style={s.topText} numberOfLines={1}>{serverLabel}</Text>
+              </Pressable>
+            )}
             {elsewhere > 0 && (
               <Pressable onPress={() => navigation.navigate('Servers')} style={s.elsewhere} accessibilityLabel={`${elsewhere} unread on other servers`}>
                 <View style={s.miniBadge}><Text style={s.miniBadgeText}>{elsewhere}</Text></View>
@@ -238,6 +252,7 @@ function SectionHeader({ header, idleOpen, toggleIdle }: { header: Sec['header']
 }
 
 function MasterCard({ card, agent, onOpen }: { card: MasterCardModel; agent: AgentEntity | undefined; onOpen: (agentId: string) => void }) {
+  const statusText = useSteady(card.statusText, (text) => text)
   return (
     <Pressable onPress={() => onOpen(card.agentId)} style={({ pressed }) => [s.card, pressed && { opacity: 0.85 }]} accessibilityLabel="Master agent">
       <View style={s.icon}><Symbol name="sparkles" size={20} color="white" /></View>
@@ -248,7 +263,7 @@ function MasterCard({ card, agent, onOpen }: { card: MasterCardModel; agent: Age
           <View style={{ flex: 1 }} />
           <Text style={s.small}>{card.timeText}</Text>
         </View>
-        <Text style={s.cardSub} numberOfLines={1}>{card.statusText}</Text>
+        <Text style={s.cardSub} numberOfLines={1}>{statusText}</Text>
         {card.previewText !== null && <Text style={[s.cardSub, { color: C.label }]} numberOfLines={2}>{card.previewText}</Text>}
       </View>
       {card.unread > 0 && <View style={s.badge}><Text style={s.badgeText}>{card.unread}</Text></View>}
@@ -256,8 +271,11 @@ function MasterCard({ card, agent, onOpen }: { card: MasterCardModel; agent: Age
   )
 }
 
+const statusKey = (status: { text: string; tone: string }) => `${status.tone}|${status.text}`
+
 // Every prop is a primitive or a stable function, so this draws again only when something it shows changed.
 const AgentRow = memo(function AgentRow(row: AgentRowModel & { onOpen: (agentId: string) => void }) {
+  const status = useSteady({ text: row.statusText, tone: row.statusTone }, statusKey)
   return (
     <Pressable onPress={() => row.onOpen(row.agentId)} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.background }]}>
       <View style={s.rowInner}>
@@ -271,7 +289,7 @@ const AgentRow = memo(function AgentRow(row: AgentRowModel & { onOpen: (agentId:
             {row.costText !== null && <Text style={s.small}>{`${row.costText} · `}</Text>}
             <Text style={s.small}>{row.timeText}</Text>
           </View>
-          <Text style={[s.sub, { color: row.statusTone === 'busy' ? C.blue : C.secondary }]} numberOfLines={1}>{row.statusText}</Text>
+          <Text style={[s.sub, { color: status.tone === 'busy' ? C.blue : C.secondary }]} numberOfLines={1}>{status.text}</Text>
           {row.summaryLine !== null && <Text style={[s.sub, { color: C.label }]}>{row.summaryLine}</Text>}
           {row.previewText !== null && <Text style={s.sub} numberOfLines={row.previewLines}>{row.previewText}</Text>}
         </View>
@@ -289,9 +307,10 @@ const AgentRow = memo(function AgentRow(row: AgentRowModel & { onOpen: (agentId:
 
 // The reference's remote row: the bare name with its computer small beside it, and no goal, cost or asks to show.
 const RemoteAgentRow = memo(function RemoteAgentRow(row: RemoteAgentRowModel & { onOpen: (remoteAgentId: string) => void }) {
+  const status = useSteady({ text: row.statusText, tone: row.statusTone }, statusKey)
   return (
     <Pressable onPress={() => row.onOpen(row.remoteAgentId)} style={({ pressed }) => [s.row, { backgroundColor: pressed ? C.pressed : C.background }]}>
-      <View style={[s.rowInner, row.statusTone === 'offline' && { opacity: 0.5 }]}>
+      <View style={[s.rowInner, status.tone === 'offline' && { opacity: 0.5 }]}>
         <Avatar seed={row.name} kind="agent" model={row.model ?? undefined} size={52} />
         <View style={{ flex: 1, gap: 3 }}>
           <View style={s.line}>
@@ -299,7 +318,7 @@ const RemoteAgentRow = memo(function RemoteAgentRow(row: RemoteAgentRowModel & {
             <View style={{ flex: 1 }} />
             {row.timeText !== null && <Text style={s.small}>{row.timeText}</Text>}
           </View>
-          <Text style={[s.sub, { color: row.statusTone === 'busy' ? C.blue : row.statusTone === 'offline' ? C.orange : C.secondary }]} numberOfLines={1}>{row.statusText}</Text>
+          <Text style={[s.sub, { color: status.tone === 'busy' ? C.blue : status.tone === 'offline' ? C.orange : C.secondary }]} numberOfLines={1}>{status.text}</Text>
           {row.summaryLine !== null && <Text style={[s.sub, { color: C.label }]}>{row.summaryLine}</Text>}
           {row.previewText !== null && <Text style={s.sub} numberOfLines={row.previewLines}>{row.previewText}</Text>}
         </View>

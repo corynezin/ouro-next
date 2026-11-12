@@ -1864,7 +1864,8 @@ export class OuroCore {
       return this.commit(() => {
         const earlier = this.store.idempotentResult(callerKey, request.idempotencyKey)
         if (earlier) return JSON.parse(earlier.resultJson) as PeerCreateAgentResult
-        const agentId = this.startAgent(request, `${callerKey}:${request.idempotencyKey}`, { parent, createdBy: OWNER_ADDRESS, parentAgentId: null, folder: request.folder ?? this.config.defaultFolder }, nameSuggestion)
+        // Files don't travel between computers yet, so a request from one names none.
+        const agentId = this.startAgent({ ...request, attachmentIds: [] }, `${callerKey}:${request.idempotencyKey}`, { parent, createdBy: OWNER_ADDRESS, parentAgentId: null, folder: request.folder ?? this.config.defaultFolder }, nameSuggestion)
         if (request.from.kind === 'owner') this.store.addOwnerChatPeer(agentId, peer.machineId, this.config.clock.now())
         const result: PeerCreateAgentResult = { outcome: 'created', agent: this.agentCard(this.requireAgentRow(agentId), 'full') }
         this.store.saveIdempotentResult(callerKey, request.idempotencyKey, 'create_agent', hashSecret(JSON.stringify(request)), JSON.stringify(result), this.config.clock.now())
@@ -1881,6 +1882,8 @@ export class OuroCore {
   private startAgent(input: NewAgentRequest, clientKey: string, origin: NewAgentOrigin, nameSuggestion: NameSuggestion = NO_NAME_SUGGESTION): string {
     const now = this.config.clock.now()
     const name = this.chooseAgentName(input.name, input.task, nameSuggestion.name)
+    // Resolved first, so a missing file refuses the command before anything is made.
+    const attachments = this.resolveAttachments(input.attachmentIds)
     const { parent } = origin
     const agentId = shortId()
     const preLaunchLifecycle: AgentLifecycle = { state: { state: 'stopped', since: now, stopped: { reason: 'idle' } }, instanceGeneration: 0, consecutiveCrashes: 0, consecutiveCreditFailures: 0, ownershipEpoch: 0, consecutiveStalls: 0 }
@@ -1907,7 +1910,7 @@ export class OuroCore {
     if (admission.kind === 'refused' && admission.hold === 'budget') throw new CommandRefused('budget_spent', `the budget of $${this.budgetUsd()} is spent: raise it to start agents`)
     this.placeInOwnWorktree(created)
 
-    this.postDirect({ from: parent, fromAgentId: origin.parentAgentId, toAgent: created, text: input.task, attachments: [], purpose: 'task', wake: 'wake', clientKey, answersAskId: null, relayedBy: null })
+    this.postDirect({ from: parent, fromAgentId: origin.parentAgentId, toAgent: created, text: input.task, attachments, purpose: 'task', wake: 'wake', clientKey, answersAskId: null, relayedBy: null })
     this.applyAgentEvent(agentId, { type: 'wake_requested', admission, reason: 'created' })
     return agentId
   }
@@ -3238,7 +3241,7 @@ type ParticipantKey = `agent:${string}` | `person:${string}` | `remote:${string}
 
 interface DirectPost { from: string; fromAgentId: string | null; toAgent: AgentRow; text: string; attachments: AttachmentRef[]; purpose: MessagePurpose; wake: DeliveryWake; clientKey: string | null; answersAskId: string | null; relayedBy: string | null }
 
-interface NewAgentRequest { task: string; name: string | null; model: string | null; folder: string | null; promptCacheLifetime: PromptCacheLifetime }
+interface NewAgentRequest { task: string; name: string | null; model: string | null; folder: string | null; promptCacheLifetime: PromptCacheLifetime; attachmentIds: string[] }
 
 /** Who starts a new agent, and where it works. `parentAgentId`: the parent's id when it is an agent of this machine. */
 interface NewAgentOrigin { parent: string; createdBy: string; parentAgentId: string | null; folder: string }

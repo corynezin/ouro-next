@@ -5,8 +5,8 @@ export type AvatarCapability = 'fast' | 'balanced' | 'flagship'
 /** The company and capability an agent's avatar announces to VoiceOver; unknown models get neither rather than a guessed rank. */
 export function avatarModel(model?: string): { company?: AvatarCompany; capability?: AvatarCapability } {
   const m = model?.toLowerCase().replace(/\[.*\]$/, '') ?? ''
-  if (/^(?:anthropic\/)?(?:claude-)?(?:opus|sonnet|haiku)(?:-|$)/.test(m) || m === 'or-haiku') {
-    return { company: 'anthropic', capability: m.includes('opus') ? 'flagship' : m.includes('haiku') ? 'fast' : 'balanced' }
+  if (/^(?:anthropic\/)?(?:claude-)?(?:fable|opus|sonnet|haiku)(?:-|$)/.test(m) || m === 'or-haiku') {
+    return { company: 'anthropic', capability: m.includes('fable') || m.includes('opus') ? 'flagship' : m.includes('haiku') ? 'fast' : 'balanced' }
   }
   if (/^(?:openai\/)?(?:gpt-|codex-)/.test(m)) {
     // Current Codex model families: Luna is fast, Sol/Terra balanced, Astra flagship.
