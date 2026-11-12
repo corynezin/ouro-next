@@ -311,7 +311,8 @@ export function inviteMessage(network: NetworkEntity, invite: { address: string;
     `Server: ${invite.address}`,
     `Code: ${invite.code}`,
     `In the Ouro app, open your server, tap Servers → ${NETWORKS_COPY.button} → ${NETWORKS_COPY.join}, paste this whole message, and choose ${kind === 'shared' ? 'a shared network' : 'my own private network'}.`,
-    `Or on the server itself: ${invite.command} --kind ${kind}`,
+    // The server writes the command with the network's kind (`--kind shared|private`): it runs as it is.
+    `Or on the server itself: ${invite.command}`,
   ].join('\n')
 }
 

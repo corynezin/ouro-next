@@ -182,7 +182,7 @@ test('a server joins a private network as its home; a shared one as a shared ser
   assert.deepEqual(choices.map((choice) => [choice.networkId, choice.kind, choice.role]), [['p', 'private', 'home'], ['s', 'shared', 'home'], ['s', 'shared', 'extra']])
 })
 
-const invited = { address: 'http://100.64.0.1:7777', code: 'abc', expiresAt: 30 * 60_000, command: 'ouro networks join http://100.64.0.1:7777 abc' }
+const invited = { address: 'http://100.64.0.1:7777', code: 'abc', expiresAt: 30 * 60_000, command: 'ouro networks join http://100.64.0.1:7777 abc --kind shared' }
 
 test('an invite carries the server and code, never the key; its time comes from when it expires, and it names the real menu and command', () => {
   const text = inviteMessage(network('s', 'team', 'shared', 'extra'), invited, 0)
