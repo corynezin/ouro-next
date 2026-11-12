@@ -206,7 +206,7 @@ test('a base that fails to build changes nothing: the live release and the perso
   assert.doesNotMatch(sourceText('server/src/app/render.ts'), /typeError/)
 })
 
-test('a conflict no agent can start for goes to the owner, and is recorded with no resolver', async () => {
+test('a conflict no agent can start for goes to the owner, and keeps waiting for their choice with no resolver', async () => {
   // The server looks for bases when it starts (and then only every half hour): a restart finds base 4.
   await offer(4, 'the default protocol is reworded again')
   const before = await run.status()
@@ -224,11 +224,15 @@ test('a conflict no agent can start for goes to the owner, and is recorded with 
     return status?.update.state === 'conflict' && status.update
   }, 60_000)
   assert.deepEqual(conflicted, { state: 'conflict', n: 4, files: [DEFAULT_PROTOCOL], resolver: null })
+  const resolving = await phone.command('resolve_base_update', {})
+  assert.deepEqual(resolving.server.release.base.kind === 'taker' && resolving.server.release.base.update, { state: 'conflict', n: 4, files: [DEFAULT_PROTOCOL], resolver: null }, 'still the owner\'s to choose')
   assert.equal(await startedFor('base-4'), undefined, 'no agent was started')
   const snapshot = await phone.snapshot()
   const systemChat = snapshot.chats.find((chat) => chat.members.some((member) => member.address === 'system') && chat.members.some((member) => member.address === snapshot.viewer.address))
   assert.ok(systemChat, 'the owner was told, from the system')
-  const notice = (await phone.history(systemChat.id)).messages.find((message) => message.text.startsWith('Ouro base 4 conflicts'))
-  assert.ok(notice, 'with the brief')
+  const notices = (await phone.history(systemChat.id)).messages.filter((message) => message.text.startsWith('Ouro base 4 conflicts'))
+  assert.match(notices[0]?.text ?? '', /ouro base resolve/, 'first, that it waits for their choice')
+  const notice = notices.find((message) => message.text.includes("couldn't start an agent"))
+  assert.ok(notice, 'then, once they chose, the brief')
   assert.match(notice.text, /couldn't start an agent for this: the limit of 1 running agents is reached/)
 })
