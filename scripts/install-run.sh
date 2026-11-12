@@ -32,8 +32,9 @@
 set -euo pipefail
 
 install_name=install-run
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib/install-common.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/install-common.sh"
+. "$script_dir/lib/install-common.sh"
 
 commit_wanted=${1:?usage: install-run.sh <commit>}
 service_manager=${OURO_NEXT_SERVICES:-}
@@ -59,10 +60,22 @@ host_socket=$home_dir/runner-host.sock
 # macOS has shasum, not sha256sum.
 sha256_of() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
 
+# launchd services run only in the person's login session (gui/<uid>, session type Aqua), which also loads
+# ~/Library/LaunchAgents by itself at each login. Bootstrapped into their background domain (user/<uid>, over SSH with no one logged in) it
+# would be loaded a second time into gui/<uid> at the next login: two hosts and two guardians on one socket and port.
+# So the plist is limited to Aqua, and an install with no one logged in is refused.
+launchd_gui_domain() { printf 'gui/%s' "$(id -u)"; }
+launchd_domain_or_refuse() {
+  local domain
+  domain=$(launchd_gui_domain)
+  launchctl print "$domain" >/dev/null 2>&1 ||
+    fail "no one is logged in to this Mac as $(id -un), so its launch agents have nowhere to run. Log in (at the Mac, through Screen Sharing, or with automatic login), then run this again; over SSH works while you're logged in"
+  printf '%s' "$domain"
+}
 case $service_manager in
   sprite) command -v "$sprite_env" >/dev/null || fail "$sprite_env isn't here, so this isn't a Sprite (see install-run-ubuntu.sh or install-run-mac.sh)" ;;
   systemd) command -v systemctl >/dev/null || fail "systemctl isn't here"; sudo -n true 2>/dev/null || fail "systemd services need sudo without a password" ;;
-  launchd) command -v launchctl >/dev/null || fail "launchctl isn't here" ;;
+  launchd) command -v launchctl >/dev/null || fail "launchctl isn't here"; launchd_domain=$(launchd_domain_or_refuse) ;;
   '') fail "set OURO_NEXT_SERVICES (sprite, systemd or launchd), or run install-run-sprite.sh, install-run-ubuntu.sh or install-run-mac.sh" ;;
   *) fail "OURO_NEXT_SERVICES must be sprite, systemd or launchd, not $service_manager" ;;
 esac
@@ -132,37 +145,34 @@ else
 fi
 base_repo=${OURO_NEXT_BASE_REPO:-}
 if [ -n "$base_repo" ]; then say "bases: taken from $base_repo"; fi
-OURO_NEXT_CONFIG_JSON=$(
-  BASE_REPO=$base_repo \
-  ROOT_HOME=$home_dir SOURCE=$source_dir PORT=$listen_port LISTEN_HOST=$listen_host URL=$public_url SOCKET=$host_socket MODEL=${OURO_NEXT_DEFAULT_MODEL:-} \
-    APNS_KEY_FILE=$apns_key_file APNS_KEY_ID=${apns_key_id:-} APNS_TEAM_ID=${OURO_NEXT_APNS_TEAM_ID:-U2Q2D6ZQP2} \
-    MACHINE=${OURO_NEXT_MACHINE_NAME:-$(hostname)} PEER=$peer_address SERVICES=$service_manager "$node_bin" -e '
-      const env = process.env
-      // Tailscale is the Sprite way in; a machine of its own under systemd can still join the Tailscale network of the
-      // person. A Mac has the Tailscale app, which the person signs in to themselves.
-      const ourodEnv = { OURO_RUNNER_HOST_SOCKET: env.SOCKET }
-      if (env.SERVICES === "sprite" || env.SERVICES === "systemd") ourodEnv.OURO_TAILSCALE = env.SERVICES
-      if (env.PEER) ourodEnv.OURO_PEER_ADDRESS = env.PEER
-      if (env.MODEL) ourodEnv.OURO_DEFAULT_MODEL = env.MODEL
-      if (env.BASE_REPO) ourodEnv.OURO_BASE_REPO = env.BASE_REPO
-      if (env.APNS_KEY_FILE) Object.assign(ourodEnv, { OURO_APNS_KEY_FILE: env.APNS_KEY_FILE, OURO_APNS_KEY_ID: env.APNS_KEY_ID, OURO_APNS_TEAM_ID: env.APNS_TEAM_ID })
-      // Only an address other than the guardian's default is written, so the configuration of a server installed before
-      // stays the same, and its guardian isn't restarted for nothing.
-      const listen = env.LISTEN_HOST === "0.0.0.0" ? {} : { listenHost: env.LISTEN_HOST }
-      process.stdout.write(JSON.stringify({ home: env.ROOT_HOME, listenPort: Number(env.PORT), ...listen, sourceDir: env.SOURCE, appSourceDir: env.SOURCE + "/apps/mobile", sourceBranch: "main",
-        machineName: env.MACHINE, publicUrl: env.URL, ourodEnv }, null, 2) + "\n")'
+# Built by a program of its own, never JavaScript inside shell quotes, where an apostrophe would end the quoting.
+config_result=$(
+  OURO_CONFIG_HOME=$home_dir OURO_CONFIG_SOURCE=$source_dir OURO_CONFIG_PORT=$listen_port OURO_CONFIG_LISTEN_HOST=$listen_host \
+  OURO_CONFIG_URL=$public_url OURO_CONFIG_SOCKET=$host_socket OURO_CONFIG_MACHINE=${OURO_NEXT_MACHINE_NAME:-$(hostname)} \
+  OURO_CONFIG_SERVICES=$service_manager OURO_CONFIG_PEER=$peer_address OURO_CONFIG_MODEL=${OURO_NEXT_DEFAULT_MODEL:-} \
+  OURO_CONFIG_BASE_REPO=$base_repo OURO_CONFIG_APNS_KEY_FILE=$apns_key_file OURO_CONFIG_APNS_KEY_ID=${apns_key_id:-} \
+  OURO_CONFIG_APNS_TEAM_ID=${OURO_NEXT_APNS_TEAM_ID:-U2Q2D6ZQP2} "$node_bin" "$script_dir/lib/guardian-config.mjs" "$config"
 )
-if [ "$(cat "$config" 2>/dev/null)" != "$OURO_NEXT_CONFIG_JSON" ]; then
-  say "writing $config"
-  printf '%s\n' "$OURO_NEXT_CONFIG_JSON" > "$config.partial"
-  mv "$config.partial" "$config"
-fi
+if [ "$config_result" = written ]; then say "wrote $config"; fi
 config_hash=$(sha256_of "$config")
 
 # 5. The services. Each is recreated only when its definition changes. Recreating the runner host ends every runner,
 #    so it happens only when the host itself changes; agents then restart and resume their conversations.
-#    Services run with this PATH, without another Ouro's command shims.
-service_path=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '\.claude-inbox' | paste -sd: -)
+#    Services run with this PATH, without any Ouro's command shims: run from an agent's shell, the agent's `ouro` comes
+#    first, and baking it in would also change the host's definition, replacing the host and ending every runner.
+#    Dropped: this server's <root>/home and anything under it, any Ouro's home/bin (a guardian.sock beside it), and
+#    agents' .claude-inbox directories.
+service_path_of() { # <PATH>
+  local dir kept= entries
+  IFS=: read -ra entries <<< "$1"
+  for dir in "${entries[@]}"; do
+    case $dir in ''|"$home_dir"|"$home_dir"/*|*.claude-inbox*) continue ;; esac
+    if [ -S "$(dirname "$dir")/guardian.sock" ]; then continue; fi
+    kept=${kept:+$kept:}$dir
+  done
+  printf '%s' "$kept"
+}
+service_path=$(service_path_of "$PATH")
 service_env="PATH=$service_path,HOME=$HOME"
 # The three service managers, each as `<manager>_services create|delete <name> [options]` with sprite-env's options
 # (--cmd, --args, --env, --dir, --needs, --http-port, --no-stream), and `<manager>_service_exists <name>`.
@@ -215,6 +225,15 @@ systemd_services() {
 systemd_service_exists() { [ -e "$(unit_file "$1")" ]; }
 
 # launchd: a launch agent of this user's, which runs while they're logged in and starts again when they log in.
+# Out of both domains, whichever has it: an earlier install may have put it in user/<uid>. "Not loaded" is no error.
+launchd_bootout_everywhere() { # <label>
+  local domain
+  for domain in "$(launchd_gui_domain)" "user/$(id -u)"; do
+    launchctl bootout "$domain/$1" >/dev/null 2>&1 || true
+    # bootout returns before the job is gone; bootstrapping the same label meanwhile fails.
+    for _ in $(seq 1 100); do launchctl print "$domain/$1" >/dev/null 2>&1 || break; sleep 0.1; done
+  done
+}
 # launchd has no dependencies, so `--needs` is dropped (the guardian waits for the host's socket itself, and launchd
 # restarts whichever exits).
 launchd_label() { printf 'com.ouro.%s' "$1"; }
@@ -227,12 +246,10 @@ launchd_services() {
   shift 2
   case $action in
     delete)
-      launchctl bootout "$launchd_domain/$label" >/dev/null 2>&1 || true
-      # bootout returns before the job is gone; bootstrapping the same label meanwhile fails.
-      for _ in $(seq 1 100); do launchctl print "$launchd_domain/$label" >/dev/null 2>&1 || break; sleep 0.1; done
+      launchd_bootout_everywhere "$label"
       rm -f "$(plist_file "$name")" ;;
     create)
-      local cmd= args= env= dir= argument pair more pairs
+      local cmd= args= env= dir= argument pair more pairs error
       while [ $# -gt 0 ]; do
         case $1 in
           --cmd) cmd=$2; shift 2 ;; --args) args=$2; shift 2 ;; --env) env=$2; shift 2 ;; --dir) dir=$2; shift 2 ;;
@@ -254,13 +271,15 @@ launchd_services() {
         for pair in "${pairs[@]}"; do printf '\t\t<key>%s</key><string>%s</string>\n' "$(xml "${pair%%=*}")" "$(xml "${pair#*=}")"; done
         printf '\t</dict>\n\t<key>WorkingDirectory</key><string>%s</string>\n' "$(xml "$dir")"
         printf '\t<key>RunAtLoad</key><true/>\n\t<key>KeepAlive</key><true/>\n\t<key>ThrottleInterval</key><integer>2</integer>\n'
-        printf '\t<key>ProcessType</key><string>Interactive</string>\n'
+        printf '\t<key>ProcessType</key><string>Interactive</string>\n\t<key>LimitLoadToSessionType</key><string>Aqua</string>\n'
         printf '\t<key>StandardOutPath</key><string>%s</string>\n\t<key>StandardErrorPath</key><string>%s</string>\n' \
           "$(xml "$root/logs/$name.log")" "$(xml "$root/logs/$name.log")"
         printf '</dict>\n</plist>\n'
       } > "$(plist_file "$name").partial"
       mv "$(plist_file "$name").partial" "$(plist_file "$name")"
-      launchctl bootstrap "$launchd_domain" "$(plist_file "$name")" 2>/dev/null || fail "launchctl couldn't start $name; see $root/logs/$name.log" ;;
+      launchd_bootout_everywhere "$label"
+      error=$(launchctl bootstrap "$launchd_domain" "$(plist_file "$name")" 2>&1) ||
+        fail "launchctl couldn't start $name: ${error:-no reason given}. Its own log: $root/logs/$name.log" ;;
   esac
 }
 launchd_service_exists() { [ -e "$(plist_file "$1")" ]; }
@@ -268,11 +287,7 @@ launchd_service_exists() { [ -e "$(plist_file "$1")" ]; }
 case $service_manager in
   sprite) services() { sprite_services "$@"; }; service_exists() { sprite_service_exists "$@"; } ;;
   systemd) services() { systemd_services "$@"; }; service_exists() { systemd_service_exists "$@"; } ;;
-  launchd)
-    services() { launchd_services "$@"; }; service_exists() { launchd_service_exists "$@"; }
-    # The logged-in person's own domain; over SSH with no one logged in, their background domain.
-    launchd_domain=gui/$(id -u)
-    launchctl print "$launchd_domain" >/dev/null 2>&1 || launchd_domain=user/$(id -u) ;;
+  launchd) services() { launchd_services "$@"; }; service_exists() { launchd_service_exists "$@"; } ;;
 esac
 service_current() { service_exists "$1" && [ "$(cat "$state_dir/$1.definition" 2>/dev/null)" = "$2" ]; }
 ensure_service() {
@@ -290,7 +305,8 @@ ensure_service() {
 }
 host_definition="$host_copy $service_env"
 # Only on a Mac, so other machines' definitions, and their runners, stay as they are.
-if [ "$service_manager" = launchd ]; then host_definition+=" keep-awake=${OURO_NEXT_KEEP_AWAKE:-off}"; fi
+# Launch agents limited to the login session: a Mac installed before gets its plists rewritten once.
+if [ "$service_manager" = launchd ]; then host_definition+=" keep-awake=${OURO_NEXT_KEEP_AWAKE:-off} session=Aqua"; fi
 # The guardian needs the host, so its service manager won't stop the host under it: a new host means a new guardian too.
 if service_exists "$host_service" && ! service_current "$host_service" "$host_definition" && service_exists "$guardian_service"; then
   say "stopping $guardian_service to replace the runner host; runners end and agents resume their conversations"
@@ -301,6 +317,7 @@ ensure_service "$host_service" "$host_definition" \
 guardian_args=(--cmd "$node_bin" --args "--no-warnings,$guardian_copy/src/main.ts,$config" --env "$service_env" --dir "$root" --needs "$host_service")
 if [ -n "$http_port" ]; then guardian_args+=(--http-port "$http_port"); fi
 guardian_definition="$guardian_copy $config_hash $http_port $service_env"
+if [ "$service_manager" = launchd ]; then guardian_definition+=" session=Aqua"; fi
 ensure_service "$guardian_service" "$guardian_definition" "${guardian_args[@]}"
 
 # 6. The release: the first one is built when the guardian first starts; after that, deploy the commit if it isn't live.
