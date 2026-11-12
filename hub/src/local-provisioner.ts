@@ -225,6 +225,7 @@ export class LocalProvisioner implements Provisioner {
       home: paths.home,
       listenPort: port,
       sourceDir: paths.source,
+      appSourceDir: join(paths.source, 'apps/mobile'),
       sourceBranch: 'main',
       machineName: machineNameOf(order.label),
       publicUrl: this.addressOf(port),

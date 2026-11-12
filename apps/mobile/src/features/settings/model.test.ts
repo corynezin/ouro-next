@@ -133,17 +133,40 @@ test('the Ouro section shows the merged base, the update under way, a conflict o
 })
 
 test('the Backup section warns while changes on no base have no private copy, and starts the setup the viewer can', () => {
-  assert.equal(backupSection({ state: 'not_applicable' }, true), null)
-  assert.equal(backupSection({ state: 'nothing_to_back_up' }, true), null)
-  assert.equal(backupSection({ state: 'backed_up', repository: 'me/ouro-next', behind: false, lastPushError: null }, true), null)
+  const now = 1_000_000
+  assert.equal(backupSection({ state: 'not_applicable' }, true, now), null)
+  assert.equal(backupSection({ state: 'nothing_to_back_up' }, true, now), null)
 
-  const noGithub = backupSection({ state: 'not_backed_up', github: 'not_connected' }, true)!
+  const noGithub = backupSection({ state: 'not_backed_up', github: 'not_connected' }, true, now)!
   assert.equal(noGithub.warning, BACKUP_WARNING)
   assert.deepEqual(noGithub.action, { kind: 'connect_github', label: 'Connect GitHub to back up' })
-  assert.deepEqual(backupSection({ state: 'not_backed_up', github: 'connected' }, true)!.action, { kind: 'make_private_copy', label: 'Make a private copy' })
-  assert.equal(backupSection({ state: 'not_backed_up', github: 'connected' }, false)!.action, null, 'only the owner makes it')
+  assert.deepEqual(backupSection({ state: 'not_backed_up', github: 'connected' }, true, now)!.action, { kind: 'make_private_copy', label: 'Make a private copy' })
+  assert.equal(backupSection({ state: 'not_backed_up', github: 'connected' }, false, now)!.action, null, 'only the owner makes it')
+})
 
-  const failed = backupSection({ state: 'backed_up', repository: 'me/ouro-next', behind: true, lastPushError: 'remote: denied' }, true)!
-  assert.equal(failed.failure, 'remote: denied')
+test('while the private copy is made the section says so and offers nothing to tap', () => {
+  const making = backupSection({ state: 'making_private_copy' }, true, 0)!
+  assert.equal(making.working, 'Making a private copy…')
+  assert.equal(making.action, null)
+  assert.equal(making.warning, null)
+})
+
+test('a private copy shows where it is, opening on GitHub, when it was last pushed, and a push waiting', () => {
+  const now = 10 * 60_000
+  const done = backupSection({ state: 'backed_up', repository: 'me/ouro-next-private', lastPushedAt: 5 * 60_000, behind: false, lastPushError: null }, true, now)!
+  assert.deepEqual(done.copy, { headline: 'Backed up to me/ouro-next-private', url: 'https://github.com/me/ouro-next-private', lastPushedText: '5m ago', pendingText: null })
+  assert.equal(done.warning, null)
+  assert.equal(done.action, null)
+
+  const pending = backupSection({ state: 'backed_up', repository: 'me/ouro-next-private', lastPushedAt: now, behind: true, lastPushError: null }, true, now)!
+  assert.equal(pending.copy!.lastPushedText, 'just now')
+  assert.equal(pending.copy!.pendingText, "Push pending: the live version isn't in the backup yet")
+
+  assert.equal(backupSection({ state: 'backed_up', repository: 'me/x', lastPushedAt: null, behind: false, lastPushError: null }, true, now)!.copy!.lastPushedText, null)
+  assert.equal(backupSection({ state: 'backed_up', repository: '/tmp/stand-in/x.git', lastPushedAt: null, behind: false, lastPushError: null }, true, now)!.copy!.url, null, 'a repository GitHub has no page for has no link')
+
+  const failed = backupSection({ state: 'backed_up', repository: 'me/ouro-next-private', lastPushedAt: null, behind: true, lastPushError: 'GitHub didn\'t accept the push.' }, true, now)!
+  assert.equal(failed.failure, 'GitHub didn\'t accept the push.')
+  assert.equal(failed.copy!.pendingText, null, 'a failure is shown instead of a pending push')
   assert.equal(failed.action, null)
 })

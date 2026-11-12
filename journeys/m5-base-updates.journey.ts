@@ -26,6 +26,9 @@ const PERSON_LINE = 'Work in {{folder}} unless the task says otherwise. Keep not
 const BASE_2_LINE = 'Work in {{folder}} unless your task says otherwise.'
 const RESOLVED_LINE = 'Work in {{folder}} unless your task says otherwise. Keep notes short.'
 
+/** A stand-in for `expo export`, configured the way a person's is. */
+const FAKE_EXPORT = `mkdir -p {out}/b && echo bundle > {out}/b/ios.js && printf '{"version":0,"fileMetadata":{"ios":{"bundle":"b/ios.js","assets":[]}}}' > {out}/metadata.json`
+
 const treeOf = (n: number) => join(treesDir, String(n))
 const besideDirOf = (n: number) => `${run.source}.base-update-${n}`
 
@@ -47,6 +50,7 @@ async function makeBaseTrees(): Promise<void> {
   writeFileSync(join(treeOf(1), 'server/protocols/master.md'), `${readFileSync(join(treeOf(1), 'server/protocols/master.md'), 'utf8')}\nBase 1 was here.\n`)
   mkdirSync(join(treeOf(1), 'apps/mobile'), { recursive: true })
   writeFileSync(join(treeOf(1), 'apps/mobile/base-1.txt'), 'the app, as of base 1\n')
+  writeFileSync(join(treeOf(1), 'apps/mobile/app.json'), JSON.stringify({ expo: { name: 'Ouro Next', version: '0.1.0', runtimeVersion: { policy: 'appVersion' } } }))
 
   cpSync(treeOf(1), treeOf(2), { recursive: true })
   editTree(2, DEFAULT_PROTOCOL, FOLDER_LINE, BASE_2_LINE)
@@ -71,7 +75,7 @@ before(async () => {
   await makeBaseTrees()
   await offer(1, 'the master protocol gains a line, and the app a file')
 
-  run.extraOurodEnv = { OURO_BASE_REPO: baseRepo.url }
+  run.extraOurodEnv = { OURO_BASE_REPO: baseRepo.url, OURO_APP_EXPORT_COMMAND: FAKE_EXPORT }
   await run.start()
   const first = await run.waitForFirstRelease()
   assert.equal(first.phase, 'live', `the first release didn't go live: ${first.reason}`)
@@ -130,7 +134,9 @@ test('an offered base is merged beside the live source, goes live through the gu
   assert.match(sourceText(DEFAULT_PROTOCOL), /Keep notes short\./, 'the person\'s own change is kept')
   assert.ok(!existsSync(besideDirOf(1)), 'the merge beside is cleaned up')
   assert.equal((await run.git('branch', '--list', 'ouro-update/*')).trim(), '')
-  assert.ok((await masterNotices()).some((text) => text.includes('Ouro base 1 is live') && text.includes('ouro publish')), 'the master agent is told to publish the app')
+  const latestUpdate = await waitFor('the app to be published', async () => ((await (await fetch(`${run.url}/v2/identity`)).json()) as { latestUpdate: { updateNumber: number } | null }).latestUpdate)
+  assert.equal(latestUpdate.updateNumber, 1, 'base 1 changes the app, so the phone has it without anyone running ouro publish')
+  assert.ok(!(await masterNotices()).some((text) => text.includes('Ouro base 1 is live')), 'nothing is left for the master agent to do')
   assert.equal(done.offered?.n, 2, 'the next base is offered once this one is in')
 })
 

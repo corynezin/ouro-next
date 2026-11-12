@@ -1,16 +1,14 @@
 // `ouro`: a thin client of ourod's local socket. It holds no state and decides nothing. A send either prints a success or
 // fails visibly. A restart of ourod is routine, so unreachable means retry, with the same idempotency key, for a while.
 import { randomUUID } from 'node:crypto'
-import { execFile } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { promisify } from 'node:util'
 import { request } from 'node:http'
 import { chatHandle, displayStateOf } from '@ouro/contract'
+import { DEFAULT_EXPORT_COMMAND, NotPublished, publishCommittedApp } from '../app/app-publishing.ts'
+import type { PublishedApp } from '../app/app-publishing.ts'
+import type { RegisterUpdateInput } from '../app/app-updates.ts'
 import type { AgentDisplayState, AgentEntity, ComputerEntity, RemoteAgentEntity, ApiError, AskEntity, ChatEntity, CommandName, CommandOutput, GoalEntity, HistoryPage, MessageEntity, Snapshot, SearchPage, BaseStatus } from '@ouro/contract'
-
-const execFileAsync = promisify(execFile)
 
 const HELP = `ouro: talk to your agents, and to the other agents if you are one
 
@@ -479,26 +477,6 @@ async function runGoal(client: Client, args: string[], environment: NodeJS.Proce
   }
 }
 
-const DEFAULT_EXPORT_COMMAND = 'npx expo export --platform ios --output-dir {out}'
-
-/** The runtime an export runs on, as expo-updates computes it from app.json. Only the policies this app uses. */
-function runtimeVersionOf(appDir: string): string {
-  const config = JSON.parse(readFileSync(join(appDir, 'app.json'), 'utf8')) as { expo?: { version?: string; runtimeVersion?: string | { policy?: string } } }
-  const runtime = config.expo?.runtimeVersion
-  if (typeof runtime === 'string') return runtime
-  if (runtime?.policy === 'appVersion' && config.expo?.version) return config.expo.version
-  throw new CliFailure('app.json has no runtimeVersion this command understands (a string, or the appVersion policy)')
-}
-
-async function shell(command: string, args: string[], cwd: string): Promise<string> {
-  try {
-    return (await execFileAsync(command, args, { cwd, maxBuffer: 64 * 1024 * 1024 })).stdout
-  } catch (error) {
-    const failure = error as { stdout?: string; stderr?: string; message: string }
-    throw new CliFailure(`${command} ${args.join(' ').slice(0, 80)} failed: ${`${failure.stdout ?? ''}${failure.stderr ?? failure.message}`.slice(-1500)}`)
-  }
-}
-
 /**
  * Exports the committed app and registers it as the next update. Says "published" only when the server has it; anything
  * else leaves the change saved but not shipped, and says why.
@@ -508,30 +486,14 @@ async function runPublish(client: Client, args: string[], environment: NodeJS.Pr
   const appDir = parsed.flags.get('--app')?.[0] ?? environment.OURO_APP_SOURCE
   const notShipped = (why: string) => new CliFailure(`not shipped: ${why}. The change is saved in the source but hasn't reached the phone.`)
   if (!appDir) throw notShipped('no app source is configured: pass --app <folder>')
-  if (!existsSync(join(appDir, 'app.json'))) throw notShipped(`${appDir} has no app.json`)
-  const dirty = (await shell('git', ['status', '--porcelain', '--', '.'], appDir)).trim()
-  if (dirty) throw notShipped(`the app has uncommitted changes; commit them first, so the update matches a commit:\n${dirty.slice(0, 500)}`)
-  const commit = (await shell('git', ['rev-parse', 'HEAD'], appDir)).trim()
-  const runtimeVersion = runtimeVersionOf(appDir)
-
-  const outputDir = mkdtempSync(join(tmpdir(), 'ouro-export-'))
+  const register = async (input: RegisterUpdateInput) =>
+    await client.call('POST', '/v2/internal/updates', Buffer.from(JSON.stringify(input)), { 'content-type': 'application/json' }) as PublishedApp
   try {
-    const exportCommand = (environment.OURO_APP_EXPORT_COMMAND ?? DEFAULT_EXPORT_COMMAND).replaceAll('{out}', outputDir)
-    print(`exporting the app at ${commit.slice(0, 8)}…\n`)
-    try {
-      await shell('/bin/sh', ['-c', exportCommand], appDir)
-    } catch (error) {
-      throw notShipped(`the app didn't build: ${(error as Error).message}`)
-    }
-    let registered: { updateNumber: number; runtimeVersion: string }
-    try {
-      registered = await client.call('POST', '/v2/internal/updates', Buffer.from(JSON.stringify({ exportDir: outputDir, runtimeVersion, commit })), { 'content-type': 'application/json' }) as typeof registered
-    } catch (error) {
-      throw notShipped((error as Error).message)
-    }
-    print(`published update ${registered.updateNumber} for app version ${registered.runtimeVersion}. Tell the person to tap the banner at the top of the app.\n`)
-  } finally {
-    rmSync(outputDir, { recursive: true, force: true })
+    const published = await publishCommittedApp(appDir, environment.OURO_APP_EXPORT_COMMAND ?? DEFAULT_EXPORT_COMMAND, register, print)
+    print(`published update ${published.updateNumber} for app version ${published.runtimeVersion}. Tell the person to tap the banner at the top of the app.\n`)
+  } catch (error) {
+    if (error instanceof NotPublished) throw notShipped(error.message)
+    throw error
   }
 }
 

@@ -1,4 +1,5 @@
 // Settings as data. Pure: Screen.tsx only draws this.
+import { ago } from '../../design/format.ts'
 import { ServerIdentity } from '@ouro/contract'
 import type { DeviceEntity, NotificationSettings, NotificationSettingsEntity, PersonEntity, ServerEntity } from '@ouro/contract'
 import type { IdleFold } from '../../core/accounts/preferences.ts'
@@ -236,39 +237,61 @@ export function baseSection(base: ServerEntity['release']['base'], isOwner: bool
 export const BACKUP_WARNING = "Your changes aren't backed up"
 export const BACKUP_MADE_TOAST = 'Private copy made on your GitHub account.'
 
+export const BACKUP_MAKING_TEXT = 'Making a private copy…'
+const BACKUP_DETAIL = "Changes you or your agents made to Ouro exist only on this server. A private copy on your GitHub account keeps them safe, and only you can see it."
+
 /**
- * The "Backup" section: shown while the source has changes on no base and no private copy, and while a copy exists but its
- * last push failed. Only the owner sets one up. Tapping the warning connects GitHub first when it isn't, then makes the copy.
+ * The "Backup" section: the warning while the source has changes on no base and no private copy, the copy being made, and
+ * once it exists, where it is, when it was last pushed and whether a push is waiting. Only the owner sets one up. Tapping
+ * the warning connects GitHub first when it isn't, and the copy is then made without another tap.
  */
 export interface BackupSection {
-  warning: string
+  warning: string | null
   detail: string
   /** What tapping the row does; null when it isn't the viewer's to do. */
   action: { kind: 'connect_github'; label: string } | { kind: 'make_private_copy'; label: string } | null
+  /** Shown instead of the action while the copy is being made. */
+  working: string | null
   /** Why the last push to the copy failed, shown beneath. */
   failure: string | null
+  /** The copy that exists. `url` is where tapping it goes, when the repository is one GitHub has. */
+  copy: { headline: string; url: string | null; lastPushedText: string | null; pendingText: string | null } | null
 }
 
-export function backupSection(backup: ServerEntity['sourceBackup'], isOwner: boolean): BackupSection | null {
+/** `owner/name` on GitHub; a local path (a stand-in's) has no page. */
+const gitHubUrlOf = (repository: string): string | null => (/^[\w.-]+\/[\w.-]+$/.test(repository) ? `https://github.com/${repository}` : null)
+
+export function backupSection(backup: ServerEntity['sourceBackup'], isOwner: boolean, now: number): BackupSection | null {
+  const none = { warning: null, working: null, failure: null, copy: null, action: null }
   switch (backup.state) {
     case 'not_applicable':
     case 'nothing_to_back_up':
       return null
     case 'not_backed_up':
       return {
+        ...none,
         warning: BACKUP_WARNING,
-        detail: "Changes you or your agents made to Ouro exist only on this server. A private copy on your GitHub account keeps them safe, and only you can see it.",
+        detail: BACKUP_DETAIL,
         action: !isOwner ? null : backup.github === 'connected'
           ? { kind: 'make_private_copy', label: 'Make a private copy' }
           : { kind: 'connect_github', label: 'Connect GitHub to back up' },
-        failure: null,
       }
-    case 'backed_up':
-      return backup.lastPushError === null ? null : {
-        warning: "Your last changes didn't reach the backup",
-        detail: `Your private copy, ${backup.repository}, is behind. Ouro tries again after the next update.`,
-        action: null,
+    case 'making_private_copy':
+      return { ...none, detail: BACKUP_DETAIL, working: BACKUP_MAKING_TEXT }
+    case 'backed_up': {
+      const failed = backup.lastPushError !== null
+      return {
+        ...none,
+        warning: failed ? "Your last changes didn't reach the backup" : null,
+        detail: failed ? `Your private copy, ${backup.repository}, is behind. Ouro tries again after the next update.` : 'Your changes to Ouro are kept in a private repository on your GitHub account.',
         failure: backup.lastPushError,
+        copy: {
+          headline: `Backed up to ${backup.repository}`,
+          url: gitHubUrlOf(backup.repository),
+          lastPushedText: backup.lastPushedAt === null ? null : ago(backup.lastPushedAt, now) === 'now' ? 'just now' : `${ago(backup.lastPushedAt, now)} ago`,
+          pendingText: backup.behind && !failed ? "Push pending: the live version isn't in the backup yet" : null,
+        },
       }
+    }
   }
 }

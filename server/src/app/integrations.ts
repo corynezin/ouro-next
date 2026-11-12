@@ -26,6 +26,8 @@ export interface IntegrationsConfig {
   commit: (body: () => void) => void
   /** An account agents run on went from signed out to signed in: agents held for that can carry on. */
   accountSignedIn: (account: AgentAccount) => void
+  /** A provider's state was stored; called after the transaction. */
+  integrationStored: (provider: IntegrationProvider) => void
   /** A plan's windows were read; called inside a transaction. */
   planUsageRead: (account: PlanAccount, windows: PlanWindowReading[]) => void
   log: (event: string, fields: Record<string, unknown>) => void
@@ -77,6 +79,7 @@ export class Integrations {
     }
     const before = this.config.store.integrationOf(provider)
     this.config.commit(() => this.config.store.saveIntegration(entity))
+    this.config.integrationStored(provider)
     if (entity.provider === 'chatgpt' && entity.state.status === 'signed_in') this.chatgptLoginPendingUntil = 0
     const signedIn = (entity.provider === 'claude' || entity.provider === 'chatgpt') && entity.state.status === 'signed_in' && before?.state.status !== 'signed_in'
     if (signedIn) this.config.accountSignedIn(entity.provider as AgentAccount)
