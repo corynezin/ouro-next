@@ -50,7 +50,7 @@ stop_runners() { local pid; for pid in $(pgrep -f "ouro-runner.ts $1/data" || tr
 trap 'stop_ourod; stop_ourod2; stop_runners "$run"; stop_runners "$run2"' EXIT INT TERM HUP
 
 rm -rf "$run"; mkdir -p "$run/data" "$run/work" "$run/home" "$run/accounts"
-# A fresh install, so defaults (such as Model avatars on) are what a new phone sees.
+# A fresh install, so defaults are what a new phone sees.
 xcrun simctl uninstall "$udid" $app_id 2>/dev/null || true
 "$repo/scripts/ios-sim.sh" ${1:-}
 # Keychain items outlive an uninstall, so a fresh install would otherwise still know the last run's server.
@@ -105,7 +105,7 @@ for f in "$flows"/${~OURO_PARITY_FLOWS:-[0-9]*.yaml}; do
           cli send helper 'standin: [{"do":"run","command":"ouro send \"#team\" \"Hello team\""},{"do":"run","command":"ouro ask human \"Need a hand?\""}]' >/dev/null
           cli new --name sleeper --model stand-in "Sleep" >/dev/null
           cli stop sleeper >/dev/null
-          cli send master 'standin: [{"do":"run","command":"ouro reply \"Ask zulu, alpha, mybot@maestro and asker, then formatter; not mybots.\""},{"do":"run","command":"ouro ask human \"Master question?\""}]' >/dev/null
+          cli send concierge 'standin: [{"do":"run","command":"ouro reply \"Ask zulu, alpha, mybot@maestro and asker, then formatter; not mybots.\""},{"do":"run","command":"ouro ask human \"Starter question?\""}]' >/dev/null
           cli new --name alpha --model stand-in "First" >/dev/null
           cli new --name zulu --model stand-in "Second" >/dev/null ;;
     50-*)

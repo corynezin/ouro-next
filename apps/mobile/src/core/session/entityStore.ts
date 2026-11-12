@@ -2,7 +2,7 @@
 // agent's change doesn't re-render a list of others.
 import type {
   AgentEntity, AskEntity, Change, ChatEntity, ComputerEntity, DeviceEntity, EntityKind, EntityOfKind, GoalEntity, HistoryPage, IntegrationEntity,
-  IntegrationProvider, MessageEntity, NotificationSettingsEntity, PersonEntity, ReadStateEntity, RemoteAgentEntity, RemoteAskEntity, ServerEntity, Snapshot,
+  IntegrationProvider, MessageEntity, NotificationSettingsEntity, PersonEntity, PinEntity, ReadStateEntity, RemoteAgentEntity, RemoteAskEntity, ServerEntity, Snapshot,
   SummaryEntity, Viewer,
 } from '@ouro/contract'
 
@@ -33,6 +33,8 @@ export class EntityStore {
   get agents(): ReadonlyMap<string, AgentEntity> { return this.entities.agent }
   get chats(): ReadonlyMap<string, ChatEntity> { return this.entities.chat }
   get readStates(): ReadonlyMap<string, ReadStateEntity> { return this.entities.read_state }
+  /** The viewer's own; the server sends only theirs. */
+  get pins(): ReadonlyMap<string, PinEntity> { return this.entities.pin }
   get asks(): ReadonlyMap<string, AskEntity> { return this.entities.ask }
   get goals(): ReadonlyMap<string, GoalEntity> { return this.entities.goal }
   get summaries(): ReadonlyMap<string, SummaryEntity> { return this.entities.summary }
@@ -67,6 +69,7 @@ export class EntityStore {
       agent: byId(snapshot.agents),
       chat: byId(snapshot.chats),
       read_state: byId(snapshot.readStates),
+      pin: byId(snapshot.pins),
       ask: byId(snapshot.asks),
       goal: byId(snapshot.goals),
       summary: byId(snapshot.summaries),
@@ -97,6 +100,7 @@ export class EntityStore {
       case 'agent': this.entities.agent.set(change.id, change.value); return
       case 'chat': this.entities.chat.set(change.id, change.value); return
       case 'read_state': this.entities.read_state.set(change.id, change.value); return
+      case 'pin': this.entities.pin.set(change.id, change.value); return
       case 'ask': this.entities.ask.set(change.id, change.value); return
       case 'goal': this.entities.goal.set(change.id, change.value); return
       case 'summary': this.entities.summary.set(change.id, change.value); return
@@ -172,7 +176,7 @@ export class EntityStore {
 
 function emptyEntities(): EntityMaps {
   return {
-    agent: new Map(), chat: new Map(), read_state: new Map(), ask: new Map(), goal: new Map(), summary: new Map(), person: new Map(), device: new Map(), notification_settings: new Map(), integration: new Map(), computer: new Map(), remote_agent: new Map(), remote_ask: new Map(),
+    agent: new Map(), chat: new Map(), read_state: new Map(), pin: new Map(), ask: new Map(), goal: new Map(), summary: new Map(), person: new Map(), device: new Map(), notification_settings: new Map(), integration: new Map(), computer: new Map(), remote_agent: new Map(), remote_ask: new Map(),
   }
 }
 

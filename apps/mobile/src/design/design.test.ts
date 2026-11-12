@@ -5,6 +5,7 @@ import { bubbleActions, textActions, wordsPresses } from './bubbleActions.ts'
 import { tapChoice } from './choiceTap.ts'
 import { attachOptions, COMPOSER_COPY, composedSend, draftWithTakenBack, pickedAssetFile } from './composerText.ts'
 import { ago, capPct, dateStampOf, dateTimeOf, foldForSearch, formatSize, money, oneLine, timeOfDay, timerText, tokensText, untilText } from './format.ts'
+import { identiconCells, identiconColor, identiconSvg } from './identicon.ts'
 import { activeMention, linkify, parseBlocks, parseInline, segments } from './messageText.ts'
 import { senderColor, senderColors, tint } from './theme.ts'
 
@@ -98,6 +99,7 @@ test('model aliases and full ids share the same visuals', () => {
   for (const [alias, full] of [
     ['or-haiku', 'anthropic/claude-haiku-5.5'],
     ['sonnet', 'claude-sonnet-5-5[1m]'],
+    ['fable', 'claude-fable-5-2'],
     ['deepseek', 'deepseek/deepseek-v4-pro'],
     ['deepseek-flash', 'deepseek/deepseek-v4.1-flash'],
     ['gemini-flash', 'google/gemini-3.8-flash'],
@@ -113,6 +115,7 @@ test('unfamiliar models of a known company keep the company and no guessed tier'
 })
 
 test('avatars classify models by company and tier, and unknown ones stay neutral', () => {
+  assert.deepEqual(avatarModel('fable'), { company: 'anthropic', capability: 'flagship' })
   assert.deepEqual(avatarModel('opus'), { company: 'anthropic', capability: 'flagship' })
   assert.deepEqual(avatarModel('sonnet[1m]'), { company: 'anthropic', capability: 'balanced' })
   assert.deepEqual(avatarModel('or-haiku'), { company: 'anthropic', capability: 'fast' })
@@ -189,4 +192,32 @@ test("a failed bubble's words take its long-press as well as its tap, so the lon
   assert.deepEqual(wordsPresses(true, tap, longPress), { onPress: tap, onLongPress: longPress }, 'words with a tap take the touch, so the long-press too')
   assert.deepEqual(wordsPresses(true, undefined, longPress), { onPress: undefined, onLongPress: undefined }, 'otherwise the Pressable has both')
   assert.deepEqual(wordsPresses(false, undefined, longPress), { onPress: undefined, onLongPress: longPress }, 'outside a Pressable the words take it')
+})
+
+test('identicons are deterministic, left-right symmetric, and differ per seed', () => {
+  const cells = identiconCells('agent-a')
+  assert.equal(cells.length, 5)
+  for (const row of cells) {
+    assert.equal(row.length, 5)
+    assert.deepEqual(row, [...row].reverse(), 'mirrored left to right')
+  }
+  assert.deepEqual(identiconCells('agent-a'), cells)
+  assert.equal(identiconColor('agent-a'), identiconColor('agent-a'))
+  const seeds = Array.from({ length: 200 }, (_, i) => `agent-${i}`)
+  const patterns = new Set(seeds.map((seed) => JSON.stringify(identiconCells(seed))))
+  const hues = new Set(seeds.map(identiconColor))
+  assert.ok(patterns.size > 190, `patterns rarely collide (${patterns.size} of 200)`)
+  assert.ok(hues.size > 150, `hues spread out (${hues.size} of 200)`)
+  const filled = seeds.flatMap((seed) => identiconCells(seed).flat()).filter(Boolean).length / (seeds.length * 25)
+  assert.ok(filled > 0.65 && filled < 0.85, `about three cells in four are on (${filled})`)
+})
+
+test('an identicon SVG draws one pastel square per lit cell, on an optional background', () => {
+  const svg = identiconSvg('agent-a', 'f0f0f0')
+  assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 7 7"/)
+  assert.match(svg, /<rect width="7" height="7" fill="#f0f0f0"\/>/)
+  assert.match(svg, /<g fill="hsl\(\d+, 55%, 72%\)">/)
+  const lit = identiconCells('agent-a').flat().filter(Boolean).length
+  assert.equal(svg.match(/width="1" height="1"/g)?.length ?? 0, lit)
+  assert.doesNotMatch(identiconSvg('agent-a'), /width="7"/, 'transparent without a background')
 })

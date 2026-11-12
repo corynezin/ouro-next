@@ -3,7 +3,7 @@
 // socket already runs as the owner's user.
 import { createReadStream, statSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { AwsCredentialsBody, CHANGES_HEARTBEAT_MS, CreateMachineBody, SpritesTokenBody, ClaudeLoginFinishBody, GithubTokenBody, IdempotencyKey, MAX_ATTACHMENT_BYTES, PairRequest, SEARCH_DEFAULT_LIMIT, SecretKeyBody, UPDATE_ASSETS_PATH, UPDATE_MANIFEST_PATH, UPDATE_PROTOCOL_VERSION } from '@ouro/contract'
+import { AwsCredentialsBody, CHANGES_HEARTBEAT_MS, CreateMachineBody, SpritesTokenBody, ClaudeLoginFinishBody, CONTEXT_PAGE_DEFAULT_LIMIT, ContextBlockPlace, GithubTokenBody, IdempotencyKey, MAX_ATTACHMENT_BYTES, PairRequest, SEARCH_DEFAULT_LIMIT, SecretKeyBody, UPDATE_ASSETS_PATH, UPDATE_MANIFEST_PATH, UPDATE_PROTOCOL_VERSION } from '@ouro/contract'
 import { UPDATE_PLATFORM } from '../app/app-updates.ts'
 import { fileTypeOf } from '../domain/file-type.ts'
 import type { SyncFrame, Viewer } from '@ouro/contract'
@@ -180,6 +180,19 @@ export function createApiHandler(core: OuroCore, trust: ListenerTrust, logging: 
       if (caller.kind === 'person' && !caller.person.isOwner) throw new CommandRefused('forbidden', 'only the owner reads logs on other computers')
       return replyJson(response, 200, await core.remoteAgentLog(decodeURIComponent(remoteLog[1]!), { after: integerParam(url, 'after'), before: integerParam(url, 'before') }))
     }
+    const contextList = /^\/v2\/agents\/([^/]+)\/context$/.exec(path)
+    if (contextList && method === 'GET') {
+      const page = { before: integerParam(url, 'before'), limit: integerParam(url, 'limit') ?? CONTEXT_PAGE_DEFAULT_LIMIT }
+      return replyJson(response, 200, await core.agentContextList(caller, decodeURIComponent(contextList[1]!), page))
+    }
+    const contextText = /^\/v2\/agents\/([^/]+)\/context\/(\d+)\/text$/.exec(path)
+    if (contextText && method === 'GET') {
+      const where = ContextBlockPlace.safeParse({ part: url.searchParams.get('part'), item: integerParam(url, 'i') ?? 0, block: integerParam(url, 'k') ?? 0 })
+      if (!where.success) throw new CommandRefused('invalid_request', 'part must be system, message or response, and i and k places in it')
+      return replyJson(response, 200, await core.agentContextText(caller, decodeURIComponent(contextText[1]!), Number(contextText[2]), where.data))
+    }
+    const contextOne = /^\/v2\/agents\/([^/]+)\/context\/(\d+)$/.exec(path)
+    if (contextOne && method === 'GET') return replyJson(response, 200, await core.agentContext(caller, decodeURIComponent(contextOne[1]!), Number(contextOne[2])))
 
     const summaries = /^\/v2\/agents\/([^/]+)\/summaries$/.exec(path)
     if (summaries && method === 'GET') {
@@ -282,11 +295,12 @@ function streamChanges(core: OuroCore, viewer: Viewer, caller: Caller, url: URL,
   }
 
   let cursor = integerParam(url, 'after') ?? 0
+  const optedIn = (url.searchParams.get('entities') ?? '').split(',').filter((kind) => kind !== '')
   let caughtUpSent = false
   const pump = () => {
     if (response.destroyed) return
     for (;;) {
-      const batch = core.changesAfter(cursor, viewer, CHANGES_BATCH)
+      const batch = core.changesAfter(cursor, viewer, CHANGES_BATCH, optedIn)
       for (const change of batch) {
         writeFrame({ frame: 'change', change }, change.cursor)
         cursor = change.cursor

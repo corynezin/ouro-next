@@ -29,12 +29,13 @@ export function useUpdatesDownloadedAtLaunch(flow: UpdateFlow) {
 export function runningCode(): RunningCode {
   if (!Updates.isEnabled) return { kind: 'development' }
   if (Updates.isEmbeddedLaunch || Updates.updateId === null) return { kind: 'embedded', runtimeVersion: Updates.runtimeVersion }
-  return { kind: 'update', updateId: Updates.updateId, createdAt: Updates.createdAt, updateNumber: updateNumberOf(Updates.manifest) }
+  const ouro = ouroExtraOf(Updates.manifest)
+  return { kind: 'update', updateId: Updates.updateId, createdAt: Updates.createdAt, updateNumber: ouro?.updateNumber ?? null, machineId: ouro?.machineId ?? null }
 }
 
-/** The running manifest was validated before it was fetched; this reads only the part Settings shows. */
-function updateNumberOf(manifest: unknown): number | null {
+/** The running manifest was validated before it was fetched; this reads only the part Ouro adds. */
+function ouroExtraOf(manifest: unknown) {
   const extra = typeof manifest === 'object' && manifest !== null && 'extra' in manifest ? manifest.extra : undefined
   const parsed = UpdateManifest.shape.extra.safeParse(extra)
-  return parsed.success ? parsed.data.ouro.updateNumber : null
+  return parsed.success ? parsed.data.ouro : null
 }

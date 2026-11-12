@@ -350,9 +350,20 @@ test('absent preferences are defaults, not damage, and changes are saved', async
   await preferences.load()
   assert.deepEqual(preferences.current, DEFAULT_PREFERENCES)
   assert.equal(preferences.needsRecovery, false)
-  preferences.set('modelAvatars', false)
+  preferences.set('requireFaceId', true)
   await settle()
-  assert.equal(JSON.parse(storage.values.get(PREFS_KEY)!).modelAvatars, false)
+  assert.equal(JSON.parse(storage.values.get(PREFS_KEY)!).requireFaceId, true)
+})
+
+test('a stored preference the app no longer has is ignored, not damage, and dropped on the next save', async () => {
+  const { storage, preferences } = preferencesOf(JSON.stringify({ requireFaceId: true, modelAvatars: false }))
+  await preferences.load()
+  assert.equal(preferences.needsRecovery, false)
+  assert.equal(preferences.current.requireFaceId, true)
+  assert.equal('modelAvatars' in preferences.current, false)
+  preferences.set('idleFold', { kind: 'never' })
+  await settle()
+  assert.equal('modelAvatars' in JSON.parse(storage.values.get(PREFS_KEY)!), false)
 })
 
 test('invalid preferences block saving until reset, while changes apply for this run', async () => {
@@ -360,9 +371,9 @@ test('invalid preferences block saving until reset, while changes apply for this
   const { storage, preferences } = preferencesOf(raw)
   await preferences.load()
   assert.equal(preferences.needsRecovery, true)
-  preferences.set('modelAvatars', false)
+  preferences.set('requireFaceId', true)
   await settle()
-  assert.equal(preferences.current.modelAvatars, false)
+  assert.equal(preferences.current.requireFaceId, true)
   assert.equal(storage.values.get(PREFS_KEY), raw)
 })
 
@@ -372,19 +383,19 @@ test('preferences that are JSON but not an object are damaged, and not written b
     await preferences.load()
     assert.equal(preferences.needsRecovery, true, raw)
     assert.deepEqual(preferences.current, DEFAULT_PREFERENCES)
-    preferences.set('modelAvatars', false)
+    preferences.set('requireFaceId', true)
     await settle()
     assert.equal(storage.values.get(PREFS_KEY), raw)
   }
 })
 
 test('mixed preferences salvage valid fields, default invalid ones, and retain the original', async () => {
-  const raw = JSON.stringify({ requireFaceId: true, idleFold: 'soon', modelAvatars: false })
+  const raw = JSON.stringify({ requireFaceId: true, idleFold: 'soon', updateHomeServerId: 'server-1' })
   const { storage, preferences } = preferencesOf(raw)
   await preferences.load()
   assert.equal(preferences.current.requireFaceId, true)
   assert.deepEqual(preferences.current.idleFold, DEFAULT_PREFERENCES.idleFold)
-  assert.equal(preferences.current.modelAvatars, false)
+  assert.equal(preferences.current.updateHomeServerId, 'server-1')
   assert.equal(preferences.needsRecovery, true)
   assert.equal(storage.values.get(PREFS_KEY), raw)
 })
@@ -397,9 +408,9 @@ test('resetting preferences keeps a recovery copy and the Face ID lock', async (
   assert.equal(preferences.needsRecovery, false)
   assert.equal(preferences.current.requireFaceId, true)
   assert.deepEqual([...storage.values].filter(([k]) => k.includes('.recovery.')).map(([, v]) => v), [raw])
-  preferences.set('modelAvatars', false)
+  preferences.set('idleFold', { kind: 'never' })
   await settle()
-  assert.equal(JSON.parse(storage.values.get(PREFS_KEY)!).modelAvatars, false)
+  assert.deepEqual(JSON.parse(storage.values.get(PREFS_KEY)!).idleFold, { kind: 'never' })
 })
 
 test('a failed backup prevents the preferences reset, leaving them damaged and as stored', async () => {
@@ -413,7 +424,7 @@ test('a failed backup prevents the preferences reset, leaving them damaged and a
 })
 
 test('a read that rejects blocks writes until a successful load', async () => {
-  const { storage, preferences } = preferencesOf(JSON.stringify({ modelAvatars: false }))
+  const { storage, preferences } = preferencesOf(JSON.stringify({ idleFold: { kind: 'never' } }))
   storage.failReads = true
   await assert.rejects(preferences.load())
   preferences.set('requireFaceId', true)
@@ -421,7 +432,7 @@ test('a read that rejects blocks writes until a successful load', async () => {
   assert.equal(JSON.parse(storage.values.get(PREFS_KEY)!).requireFaceId, undefined)
   storage.failReads = false
   await preferences.load()
-  assert.equal(preferences.current.modelAvatars, false)
+  assert.deepEqual(preferences.current.idleFold, { kind: 'never' })
 })
 
 // ---- pairing input ----

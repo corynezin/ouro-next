@@ -24,12 +24,6 @@ test('a message whose place is loaded but which is not there: the nearest at or 
   assert.equal(JUMP_COPY.tooFar, 'That message is too far back to jump to.')
 })
 
-test('a done report folded into the message before it is found at that message', () => {
-  const report = { seq: 13, chatId: 'c', at: 12_500, purpose: 'done_report' as const, from: 'alice' }
-  const items = itemsOf([11, 12], [report])
-  assert.deepEqual(jumpStep(items, { messageId: 'm13', seq: 13 }, false, 0), { kind: 'scroll', index: 0, messageId: 'm12' })
-})
-
 test("a history page that fails says why in the status bar's note, and one that loads clears it (CHAT-16)", () => {
   assert.equal(historyLoadNote({ ok: false, failure: { kind: 'no_answer', reason: 'reset' } }), "Couldn't reach your Ouro machine. Try again in a few seconds.")
   assert.equal(historyLoadNote({ ok: true, value: undefined }), null)

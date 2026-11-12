@@ -4,11 +4,11 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { request } from 'node:http'
-import { chatHandle, displayStateOf } from '@ouro/contract'
+import { chatHandle, displayStateOf, PromptCacheLifetime } from '@ouro/contract'
 import { DEFAULT_EXPORT_COMMAND, NotPublished, publishCommittedApp } from '../app/app-publishing.ts'
 import type { PublishedApp } from '../app/app-publishing.ts'
 import type { RegisterUpdateInput } from '../app/app-updates.ts'
-import type { AgentDisplayState, AgentEntity, ComputerEntity, RemoteAgentEntity, ApiError, AskEntity, ChatEntity, CommandName, CommandOutput, GoalEntity, HistoryPage, MessageEntity, Snapshot, SearchPage, BaseStatus } from '@ouro/contract'
+import type { AgentDisplayState, AgentEntity, ComputerEntity, RemoteAgentEntity, ApiError, AskEntity, ChatEntity, CommandName, CommandOutput, GoalEntity, HistoryPage, MessageEntity, PinTarget, Snapshot, SearchPage, BaseStatus } from '@ouro/contract'
 
 const HELP = `ouro: talk to your agents, and to the other agents if you are one
 
@@ -18,15 +18,16 @@ const HELP = `ouro: talk to your agents, and to the other agents if you are one
   ouro reply [--file <path>]... "message"                        answer the last message, in its chat
   ouro ask <human> [--blocked|--urgent] [--choice "x"]... "question"
   ouro withdraw-ask <ask-id>
-  ouro relay <agent> [--ask <ask-id>] "the person's words"      master only: pass the person's own words on, as theirs
+  ouro relay <agent> [--ask <ask-id>] "the person's words"      agents a person started: pass their words on
+  ouro pin|unpin <agent|agent@computer|'#group'>                 keep it at the top of the person's lists, or stop
   ouro goal set [--open-ended] [--check "<command>"] [--every <seconds>] [--for <agent>] "goal"
   ouro goal pause ["question or reason"] | resume | reopen | clear | done ["summary"] [--for <agent>]
   ouro goal every <seconds|default> [--for <agent>]
   ouro goal [show] [--for <agent>]                              the goal, its state and notes
   ouro goals                                                     every agent's goal
   ouro done "summary"                                            report to your parent and finish
-  ouro spawn <new-name>[@computer] [--folder <dir>] [--model <m>] "task"    start a helper, here or on another computer
-  ouro new [--name <n>] [--computer <c>] [--folder <dir>] [--model <m>] "task"    start an agent, naming it from the task if unnamed
+  ouro spawn <new-name>[@computer] [--folder <dir>] [--model <m>] [--cache 5m|1h] "task"    start a helper, here or on another computer
+  ouro new [--name <n>] [--computer <c>] [--folder <dir>] [--model <m>] [--cache 5m|1h] "task"    start an agent, naming it from the task if unnamed
   ouro list                                                      all agents, their state and what they did lately
   ouro chats                                                     the groups here; * = you're in it
   ouro chats read '#group' [-n <count>]                          its latest messages
@@ -55,7 +56,7 @@ const HELP = `ouro: talk to your agents, and to the other agents if you are one
   ouro publish [--app <folder>]                                  export the committed app and send it to the person's phone
   ouro base                                                      the base this machine has, the one offered, and how an update stands
   ouro base take <n>                                             take the offered base n, for the owner
-  ouro base resolve                                              after a conflict, have the master agent merge it
+  ouro base resolve                                              after a conflict, have an agent started to merge it
   ouro base drop                                                 after a conflict, throw the merge away (an agent on it stops); the base stays offered
   ouro base continue                                             carry on with a base update once its conflicts are resolved and committed
 `
@@ -171,6 +172,15 @@ function parseArguments(args: string[], valueFlags: readonly string[], switchFla
     }
   }
   return parsed
+}
+
+/** `--cache 5m|1h`: how long a new agent's prompt cache lives, for models with a timed one. Absent: nothing is sent, and
+ * the server's default applies. */
+export function promptCacheLifetimeFlag(value: string | undefined): PromptCacheLifetime | undefined {
+  if (value === undefined) return undefined
+  const parsed = PromptCacheLifetime.safeParse(value)
+  if (!parsed.success) throw new CliFailure(`--cache is 5m or 1h, not ${value}`)
+  return parsed.data
 }
 
 /** Whether a hook's input says a file in the memory folder was written. Input without a file (a session starting) says
@@ -492,7 +502,10 @@ async function runPublish(client: Client, args: string[], environment: NodeJS.Pr
     await client.call('POST', '/v2/internal/updates', Buffer.from(JSON.stringify(input)), { 'content-type': 'application/json' }) as PublishedApp
   try {
     const published = await publishCommittedApp(appDir, environment.OURO_APP_EXPORT_COMMAND ?? DEFAULT_EXPORT_COMMAND, register, print)
-    print(`published update ${published.updateNumber} for app version ${published.runtimeVersion}. Tell the person to tap the banner at the top of the app.\n`)
+    print(`published update ${published.updateNumber} for app version ${published.runtimeVersion}. `)
+    // An older server doesn't return a mark.
+    if (published.mark) print(`End the message that tells the person with this mark, on a line of its own, exactly as written. The app shows it as a sentence saying whether the update is in the app they're running, and how to get it, so don't name the update or tell them to tap the banner around it:\n${published.mark}\n`)
+    else print('Tell the person to tap the banner at the top of the app.\n')
   } catch (error) {
     if (error instanceof NotPublished) throw notShipped(error.message)
     throw error
@@ -504,7 +517,7 @@ function describeBase(base: BaseStatus): string {
   const offered = base.offered === null ? 'no newer base is offered' : `base ${base.offered.n} is offered: ${base.offered.notes}`
   const update = base.update.state === 'idle' ? ''
     : base.update.state === 'updating' ? `updating to base ${base.update.n}\n`
-      : base.update.state === 'conflict' ? `base ${base.update.n} conflicts in ${base.update.files.join(', ')}${base.update.resolver ? `; ${base.update.resolver} is resolving it` : '; have the master agent merge it with ouro base resolve, or drop it with ouro base drop'}\n`
+      : base.update.state === 'conflict' ? `base ${base.update.n} conflicts in ${base.update.files.join(', ')}${base.update.resolver ? `; ${base.update.resolver} is resolving it` : '; have an agent merge it with ouro base resolve, or drop it with ouro base drop'}\n`
         : `base ${base.update.n} didn't go in: ${base.update.why}\n`
   return `on base ${base.integrated}; ${offered}\n${update}`
 }
@@ -573,6 +586,20 @@ export async function runCli(args: string[], environment: NodeJS.ProcessEnv, std
       print(`${describeMessage(message)}: to ${to}, as ${message.from}'s own words\n`)
       return
     }
+    case 'pin':
+    case 'unpin': {
+      const [what] = rest
+      if (!what) throw new CliFailure(`${verb} what? ouro ${verb} <agent|agent@computer|'#group'>`)
+      const target: PinTarget = what.startsWith('#')
+        ? { kind: 'chat', chatId: (await requireGroup(client, what)).id }
+        : what.includes('@')
+          ? { kind: 'remote_agent', address: (await requireRemoteAgent(client, what)).address }
+          : { kind: 'agent', agentId: (await requireAgent(client, what)).id }
+      if (verb === 'pin') await client.command('pin', { target })
+      else await client.command('unpin', { target })
+      print(`${verb === 'pin' ? 'pinned' : 'unpinned'} ${what}\n`)
+      return
+    }
     case 'computers': return await runComputers(client, rest, print)
     case 'memory': {
       const parsed = parseArguments(rest, [], ['--hook'])
@@ -624,10 +651,10 @@ export async function runCli(args: string[], environment: NodeJS.ProcessEnv, std
       return
     }
     case 'spawn': {
-      const parsed = parseArguments(rest, ['--folder', '--model'], [])
+      const parsed = parseArguments(rest, ['--folder', '--model', '--cache'], [])
       const [name, ...words] = parsed.positionals
       if (!name) throw new CliFailure('spawn what? ouro spawn <new-name> "task"')
-      const request = { task: messageText(words, stdin, 'the task'), model: parsed.flags.get('--model')?.[0] ?? null, folder: parsed.flags.get('--folder')?.[0] ?? null }
+      const request = { task: messageText(words, stdin, 'the task'), model: parsed.flags.get('--model')?.[0] ?? null, folder: parsed.flags.get('--folder')?.[0] ?? null, promptCacheLifetime: promptCacheLifetimeFlag(parsed.flags.get('--cache')?.[0]) }
       const [localName, computerName] = name.split('@')
       if (computerName !== undefined) {
         const { remoteAgent } = await client.command('create_remote_agent', { ...request, name: localName!, computerId: (await requireComputer(client, computerName)).id })
@@ -639,8 +666,8 @@ export async function runCli(args: string[], environment: NodeJS.ProcessEnv, std
       return
     }
     case 'new': {
-      const parsed = parseArguments(rest, ['--name', '--computer', '--folder', '--model'], [])
-      const request = { name: parsed.flags.get('--name')?.[0] ?? null, task: messageText(parsed.positionals, stdin, 'the task'), model: parsed.flags.get('--model')?.[0] ?? null, folder: parsed.flags.get('--folder')?.[0] ?? null }
+      const parsed = parseArguments(rest, ['--name', '--computer', '--folder', '--model', '--cache'], [])
+      const request = { name: parsed.flags.get('--name')?.[0] ?? null, task: messageText(parsed.positionals, stdin, 'the task'), model: parsed.flags.get('--model')?.[0] ?? null, folder: parsed.flags.get('--folder')?.[0] ?? null, promptCacheLifetime: promptCacheLifetimeFlag(parsed.flags.get('--cache')?.[0]) }
       const computerName = parsed.flags.get('--computer')?.[0]
       if (computerName !== undefined) {
         const { remoteAgent } = await client.command('create_remote_agent', { ...request, computerId: (await requireComputer(client, computerName)).id })

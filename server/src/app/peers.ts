@@ -685,6 +685,8 @@ export class Peers {
     if (this.claudePlans.delete(machineId)) this.config.peerClaudePlanChanged()
     const peer = this.config.store.peerById(machineId)
     if (peer) this.config.store.abandonPeerOutbox(machineId, `${peer.name} was removed from this computer`, this.config.now())
+    // Its agents are out of reach now, so pins of them would stay hidden for good.
+    if (peer) for (const { personId, pin } of this.config.store.pinsOfAgentsOn(peer.name)) this.config.store.deletePin(personId, pin.id)
     this.config.store.deletePeer(machineId)
     this.reportedStatus.delete(machineId)
     this.lastHelloSentAt.delete(machineId)

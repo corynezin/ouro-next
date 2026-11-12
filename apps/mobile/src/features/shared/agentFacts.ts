@@ -1,8 +1,8 @@
 // What every screen says about an agent. Pure: store -> display. The rules here are the brief's and the reference app's;
 // keeping them in one file is what stops two screens from disagreeing.
-import { displayStateOf, MASTER_AGENT_NAME, parseAddress } from '@ouro/contract'
+import { displayStateOf, parseAddress, pinTargetKey } from '@ouro/contract'
 import type { HoldReason } from '@ouro/contract'
-import type { AgentEntity, AskEntity, AskSnooze, ChatEntity, GoalEntity, ModelOption, PersonEntity, ReadStateEntity, RemoteAskEntity, ServerEntity, SummaryEntity, Viewer } from '@ouro/contract'
+import type { AgentEntity, AskEntity, AskSnooze, ChatEntity, GoalEntity, ModelOption, PersonEntity, PinEntity, PinTarget, ReadStateEntity, RemoteAskEntity, ServerEntity, SummaryEntity, Viewer } from '@ouro/contract'
 import { tokensText, untilText } from '../../design/format.ts'
 import type { IdleFold } from '../../core/accounts/preferences.ts'
 import type { ConnectionStatus } from '../../core/session/syncEngine.ts'
@@ -20,7 +20,20 @@ export interface StoreView {
   readStateOfChat(chatId: string): ReadStateEntity | undefined
 }
 
-export const isMaster = (agent: AgentEntity) => agent.name === MASTER_AGENT_NAME
+/** The viewer's pins, which the lists put first. */
+export interface PinView { readonly pins: ReadonlyMap<string, PinEntity> }
+
+/** In the order they were pinned. */
+export const sortedPins = (store: PinView): PinEntity[] => [...store.pins.values()].sort((x, y) => x.pinnedAt - y.pinnedAt || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0))
+
+export const pinOf = (store: PinView, target: PinTarget): PinEntity | undefined => {
+  const key = pinTargetKey(target)
+  return [...store.pins.values()].find((pin) => pinTargetKey(pin.target) === key)
+}
+
+/** What toggling a pin does, everywhere one can be toggled: unpin what is pinned, pin what isn't. */
+export const pinToggleOf = (store: PinView, target: PinTarget): 'pin' | 'unpin' => (pinOf(store, target) ? 'unpin' : 'pin')
+
 export const isArchived = (agent: AgentEntity) => agent.state.state === 'archived'
 export const listedAgents = (store: StoreView) => [...store.agents.values()].filter((agent) => !isArchived(agent))
 

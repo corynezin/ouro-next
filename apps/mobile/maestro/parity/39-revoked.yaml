@@ -33,4 +33,4 @@ appId: dev.claudeinbox.ouronext
 - extendedWaitUntil:
     visible: "Agents, tasks, messages"
     timeout: 20000
-- assertVisible: "Master agent"
+- assertVisible: "PINNED"

@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { AgentEntity, AskEntity, ComputerEntity, GoalEntity, GoalWait, ModelOption, ReadStateEntity } from '@ouro/contract'
-import { MASTER_AGENT_NAME } from '@ouro/contract'
+import type { AgentEntity, AskEntity, ComputerEntity, GoalEntity, GoalWait, ModelOption, PinEntity, ReadStateEntity } from '@ouro/contract'
 import { EntityStore } from '../core/session/entityStore.ts'
 import { agentOf, directChatOf as chat, messageOf, readStateOf, snapshotOf, VIEWER_ADDRESS } from '../core/testSupport.ts'
 import type { OutboxEntry } from '../core/session/outbox.ts'
 import { agentsListModel, goalColorOf, goalMarkerOf, otherServersUnreadTotal, searchAgents, swipeActionsOf } from './agents/model.ts'
 import type { AgentRowModel, ListedRow } from './agents/model.ts'
 import {
-  asksPanel, asksStrip, ChoiceTapGuard, chatItems, choicesForMessage, composedFilesOf, composerPlaceholder, directSend, historyFooter, foldDoneReports, goalBar, messageFiles, outboxBubble,
+  asksPanel, ChoiceTapGuard, chatItems, choicesForMessage, composedFilesOf, composerPlaceholder, directSend, historyFooter, goalBar, messageFiles, outboxBubble,
   recipientLastOutputOf, routedAgents, statusBar, summaryBar, chatMoreMenu, FAILED_SEND_ACTIONS, nextUnreadLabel, STOP_COPY,
 } from './chat/model.ts'
-import { canStartAgent, hasPromptCache, machineFooter, machineOptions, modelGroups, modelName, newAgentInput, newRemoteAgentInput, typedAgentName } from './newAgent/model.ts'
+import { canStartAgent, hasPromptCache, machineFooter, machineOptions, modelGroups, modelName, newAgentInput, newRemoteAgentInput, typedAgentName, uploadFilesOnce } from './newAgent/model.ts'
 import { LOG_COPY, LOG_FOLLOW_EVERY_MS, LogReader, logLine } from './log/model.ts'
 import { archivedRows, unarchivedNote } from './archived/model.ts'
 import { branchMergeText, DETAILS_COPY, detailsModel, screensAboutAgent } from './details/model.ts'
@@ -20,7 +19,7 @@ import { allSummariesModel, NO_SUMMARY_YET_IN_LIST, SummariesReader, summariesMo
 import { FILE_COPY, sharedFileName } from './file/model.ts'
 import {
   agentByRef, askSnoozeText, listOrder, nextCycleLine, nextUnread, shownConnection, sortAsks, stateDotOf, statusLine, unreadElsewhereCount,
-  memberLabel, quickSnooze, snoozeChoices,
+  memberLabel, pinToggleOf, quickSnooze, snoozeChoices, sortedPins,
 } from './shared/agentFacts.ts'
 
 const NOW = 10_000_000_000
@@ -43,6 +42,7 @@ function storeWith(partial: Parameters<typeof snapshotOf>[0]) {
   return store
 }
 const noUnreadDefaults = { connection: live, fold: { kind: 'never' as const }, query: '', failureNote: null, now: NOW }
+const pinOf = (id: string, target: PinEntity['target'], pinnedAt: number): PinEntity => ({ id, target, pinnedAt })
 const localRows = (rows: readonly ListedRow[]): AgentRowModel[] => rows.flatMap((listed) => (listed.kind === 'local' ? [listed.row] : []))
 
 test('a row shows only pay-as-you-go spend: an OpenRouter agent\'s cost, never a subscription\'s or a zero', () => {
@@ -169,21 +169,20 @@ test('asks of the same level raised at the same moment go by lowest id (AG-19)',
   assert.deepEqual(agentsListModel(store, noUnreadDefaults).asks!.rows.map((row) => row.askId), ['k3', 'k1', 'k2'])
 })
 
-test('asks: not snoozed first, then level, then oldest; master excluded; header counts open only', () => {
-  const master = agentOf({ id: 'master', name: 'master' })
+test('asks: not snoozed first, then level, then oldest, every agent\'s, a pinned one\'s too; header counts open only', () => {
   const asks = [
     ask('late', 'a', 'waiting', 50),
     ask('early', 'a', 'waiting', 10),
     ask('urgent', 'b', 'urgent', 90),
     ask('zz', 'b', 'urgent', 1, { kind: 'until', at: NOW + 1000 }),
-    ask('mine', 'master', 'urgent', 1),
+    ask('pinned', 'p', 'urgent', 1),
   ]
-  const store = storeWith({ agents: [master, agentOf({ id: 'a', name: 'a' }), agentOf({ id: 'b', name: 'b' })], asks })
+  const store = storeWith({ agents: [agentOf({ id: 'p', name: 'concierge' }), agentOf({ id: 'a', name: 'a' }), agentOf({ id: 'b', name: 'b' })], asks, pins: [pinOf('p1', { kind: 'agent', agentId: 'p' }, 0)] })
   const section = agentsListModel(store, noUnreadDefaults).asks!
-  assert.deepEqual(section.rows.map((r) => r.askId), ['urgent', 'early', 'late', 'zz'])
-  assert.equal(section.headerText, 'Asks (3)')
+  assert.deepEqual(section.rows.map((r) => r.askId), ['pinned', 'urgent', 'early', 'late', 'zz'])
+  assert.equal(section.headerText, 'Asks (4)')
   assert.equal(section.headerTone, 'orange')
-  assert.equal(section.rows[0]!.text, 'ask urgent more')
+  assert.equal(section.rows[1]!.text, 'ask urgent more')
   assert.equal(section.rows[0]!.symbolName, 'exclamationmark.octagon.fill')
   assert.equal(section.rows.at(-1)!.snoozed, true)
 })
@@ -243,24 +242,41 @@ test('a message from the agent has no "you:", and a summary takes the preview do
   assert.equal(row.summaryLine, 'fixed it')
 })
 
-test('master gets the card, not a row; its status is the invitation unless busy', () => {
-  const store = storeWith({ agents: [agentOf({ id: 'm', name: 'master' }), agentOf({ id: 'a', name: 'alice' })] })
+test('pinned agents and groups lead, in pin order, and leave the rows below; an agent named master is no different', () => {
+  const group = { ...chat('g1', 'x'), kind: 'group' as const, title: 'Team', members: [{ address: VIEWER_ADDRESS, joinedAt: 0 }, { address: 'alice', joinedAt: 0 }] }
+  const store = storeWith({
+    agents: [agentOf({ id: 'm', name: 'master' }), agentOf({ id: 'a', name: 'alice' }), agentOf({ id: 'z', name: 'zed', state: inTurn() }), agentOf({ id: 'gone', name: 'gone', state: { state: 'archived', since: 0 } as AgentEntity['state'] })],
+    chats: [group],
+    pins: [pinOf('p2', { kind: 'chat', chatId: 'g1' }, 2), pinOf('p1', { kind: 'agent', agentId: 'z' }, 1), pinOf('p3', { kind: 'agent', agentId: 'gone' }, 3), pinOf('p4', { kind: 'remote_agent', address: 'x@nowhere' }, 4)],
+  })
   const model = agentsListModel(store, noUnreadDefaults)
-  assert.deepEqual(localRows(model.awake).map((r) => r.name), ['alice'])
-  assert.equal(model.master?.statusText, 'Tell me what you need; I route it')
-  const busy = storeWith({ agents: [agentOf({ id: 'm', name: 'master', state: inTurn() })] })
-  assert.equal(agentsListModel(busy, noUnreadDefaults).master?.statusText, 'thinking')
+  assert.deepEqual(model.pinned.map((row) => (row.kind === 'local' ? row.row.name : row.kind === 'group' ? row.row.title : row.row.name)), ['zed', 'Team'], 'archived and unreported ones hide')
+  assert.equal(model.pinned[0]!.kind === 'local' && model.pinned[0]!.row.statusText, 'thinking', 'a pinned row is a normal row')
+  assert.deepEqual(localRows(model.awake).map((r) => r.name).sort(), ['alice', 'master'])
+  assert.deepEqual(swipeActionsOf(store, store.agents.get('z')!)[0], { kind: 'unpin' })
+  assert.deepEqual(swipeActionsOf(store, store.agents.get('a')!)[0], { kind: 'pin' })
+  assert.equal(agentsListModel(storeWith({ pins: [pinOf('p1', { kind: 'agent', agentId: 'z' }, 1)], agents: [agentOf({ id: 'z', name: 'zed' })] }), noUnreadDefaults).emptyText, null, 'a pinned agent alone is not an empty list')
+})
+
+test('pins are in the order pinned, and toggling one unpins exactly what is pinned', () => {
+  const store = storeWith({ pins: [pinOf('b', { kind: 'chat', chatId: 'g' }, 5), pinOf('a', { kind: 'remote_agent', address: 'bob@mac' }, 5), pinOf('c', { kind: 'agent', agentId: 'z' }, 1)] })
+  assert.deepEqual(sortedPins(store).map((pin) => pin.id), ['c', 'a', 'b'], 'a tie goes by id')
+  assert.equal(pinToggleOf(store, { kind: 'agent', agentId: 'z' }), 'unpin')
+  assert.equal(pinToggleOf(store, { kind: 'chat', chatId: 'g' }), 'unpin')
+  assert.equal(pinToggleOf(store, { kind: 'remote_agent', address: 'bob@mac' }), 'unpin')
+  assert.equal(pinToggleOf(store, { kind: 'chat', chatId: 'z' }), 'pin', 'the same id as another kind is another target')
+  assert.equal(pinToggleOf(store, { kind: 'remote_agent', address: 'bob@pc' }), 'pin')
 })
 
 // ---- search ----
 
-test('search folds case and accents, ranks name prefix first, and includes idle agents and master', () => {
+test('search folds case and accents, ranks name prefix first, and includes idle agents and pinned ones', () => {
   const store = storeWith({ agents: [
     agentOf({ id: '1', name: 'renee', task: 'x', lastActivityAt: NOW - 86_400_000 }),
     agentOf({ id: '2', name: 'other', task: 'help René with this' }),
     agentOf({ id: '3', name: 'irene', task: 'x' }),
     agentOf({ id: '4', name: 'master', task: 'route to rene' }),
-  ] })
+  ], pins: [pinOf('p', { kind: 'agent', agentId: '4' }, 0)] })
   assert.deepEqual(searchAgents(store, 'RENÉ', NOW).map((listed) => listed.row.name), ['renee', 'irene', 'master', 'other'])
   const model = agentsListModel(store, { ...noUnreadDefaults, fold: { kind: 'after_minutes', minutes: 1 }, query: 'zzz' })
   assert.deepEqual(model.search, { rows: [], emptyText: 'No agents match “zzz”.' })
@@ -279,7 +295,7 @@ test('search covers the summary, done summary and last message', () => {
 
 // ---- empty and bad states ----
 
-test('empty text depends on the connection; master alone still shows the empty text', () => {
+test('empty text depends on the connection; one agent is a list', () => {
   assert.equal(agentsListModel(storeWith({}), noUnreadDefaults).emptyText, 'No agents yet.')
   assert.equal(agentsListModel(storeWith({}), { ...noUnreadDefaults, connection: { phase: 'connecting', detail: '', downSince: NOW } }).emptyText, 'Connecting…')
   assert.equal(agentsListModel(storeWith({ agents: [agentOf({ id: 'a', name: 'a' })] }), noUnreadDefaults).emptyText, null)
@@ -311,8 +327,9 @@ test('a failed action adds a note', () => {
 // ---- swipes ----
 
 test('swipe actions by state', () => {
+  // After Pin, which every agent has first.
   const kinds = (partial: Partial<AgentEntity>, goals: GoalEntity[] = []) =>
-    swipeActionsOf(storeWith({ goals }), agentOf({ id: 'a', name: 'a', ...partial })).map((x) => x.kind)
+    swipeActionsOf(storeWith({ goals }), agentOf({ id: 'a', name: 'a', ...partial })).map((x) => x.kind).slice(1)
   assert.deepEqual(kinds({ state: inTurn() }), ['interrupt', 'stop'])
   assert.deepEqual(kinds({}), ['stop'])
   assert.deepEqual(kinds({ state: stopped }), ['archive'])
@@ -384,21 +401,12 @@ test('an outbox entry hides once the stream lists its message, even before the c
   assert.deepEqual(itemsOf([listed], [entry]).map((i) => i.key), ['m1'])
 })
 
-test('a done report close after the previous message folds under it; others stay plain', () => {
+test('a done report shows as a message of its own', () => {
   const said = messageOf({ seq: 1, chatId: 'c', at: 0 })
-  const closeDone = messageOf({ seq: 2, chatId: 'c', at: 14 * 60_000, purpose: 'done_report', text: 'summary' })
-  const folded = foldDoneReports([said, closeDone])
-  assert.equal(folded.length, 1)
-  assert.equal(folded[0]!.doneReport?.text, 'summary')
-
-  const farDone = { ...closeDone, at: 16 * 60_000 }
-  assert.equal(foldDoneReports([said, farDone]).length, 2)
-  const otherSender = { ...closeDone, from: 'bob' }
-  assert.equal(foldDoneReports([said, otherSender]).length, 2)
-  const twoReports = [closeDone, { ...closeDone, seq: 3, id: 'm3' }]
-  assert.equal(foldDoneReports(twoReports).length, 2, 'a report does not fold under a report')
-  const item = itemsOf([said, closeDone])[0]!
-  assert.equal(item.kind === 'message' && item.doneReport?.summary, 'summary')
+  const done = messageOf({ seq: 2, chatId: 'c', at: 60_000, purpose: 'done_report', text: 'summary' })
+  const items = itemsOf([said, done])
+  assert.equal(items.length, 2)
+  assert.equal(items[0]!.kind === 'message' && items[0]!.message.text, 'summary')
 })
 
 function outboxEntry(key: string, text: string, delivery: OutboxEntry['delivery'] = { state: 'sending' }, attachments: OutboxEntry['attachments'] = []): OutboxEntry {
@@ -437,8 +445,8 @@ test('summary bar prefers a newer live line and marks a stale summary', () => {
 
 test('status bar has a timer while busy', () => {
   const store = storeWith({})
-  assert.deepEqual(statusBar(store, agentOf({ id: 'a', name: 'a', state: inTurn(NOW - 65_000) }), live, NOW), { kind: 'agent', dot: 'busy', busy: true, text: 'thinking  1:05' })
-  assert.deepEqual(statusBar(store, agentOf({ id: 'a', name: 'a' }), live, NOW), { kind: 'agent', dot: 'running', busy: false, text: 'idle' })
+  assert.deepEqual(statusBar(store, agentOf({ id: 'a', name: 'a', state: inTurn(NOW - 65_000) }), live, NOW), { kind: 'agent', dot: 'busy', busy: true, label: 'thinking', text: 'thinking  1:05' })
+  assert.deepEqual(statusBar(store, agentOf({ id: 'a', name: 'a' }), live, NOW), { kind: 'agent', dot: 'running', busy: false, label: 'idle', text: 'idle' })
 })
 
 test('status bar: a lost connection replaces the stale state once the grace is over, as on the agents list', () => {
@@ -479,25 +487,21 @@ test('choices show on the message that posed an open ask and vanish when it clos
   assert.equal(choicesForMessage(messageOf({ seq: 2, chatId: 'c' }), open), null)
 })
 
-// ---- master's chat ----
+// ---- agents a message names ----
 
-test('route chips: named agents in order of appearance, whole names only, at most four', () => {
+test('route chips: agents a message mentions with @, → or backticks, in order of appearance, at most four', () => {
   const names = ['ios', 'ios-push', 'api', 'web', 'db', 'ml']
-  const store = storeWith({ agents: [agentOf({ id: 'm', name: 'master' }), ...names.map((name) => agentOf({ id: name, name }))] })
+  const store = storeWith({ agents: [agentOf({ id: 'm', name: 'concierge' }), ...names.map((name) => agentOf({ id: name, name }))] })
   const routed = (text: string) => routedAgents(text, store, 'm').map((a) => a.name)
   assert.deepEqual(routed('→ api is on it, then `ios`'), ['api', 'ios'])
-  assert.deepEqual(routed('asked ios-push'), ['ios-push'], 'not also ios')
-  assert.deepEqual(routed('radios and APIs'), [], 'not inside longer words')
-  assert.deepEqual(routed('ios@mac handles it'), ['ios'])
-  assert.deepEqual(routed('master ios api web db ml'), ['ios', 'api', 'web', 'db'], 'never itself, at most four')
+  assert.deepEqual(routed('asked @ios-push'), ['ios-push'], 'not also ios')
+  assert.deepEqual(routed('the api and ios are fine'), [], 'a bare name is just a word')
+  assert.deepEqual(routed('mail me@ios'), [], 'not the end of an address')
+  assert.deepEqual(routed('@IOS handles it'), ['ios'])
+  assert.deepEqual(routed('@concierge @ios @api @web @db @ml'), ['ios', 'api', 'web', 'db'], 'never itself, at most four')
 })
 
-test('the strip holds other agents\' open asks only', () => {
-  const store = storeWith({
-    agents: [agentOf({ id: 'm', name: 'master' }), agentOf({ id: 'a', name: 'a' })],
-    asks: [ask('own', 'm', 'urgent', 1), ask('open', 'a', 'waiting', 1), ask('zz', 'a', 'urgent', 1, { kind: 'person_back' })],
-  })
-  assert.deepEqual(asksStrip(store, NOW).map((x) => x.askId), ['open'])
+test('no asks sort to none', () => {
   assert.deepEqual(sortAsks([], NOW), [])
 })
 
@@ -514,7 +518,7 @@ test('models group by source; unavailable ones are left out unless current', () 
 
 test('models are named as the reference names them; one it does not name keeps the server label', () => {
   const named = (id: string, provider: ModelOption['provider'], label = `${id} label`) => modelName({ id, label, provider })
-  assert.deepEqual(['opus', 'sonnet', 'haiku'].map((id) => named(id, 'anthropic')), ['Opus', 'Sonnet', 'Haiku'])
+  assert.deepEqual(['fable', 'opus', 'sonnet', 'haiku'].map((id) => named(id, 'anthropic')), ['Fable 5.2', 'Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5'])
   assert.deepEqual(['deepseek', 'deepseek-flash', 'qwen-coder', 'gemini-flash', 'or-haiku'].map((id) => named(id, 'openrouter')),
     ['DeepSeek', 'DeepSeek Flash', 'Qwen Coder', 'Gemini Flash', 'Haiku'])
   assert.equal(named('gpt-5-codex', 'openai'), 'GPT-5-Codex')
@@ -524,9 +528,10 @@ test('models are named as the reference names them; one it does not name keeps t
 })
 
 test('starting needs a task; a blank name lets the server generate one', () => {
-  assert.equal(canStartAgent('  ', false), false)
-  assert.equal(canStartAgent('do it', true), false)
-  assert.equal(canStartAgent('do it', false), true)
+  const noFiles = { count: 0, toAnotherComputer: false }
+  assert.equal(canStartAgent('  ', false, noFiles), false)
+  assert.equal(canStartAgent('do it', true, noFiles), false)
+  assert.equal(canStartAgent('do it', false, noFiles), true)
   assert.equal(typedAgentName('my bot '), 'mybot', 'spaces are stripped as the name is typed')
   assert.deepEqual(newAgentInput('do it', '  ', 'opus', '5m'), { task: 'do it', name: null, model: 'opus', folder: null })
   assert.equal(newAgentInput('do it', ' bob ', null, null).name, 'bob')
@@ -539,6 +544,32 @@ test('starting needs a task; a blank name lets the server generate one', () => {
   assert.equal(hasPromptCache(models, null), false)
   assert.equal(newAgentInput('do it', '', 'opus', '1h').promptCacheLifetime, '1h', 'a 1 hour cache is sent')
   assert.equal('promptCacheLifetime' in newAgentInput('do it', '', 'gpt', null), false, 'a model without a cache sends none')
+})
+
+test('files picked for a task go with it, by their uploaded ids, and keep it from starting on another computer', () => {
+  assert.deepEqual(newAgentInput('read this', '', null, null, ['att1', 'att2']).attachmentIds, ['att1', 'att2'])
+  assert.equal('attachmentIds' in newAgentInput('do it', '', null, null, []), false, 'no files sends none')
+  assert.equal(canStartAgent('read this', false, { count: 2, toAnotherComputer: false }), true)
+  assert.equal(canStartAgent('read this', false, { count: 2, toAnotherComputer: true }), false, 'files to another computer are refused there')
+  assert.equal(canStartAgent('read this', false, { count: 0, toAnotherComputer: true }), true)
+})
+
+test('files upload once each, in order, and the first failure stops the start; Start again sends none twice', async () => {
+  const file = (localId: string) => ({ localId, uri: `file:///${localId}`, fileName: `${localId}.txt`, mimeType: 'text/plain' })
+  const uploaded = new Map<string, string>()
+  const sent: string[] = []
+  let failing: string | null = 'b'
+  const upload = async (picked: { localId: string }) => {
+    sent.push(picked.localId)
+    return picked.localId === failing ? { ok: false as const, failure: { kind: 'timed_out' as const } } : { ok: true as const, value: { id: `att-${picked.localId}` } }
+  }
+  const first = await uploadFilesOnce([file('a'), file('b'), file('c')], uploaded, upload)
+  assert.equal(first.ok, false)
+  assert.equal(!first.ok && first.fileName, 'b.txt')
+  assert.deepEqual(sent, ['a', 'b'], 'nothing after the one that failed')
+  failing = null
+  assert.deepEqual(await uploadFilesOnce([file('a'), file('b'), file('c')], uploaded, upload), { ok: true, attachmentIds: ['att-a', 'att-b', 'att-c'] })
+  assert.deepEqual(sent, ['a', 'b', 'b', 'c'], 'the file already uploaded is not sent again')
 })
 
 test('the Machine picker: here, then fully trusting computers by their names in Settings; none of them, no picker', () => {
@@ -715,9 +746,9 @@ test('details: the latest summary as Lately with its age, stale once a turn bega
 })
 
 test("the model picker's groups are in the reference's order, most capable first (DET-03)", () => {
-  const models = ['or-haiku', 'gemini-flash', 'deepseek-flash', 'qwen-coder', 'deepseek', 'haiku', 'sonnet', 'opus'].map((id) => ({ id, label: id, provider: (['opus', 'sonnet', 'haiku'].includes(id) ? 'anthropic' : 'openrouter') as ModelOption['provider'], available: true }))
+  const models = ['or-haiku', 'gemini-flash', 'deepseek-flash', 'qwen-coder', 'deepseek', 'haiku', 'sonnet', 'opus', 'fable'].map((id) => ({ id, label: id, provider: (['fable', 'opus', 'sonnet', 'haiku'].includes(id) ? 'anthropic' : 'openrouter') as ModelOption['provider'], available: true }))
   assert.deepEqual(modelGroups(models, null).map((group) => [group.title, group.models.map((model) => model.label)]), [
-    ['Subscription', ['Opus', 'Sonnet', 'Haiku']],
+    ['Subscription', ['Fable 5.2', 'Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5']],
     ['OpenRouter', ['DeepSeek', 'Qwen Coder', 'DeepSeek Flash', 'Gemini Flash', 'Haiku']],
   ])
 })
@@ -889,14 +920,14 @@ test('members read as You, a person by name, an agent here by its bare name, one
   assert.equal(memberLabel(store, 'fixer@beta'), 'fixer@beta')
 })
 
-test('all summaries list every agent in the list order, idle ones unfolded, master included (SUM-05)', () => {
-  const master = agentOf({ id: 'm', name: MASTER_AGENT_NAME, lastActivityAt: NOW - 50_000 })
+test('all summaries list every agent in the list order, idle ones unfolded (SUM-05)', () => {
+  const starter = agentOf({ id: 'm', name: 'concierge', lastActivityAt: NOW - 50_000 })
   const busy = agentOf({ id: 'b', name: 'busy', state: inTurn(), lastActivityAt: NOW - 100_000 })
   const quiet = agentOf({ id: 'q', name: 'quiet', lastActivityAt: NOW - 5 * 60 * 60_000 })
   const server = snapshotOf().server
-  const store = storeWith({ server: { ...server, limits: { ...server.limits, idleFoldMinutes: 30 } }, agents: [quiet, master, busy] })
+  const store = storeWith({ server: { ...server, limits: { ...server.limits, idleFoldMinutes: 30 } }, agents: [quiet, starter, busy] })
   assert.deepEqual(listOrder(store, { kind: 'server_default' }, NOW).idle.map((agent) => agent.name), ['quiet'], 'the list folds it')
-  assert.deepEqual(allSummariesModel(store, NOW).map((card) => card.name), ['busy', MASTER_AGENT_NAME, 'quiet'])
+  assert.deepEqual(allSummariesModel(store, NOW).map((card) => card.name), ['busy', 'concierge', 'quiet'])
 })
 
 test('the top line dot: green live, yellow connecting, red once offline (AG-08)', () => {
@@ -906,14 +937,16 @@ test('the top line dot: green live, yellow connecting, red once offline (AG-08)'
   assert.equal(agentsListModel(store, { ...noUnreadDefaults, connection: { phase: 'offline', detail: 'x', downSince: NOW - 60_000 } }).dotColor, 'red')
 })
 
-test("the master's card previews its last message, yours with \"you: \", and counts its unread (AG-15)", () => {
-  const master = agentOf({ id: 'm', name: MASTER_AGENT_NAME })
-  const c = { ...chat('cm', MASTER_AGENT_NAME), latestMessage: { seq: 3, from: MASTER_AGENT_NAME, at: 1, text: 'routed to\nalice' } }
-  const card = agentsListModel(storeWith({ agents: [master], chats: [c], readStates: [readStateOf('cm', 0, 2)] }), noUnreadDefaults).master!
-  assert.equal(card.previewText, 'routed to alice')
-  assert.equal(card.unread, 2)
+test("a pinned agent's row previews its last message, yours with \"you: \", and counts its unread (AG-15)", () => {
+  const starter = agentOf({ id: 'm', name: 'concierge' })
+  const pins = [pinOf('p', { kind: 'agent', agentId: 'm' }, 0)]
+  const c = { ...chat('cm', 'concierge'), latestMessage: { seq: 3, from: 'concierge', at: 1, text: 'routed to\nalice' } }
+  const pinnedRow = (store: EntityStore) => { const row = agentsListModel(store, noUnreadDefaults).pinned[0]!; assert.equal(row.kind, 'local'); return row.row as AgentRowModel }
+  const row = pinnedRow(storeWith({ agents: [starter], chats: [c], readStates: [readStateOf('cm', 0, 2)], pins }))
+  assert.equal(row.previewText, 'routed to alice')
+  assert.equal(row.unread, 2)
   const mine = { ...c, latestMessage: { seq: 4, from: VIEWER_ADDRESS, at: 2, text: 'thanks' } }
-  assert.equal(agentsListModel(storeWith({ agents: [master], chats: [mine] }), noUnreadDefaults).master!.previewText, 'you: thanks')
+  assert.equal(pinnedRow(storeWith({ agents: [starter], chats: [mine], pins })).previewText, 'you: thanks')
 })
 
 test('goal markers and colours: ◎ or ∞ orange while active, ◷ yellow waiting, ‖ yellow paused, ✓ secondary complete (AG-28, GOAL-03)', () => {
@@ -945,9 +978,9 @@ test('the badge for other servers adds their unread, leaving out the open one, a
 test("the chat's header: next unread and its words, and the More menu by what the agent is doing (CHAT-02, CHAT-03)", () => {
   assert.equal(nextUnreadLabel(2), 'Next unread, 2')
   assert.equal(nextUnreadLabel(0), 'No other unread')
-  const titles = (agent: { hasGoal: boolean; running: boolean; busy: boolean }) => chatMoreMenu(agent).map((item) => `${item.title}${item.disabled ? ' (off)' : ''}${item.destructive ? ' (red)' : ''}`)
-  assert.deepEqual(titles({ hasGoal: false, running: false, busy: false }), ['Log', 'Set a goal', 'Summaries', 'Details'])
-  assert.deepEqual(titles({ hasGoal: true, running: true, busy: false }), ['Log', 'Goal', 'Summaries', 'Details', 'Interrupt (off)', 'Stop (red)'])
+  const titles = (agent: { hasGoal: boolean; running: boolean; busy: boolean; pinned?: boolean }) => chatMoreMenu({ pinned: false, ...agent }).map((item) => `${item.title}${item.disabled ? ' (off)' : ''}${item.destructive ? ' (red)' : ''}`)
+  assert.deepEqual(titles({ hasGoal: false, running: false, busy: false }), ['Pin to top', 'Log', 'Context', 'Set a goal', 'Summaries', 'Details'])
+  assert.deepEqual(titles({ hasGoal: true, running: true, busy: false, pinned: true }), ['Unpin', 'Log', 'Context', 'Goal', 'Summaries', 'Details', 'Interrupt (off)', 'Stop (red)'])
   assert.deepEqual(titles({ hasGoal: true, running: true, busy: true }).slice(-2), ['Interrupt', 'Stop (red)'])
   assert.deepEqual([STOP_COPY.confirmTitle('fixer'), STOP_COPY.confirmMessage, STOP_COPY.confirmAction, STOP_COPY.done('fixer')],
     ['Stop fixer?', 'It keeps its session; a message restarts it.', 'Stop', 'stopped fixer'])

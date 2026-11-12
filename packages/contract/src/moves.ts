@@ -1,12 +1,16 @@
 // Moving an agent to another of the person's computers, machine to machine. The sender stays the agent's owner until
 // the receiver answers that it has it.
 import { z } from 'zod'
-import { ModelId, PromptCacheLifetime } from './agent.ts'
+import { ModelId, PromptCacheLifetime, StandingInstructions } from './agent.ts'
 import { GoalKind } from './entities.ts'
 import { MessagePurpose } from './message.ts'
 
 /** POST /move-check, signed, from a fully trusted peer: whether this machine would take an agent of that name now.
  * Changes nothing; asked before a move is agreed, so a clash or an unreachable computer is refused at once. */
+/** How Claude Code, Codex and the stand-in name a conversation (a uuid, in practice). The name becomes a file name in
+ * the receiver's store, so anything that could leave that folder is refused. */
+export const PROVIDER_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
+
 export const PeerMoveCheck = z.object({ name: z.string() })
 export type PeerMoveCheck = z.infer<typeof PeerMoveCheck>
 export const PeerMoveCheckResult = z.discriminatedUnion('outcome', [
@@ -41,6 +45,8 @@ export const PeerMove = z.object({
     ownershipEpoch: z.number().int(),
     /** Older computers don't send it; every agent there had the 5 minute cache, so that is what it means. */
     promptCacheLifetime: PromptCacheLifetime.default('5m'),
+    /** Older computers don't send it: none. Instructions this computer doesn't know of (a newer one's): none. */
+    instructions: StandingInstructions.nullable().default(null).catch(null),
   }),
   goal: z.object({
     text: z.string(),
@@ -58,7 +64,7 @@ export const PeerMove = z.object({
    * seeded from what arrives with it. `path` is relative to that program's store. */
   conversation: z.object({
     runtime: z.enum(['claude_code', 'codex', 'stand_in']),
-    providerSessionId: z.string(),
+    providerSessionId: z.string().regex(PROVIDER_SESSION_ID_PATTERN),
     /** Its folder on the sending machine: the conversation's own record of where it ran. */
     ranIn: z.string(),
     files: z.array(z.object({ path: z.string(), contentBase64: z.string() })),
