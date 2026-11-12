@@ -32,8 +32,9 @@
 set -euo pipefail
 
 install_name=install-run
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib/install-common.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/install-common.sh"
+. "$script_dir/lib/install-common.sh"
 
 commit_wanted=${1:?usage: install-run.sh <commit>}
 service_manager=${OURO_NEXT_SERVICES:-}
@@ -144,31 +145,15 @@ else
 fi
 base_repo=${OURO_NEXT_BASE_REPO:-}
 if [ -n "$base_repo" ]; then say "bases: taken from $base_repo"; fi
-OURO_NEXT_CONFIG_JSON=$(
-  BASE_REPO=$base_repo \
-  ROOT_HOME=$home_dir SOURCE=$source_dir PORT=$listen_port LISTEN_HOST=$listen_host URL=$public_url SOCKET=$host_socket MODEL=${OURO_NEXT_DEFAULT_MODEL:-} \
-    APNS_KEY_FILE=$apns_key_file APNS_KEY_ID=${apns_key_id:-} APNS_TEAM_ID=${OURO_NEXT_APNS_TEAM_ID:-U2Q2D6ZQP2} \
-    MACHINE=${OURO_NEXT_MACHINE_NAME:-$(hostname)} PEER=$peer_address SERVICES=$service_manager "$node_bin" -e '
-      const env = process.env
-      // Tailscale is the Sprite way in; a machine of its own under systemd can still join the Tailscale network of the
-      // person. A Mac has the Tailscale app, which the person signs in to themselves.
-      const ourodEnv = { OURO_RUNNER_HOST_SOCKET: env.SOCKET }
-      if (env.SERVICES === "sprite" || env.SERVICES === "systemd") ourodEnv.OURO_TAILSCALE = env.SERVICES
-      if (env.PEER) ourodEnv.OURO_PEER_ADDRESS = env.PEER
-      if (env.MODEL) ourodEnv.OURO_DEFAULT_MODEL = env.MODEL
-      if (env.BASE_REPO) ourodEnv.OURO_BASE_REPO = env.BASE_REPO
-      if (env.APNS_KEY_FILE) Object.assign(ourodEnv, { OURO_APNS_KEY_FILE: env.APNS_KEY_FILE, OURO_APNS_KEY_ID: env.APNS_KEY_ID, OURO_APNS_TEAM_ID: env.APNS_TEAM_ID })
-      // Only an address other than the guardian's default is written, so the configuration of a server installed before
-      // stays the same, and its guardian isn't restarted for nothing.
-      const listen = env.LISTEN_HOST === "0.0.0.0" ? {} : { listenHost: env.LISTEN_HOST }
-      process.stdout.write(JSON.stringify({ home: env.ROOT_HOME, listenPort: Number(env.PORT), ...listen, sourceDir: env.SOURCE, appSourceDir: env.SOURCE + "/apps/mobile", sourceBranch: "main",
-        machineName: env.MACHINE, publicUrl: env.URL, ourodEnv }, null, 2) + "\n")'
+# Built by a program of its own, never JavaScript inside shell quotes, where an apostrophe would end the quoting.
+config_result=$(
+  OURO_CONFIG_HOME=$home_dir OURO_CONFIG_SOURCE=$source_dir OURO_CONFIG_PORT=$listen_port OURO_CONFIG_LISTEN_HOST=$listen_host \
+  OURO_CONFIG_URL=$public_url OURO_CONFIG_SOCKET=$host_socket OURO_CONFIG_MACHINE=${OURO_NEXT_MACHINE_NAME:-$(hostname)} \
+  OURO_CONFIG_SERVICES=$service_manager OURO_CONFIG_PEER=$peer_address OURO_CONFIG_MODEL=${OURO_NEXT_DEFAULT_MODEL:-} \
+  OURO_CONFIG_BASE_REPO=$base_repo OURO_CONFIG_APNS_KEY_FILE=$apns_key_file OURO_CONFIG_APNS_KEY_ID=${apns_key_id:-} \
+  OURO_CONFIG_APNS_TEAM_ID=${OURO_NEXT_APNS_TEAM_ID:-U2Q2D6ZQP2} "$node_bin" "$script_dir/lib/guardian-config.mjs" "$config"
 )
-if [ "$(cat "$config" 2>/dev/null)" != "$OURO_NEXT_CONFIG_JSON" ]; then
-  say "writing $config"
-  printf '%s\n' "$OURO_NEXT_CONFIG_JSON" > "$config.partial"
-  mv "$config.partial" "$config"
-fi
+if [ "$config_result" = written ]; then say "wrote $config"; fi
 config_hash=$(sha256_of "$config")
 
 # 5. The services. Each is recreated only when its definition changes. Recreating the runner host ends every runner,
