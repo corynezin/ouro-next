@@ -204,12 +204,16 @@ test('a base that fails to build changes nothing: the live release and the perso
 })
 
 test('a conflict no agent can start for goes to the owner, and is recorded with no resolver', async () => {
+  // The server looks for bases when it starts (and then only every half hour): a restart finds base 4.
+  await offer(4, 'the default protocol is reworded again')
+  const before = await run.status()
+  process.kill(before.ourodPid!, 'SIGKILL')
+  await waitFor('a new server', async () => { const status = await run.status(); return status.ourodPid !== null && status.ourodPid !== before.ourodPid }, 20_000)
+  await waitFor('base 4 to be offered', async () => (await base())?.offered?.n === 4, 30_000)
   // A running agent holds the only slot.
   await phone.command('create_agent', { task: standInScript({ do: 'run', command: 'sleep 600' }), name: 'sleeper', model: null, folder: null })
   await waitFor('the sleeper to run', async () => (await startedFor('sleeper'))?.state.state === 'in_turn')
   await phone.command('set_limits', { agentLimit: 1, budgetUsd: null })
-  await offer(4, 'the default protocol is reworded again')
-  await waitFor('base 4 to be offered', async () => (await base())?.offered?.n === 4)
 
   await phone.command('take_base_update', { n: 4 })
   const conflicted = await waitFor('base 4 to conflict', async () => {
