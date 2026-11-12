@@ -5,6 +5,12 @@ import { join } from 'node:path'
 export interface GuardianConfig {
   home: string
   listenPort: number
+  /**
+   * The address the listening port binds to. Everywhere by default: a Sprite's URL reaches the port from outside the
+   * machine. A server behind its own HTTPS proxy on the same machine (Caddy on an EC2 instance) binds 127.0.0.1, so the
+   * plain-HTTP port can't be reached around the proxy, whatever the firewall says.
+   */
+  listenHost: string
   /** The person's own copy of the source, a git repository. Deploys build from its commits. */
   sourceDir: string
   sourceBranch: string
@@ -92,9 +98,13 @@ export function guardianPaths(home: string): GuardianPaths {
   }
 }
 
+/** Where the listening port binds unless the configuration says otherwise. */
+export const DEFAULT_LISTEN_HOST = '0.0.0.0'
+
 export function loadConfig(path: string): GuardianConfig {
   const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<GuardianConfig> & { home: string; listenPort: number; sourceDir: string }
   return {
+    listenHost: DEFAULT_LISTEN_HOST,
     sourceBranch: 'main',
     appSourceDir: join(raw.sourceDir, 'apps/mobile'),
     machineName: 'this-machine',
